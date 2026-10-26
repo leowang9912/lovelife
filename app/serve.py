@@ -61,64 +61,104 @@ def data_root():
 
 
 DEFAULT_CATEGORIES = {
-    "device": [
-        {"id": "console", "name": "主机", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "icon": "🎮"},
-        {"id": "handheld", "name": "掌机/便携", "lifeYears": 3, "residualRate": 0.10, "costModel": "daily_dep", "icon": "🕹️"},
-        {"id": "pc", "name": "电脑/平板", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "icon": "💻"},
-        {"id": "display", "name": "显示器/外设", "lifeYears": 4, "residualRate": 0.10, "costModel": "daily_dep", "icon": "🖥️"},
-        {"id": "phone", "name": "手机/穿戴", "lifeYears": 3, "residualRate": 0.15, "costModel": "daily_dep", "icon": "📱"},
-        {"id": "accessory", "name": "配件", "lifeYears": 3, "residualRate": 0.05, "costModel": "daily_dep", "icon": "🔌", "attachable": True},
-        {"id": "collectible", "name": "限定/周边收藏", "lifeYears": 8, "residualRate": 0.30, "costModel": "daily_hold", "icon": "🏆"},
+    # ===== 数码（含游戏）：L1 大类 × L2 子类 =====
+    "digital": [
+        {"id": "host", "name": "主机类", "icon": "💻", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "children": [
+            {"id": "host_phone", "name": "手机"}, {"id": "host_tablet", "name": "平板"},
+            {"id": "host_laptop", "name": "笔记本"}, {"id": "host_desktop", "name": "台式机"},
+            {"id": "host_switch", "name": "Switch"}, {"id": "host_handheld", "name": "掌机"},
+            {"id": "host_other", "name": "其他主机"},
+        ]},
+        {"id": "camera", "name": "影像类", "icon": "📷", "lifeYears": 6, "residualRate": 0.15, "costModel": "daily_dep", "children": [
+            {"id": "cam_body", "name": "相机"}, {"id": "cam_lens", "name": "镜头"},
+            {"id": "cam_flash", "name": "闪光灯"}, {"id": "cam_stab", "name": "稳定器"},
+        ]},
+        {"id": "audio", "name": "音频类", "icon": "🎧", "lifeYears": 4, "residualRate": 0.10, "costModel": "daily_dep", "children": [
+            {"id": "aud_headphone", "name": "耳机"}, {"id": "aud_speaker", "name": "音箱"},
+            {"id": "aud_player", "name": "播放器"}, {"id": "aud_mic", "name": "麦克风"},
+        ]},
+        {"id": "display", "name": "显示外设", "icon": "🖥️", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "children": [
+            {"id": "dsp_monitor", "name": "显示器"}, {"id": "dsp_projector", "name": "投影"},
+        ]},
+        {"id": "storage", "name": "存储", "icon": "💾", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "children": [
+            {"id": "sto_ssd", "name": "固态"}, {"id": "sto_hdd", "name": "移动硬盘"},
+            {"id": "sto_usb", "name": "U盘"}, {"id": "sto_card", "name": "存储卡"},
+        ]},
+        {"id": "acc", "name": "配件", "icon": "🔌", "lifeYears": 3, "residualRate": 0.05, "costModel": "daily_dep", "attachable": True, "children": [
+            {"id": "ac_charger", "name": "充电器"}, {"id": "ac_cable", "name": "线材"},
+            {"id": "ac_hub", "name": "拓展坞"}, {"id": "ac_kbmouse", "name": "键鼠"},
+            {"id": "ac_case", "name": "保护壳"}, {"id": "ac_battery", "name": "电池"},
+        ]},
+        {"id": "gadget", "name": "其他数码", "icon": "⌚", "lifeYears": 4, "residualRate": 0.10, "costModel": "daily_dep", "children": [
+            {"id": "gd_watch", "name": "手表"}, {"id": "gd_band", "name": "手环"},
+            {"id": "gd_drone", "name": "无人机"}, {"id": "gd_reader", "name": "阅读器"},
+            {"id": "gd_other", "name": "其他"},
+        ]},
+        {"id": "game", "name": "游戏", "icon": "🎮", "costModel": "per_title", "children": [
+            {"id": "gm_cartridge", "name": "卡带"}, {"id": "gm_disc", "name": "光盘"},
+            {"id": "gm_digital", "name": "数字版"}, {"id": "gm_dlc", "name": "DLC/季票"},
+            {"id": "gm_acc", "name": "游戏周边"},
+        ]},
     ],
-    "game": [
-        {"id": "physical", "name": "实体游戏（卡带/光盘）", "costModel": "per_title", "icon": "💿"},
-        {"id": "digital", "name": "数字版游戏", "costModel": "per_title", "icon": "⬇️"},
-        {"id": "dlc", "name": "DLC/季票", "costModel": "per_title", "icon": "🧩"},
-        {"id": "game_acc", "name": "游戏周边", "costModel": "daily_hold", "lifeYears": 8, "residualRate": 0.30, "icon": "🧸", "attachable": True},
-    ],
+    # ===== 服饰 =====
     "clothing": [
-        {"id": "top", "name": "上衣", "icon": "👕"},
-        {"id": "bottom", "name": "下装", "icon": "👖"},
-        {"id": "outer", "name": "外套", "icon": "🧥"},
-        {"id": "dress", "name": "连衣裙/套装", "icon": "👗"},
-        {"id": "shoes", "name": "鞋", "icon": "👟"},
-        {"id": "bag", "name": "包", "icon": "👜"},
-        {"id": "acc", "name": "配饰", "icon": "🧣"},
-        {"id": "other", "name": "其他", "icon": "📦"},
+        {"id": "top", "name": "上装", "icon": "👕", "children": [
+            {"id": "top_tee", "name": "T恤"}, {"id": "top_shirt", "name": "衬衫"},
+            {"id": "top_hoodie", "name": "卫衣"}, {"id": "top_sweater", "name": "毛衣"},
+            {"id": "top_coat", "name": "外套"}, {"id": "top_suit", "name": "西装"},
+            {"id": "top_jacket", "name": "冲锋衣"}, {"id": "top_other", "name": "其他上装"},
+        ]},
+        {"id": "bottom", "name": "下装", "icon": "👖", "children": [
+            {"id": "bt_pants", "name": "裤子"}, {"id": "bt_skirt", "name": "半裙"},
+            {"id": "bt_dress", "name": "长裙"}, {"id": "bt_other", "name": "其他下装"},
+        ]},
+        {"id": "under", "name": "内衣家居", "icon": "🩱", "children": [
+            {"id": "un_underwear", "name": "内衣"}, {"id": "un_socks", "name": "袜子"},
+            {"id": "un_home", "name": "家居服"},
+        ]},
+        {"id": "shoes", "name": "鞋靴", "icon": "👟", "children": [
+            {"id": "sh_sneaker", "name": "运动鞋"}, {"id": "sh_leather", "name": "皮鞋"},
+            {"id": "sh_boot", "name": "靴子"}, {"id": "sh_slipper", "name": "拖鞋"},
+        ]},
+        {"id": "acc", "name": "配饰", "icon": "👜", "children": [
+            {"id": "ac_hat", "name": "帽子"}, {"id": "ac_scarf", "name": "围巾"},
+            {"id": "ac_belt", "name": "腰带"}, {"id": "ac_bag", "name": "包包"},
+            {"id": "ac_sunglass", "name": "墨镜"},
+        ]},
+        {"id": "formal", "name": "正装/礼服", "icon": "👔", "children": [
+            {"id": "fm_suit", "name": "正装"}, {"id": "fm_dress", "name": "礼服"},
+        ]},
+        {"id": "sport", "name": "运动服饰", "icon": "🏃", "children": [
+            {"id": "sp_top", "name": "运动上装"}, {"id": "sp_bottom", "name": "运动下装"},
+            {"id": "sp_other", "name": "运动其他"},
+        ]},
     ],
+    # ===== 美妆生活 =====
     "life": [
         {"id": "skin", "name": "护肤", "icon": "🧴", "children": [
-            {"id": "skin_clean", "name": "洁面"}, {"id": "skin_toner", "name": "爽肤水"},
-            {"id": "skin_serum", "name": "精华"}, {"id": "skin_lotion", "name": "乳液"},
-            {"id": "skin_cream", "name": "面霜"}, {"id": "skin_eye", "name": "眼霜"},
-            {"id": "skin_sun", "name": "防晒"}, {"id": "skin_mask", "name": "面膜"},
-            {"id": "skin_exfol", "name": "去角质"},
+            {"id": "sk_toner", "name": "水"}, {"id": "sk_lotion", "name": "乳"},
+            {"id": "sk_serum", "name": "精华"}, {"id": "sk_cream", "name": "面霜"},
+            {"id": "sk_mask", "name": "面膜"}, {"id": "sk_sun", "name": "防晒"},
+            {"id": "sk_clean", "name": "洁面"}, {"id": "sk_other", "name": "其他"},
         ]},
         {"id": "makeup", "name": "彩妆", "icon": "💄", "children": [
-            {"id": "mk_base", "name": "底妆"}, {"id": "mk_conceal", "name": "遮瑕"},
-            {"id": "mk_powder", "name": "散粉"}, {"id": "mk_brow", "name": "眉妆"},
-            {"id": "mk_eye", "name": "眼妆"}, {"id": "mk_lip", "name": "唇妆"},
-            {"id": "mk_blush", "name": "腮红"}, {"id": "mk_contour", "name": "修容高光"},
-        ]},
-        {"id": "fragrance", "name": "香氛", "icon": "🌸", "children": [
-            {"id": "fg_perfume", "name": "香水"}, {"id": "fg_mist", "name": "身体喷雾"},
-        ]},
-        {"id": "hair", "name": "美发护发", "icon": "💇", "children": [
-            {"id": "hr_shampoo", "name": "洗发"}, {"id": "hr_conditioner", "name": "护发"},
-            {"id": "hr_oil", "name": "发油/造型"},
-        ]},
-        {"id": "body", "name": "身体护理", "icon": "🛁", "children": [
-            {"id": "bd_bath", "name": "沐浴"}, {"id": "bd_lotion", "name": "身体乳"},
-            {"id": "bd_hand", "name": "护手霜"},
+            {"id": "mk_foundation", "name": "粉底"}, {"id": "mk_eyeshadow", "name": "眼影"},
+            {"id": "mk_lip", "name": "口红"}, {"id": "mk_blush", "name": "腮红"},
+            {"id": "mk_brow", "name": "眉笔"}, {"id": "mk_powder", "name": "散粉"},
+            {"id": "mk_other", "name": "其他"},
         ]},
         {"id": "tool", "name": "工具", "icon": "🖌️", "children": [
-            {"id": "tl_brush", "name": "刷具"}, {"id": "tl_sponge", "name": "美妆蛋"},
-            {"id": "tl_other", "name": "其他工具"},
+            {"id": "tl_brush", "name": "化妆刷"}, {"id": "tl_puff", "name": "粉扑"},
+            {"id": "tl_sponge", "name": "美妆蛋"}, {"id": "tl_curler", "name": "睫毛夹"},
+            {"id": "tl_other", "name": "其他"},
         ]},
-        {"id": "sample", "name": "小样/旅行装", "icon": "🧳", "children": []},
-        {"id": "daily", "name": "日用消耗", "icon": "🧻", "children": [
-            {"id": "dl_paper", "name": "纸品"}, {"id": "dl_clean", "name": "清洁"},
-            {"id": "dl_other", "name": "其他"},
+        {"id": "fragrance", "name": "香氛", "icon": "🌸", "children": [
+            {"id": "fg_perfume", "name": "香水"}, {"id": "fg_candle", "name": "香薰"},
+            {"id": "fg_other", "name": "其他"},
+        ]},
+        {"id": "body", "name": "身体护理", "icon": "🛁", "children": [
+            {"id": "bd_lotion", "name": "身体乳"}, {"id": "bd_bath", "name": "沐浴"},
+            {"id": "bd_hand", "name": "护手霜"}, {"id": "bd_other", "name": "其他"},
         ]},
     ],
     "foodCuisine": [
@@ -129,8 +169,15 @@ DEFAULT_CATEGORIES = {
     "foodType": ["主食", "肉菜", "素菜", "汤粥", "甜品", "小吃", "饮品", "水果", "其他"],
     "meal": ["早餐", "午餐", "晚餐", "加餐", "夜宵"],
     "foodTag": ["自制", "外卖", "餐厅", "聚餐", "零食"],
-    "occasion": ["通勤", "休闲", "运动", "正式", "居家", "约会", "旅行", "其他"],
-    "season": ["春", "夏", "秋", "冬"],
+    "occasion": ["日常", "通勤", "运动", "正式", "居家", "约会", "旅行", "其他"],
+    "season": ["春", "夏", "秋", "冬", "四季"],
+    "tagPresets": ["送人", "待清洗", "待维修", "限量款", "贵重", "断舍离候选", "心头好", "换季收纳", "待出闲置", "备用"],
+    "condition": ["全新", "几乎全新", "9成新", "8成新", "有痕迹", "战损"],
+    "remainLevel": ["满", "¾", "½", "¼", "空"],
+    "sizeSystem": ["中国码", "美国码", "欧码", "均码", "其他"],
+    "skinType": ["干皮", "油皮", "混干", "混油", "敏皮", "通用"],
+    "usageFreq": ["天天用", "每周几次", "偶尔用", "低频"],
+    "washMethod": ["干洗", "手洗", "机洗", "不可水洗", "其他"],
 }
 
 DEFAULT_SETTINGS = {
@@ -238,6 +285,87 @@ def _write_json(path, obj):
     os.replace(tmp, path)
 
 
+# 旧分类 → 新分类树（自动迁移；映射不到的归入对应大类其他并标记待整理）
+CATEGORY_MAP = {
+    # 旧 device
+    "console": ("device", "host", ""), "handheld": ("device", "host", "host_handheld"),
+    "pc": ("device", "host", "host_laptop"), "display": ("device", "display", "dsp_monitor"),
+    "phone": ("device", "host", "host_phone"), "accessory": ("device", "acc", ""),
+    "collectible": ("device", "gadget", "gd_other"),
+    # 旧 game
+    "physical": ("game", "game", "gm_cartridge"), "digital": ("game", "game", "gm_digital"),
+    "dlc": ("game", "game", "gm_dlc"), "game_acc": ("game", "game", "gm_acc"),
+    # 旧 clothing
+    "top": ("clothing", "top", ""), "outer": ("clothing", "top", "top_coat"),
+    "bottom": ("clothing", "bottom", ""), "dress": ("clothing", "formal", "fm_dress"),
+    "shoes": ("clothing", "shoes", ""), "bag": ("clothing", "acc", "ac_bag"),
+    "acc": ("clothing", "acc", ""),
+    # 旧 life
+    "skin": ("life", "skin", ""), "skin_clean": ("life", "skin", "sk_clean"),
+    "skin_toner": ("life", "skin", "sk_toner"), "skin_serum": ("life", "skin", "sk_serum"),
+    "skin_lotion": ("life", "skin", "sk_lotion"), "skin_cream": ("life", "skin", "sk_cream"),
+    "skin_eye": ("life", "skin", "sk_cream"), "skin_sun": ("life", "skin", "sk_sun"),
+    "skin_mask": ("life", "skin", "sk_mask"), "skin_exfol": ("life", "skin", "sk_other"),
+    "makeup": ("life", "makeup", ""), "mk_base": ("life", "makeup", "mk_foundation"),
+    "mk_conceal": ("life", "makeup", "mk_foundation"), "mk_powder": ("life", "makeup", "mk_powder"),
+    "mk_brow": ("life", "makeup", "mk_brow"), "mk_eye": ("life", "makeup", "mk_eyeshadow"),
+    "mk_lip": ("life", "makeup", "mk_lip"), "mk_blush": ("life", "makeup", "mk_blush"),
+    "mk_contour": ("life", "makeup", "mk_other"),
+    "fragrance": ("life", "fragrance", ""), "fg_perfume": ("life", "fragrance", "fg_perfume"),
+    "fg_mist": ("life", "fragrance", "fg_other"),
+    "tool": ("life", "tool", ""), "tl_brush": ("life", "tool", "tl_brush"),
+    "tl_sponge": ("life", "tool", "tl_sponge"), "tl_other": ("life", "tool", "tl_other"),
+    "body": ("life", "body", ""), "bd_lotion": ("life", "body", "bd_lotion"),
+    "bd_bath": ("life", "body", "bd_bath"), "bd_hand": ("life", "body", "bd_hand"),
+    "hair": ("life", "body", "bd_other"), "hr_shampoo": ("life", "body", "bd_other"),
+    "hr_conditioner": ("life", "body", "bd_other"), "hr_oil": ("life", "body", "bd_other"),
+    "sample": ("life", "makeup", "mk_other"), "daily": ("life", "body", "bd_other"),
+    "dl_paper": ("life", "body", "bd_other"), "dl_clean": ("life", "body", "bd_other"),
+    "dl_other": ("life", "body", "bd_other"),
+}
+# 新分类树的兜底「其他」
+FALLBACK = {"device": ("gadget", "gd_other"), "game": ("game", "gm_acc"),
+            "clothing": ("top", "top_other"), "life": ("body", "bd_other")}
+
+
+def migrate_taxonomy(items):
+    """旧 categoryId/subCategoryId → 新分类树；映射不到的标记 needsReview"""
+    for it in items:
+        old_sub = it.get("subCategoryId") or ""
+        if it.get("taxonomy") == 2 and old_sub not in CATEGORY_MAP:
+            continue
+        old = it.get("categoryId") or ""
+        mapped = CATEGORY_MAP.get(old)
+        if mapped:
+            kind, l1, l2 = mapped
+            it["kind"] = kind
+            it["categoryId"] = l1
+            if l2:
+                it["subCategoryId"] = l2
+            it.pop("needsReview", None)
+        else:
+            fb = FALLBACK.get(it.get("kind") or "device", ("gadget", "gd_other"))
+            it["categoryId"] = fb[0]
+            it["subCategoryId"] = fb[1]
+            it["needsReview"] = True
+        # 子分类旧 ID 也要重映射（如 skin_exfol → sk_other）
+        sub = it.get("subCategoryId") or ""
+        if sub in CATEGORY_MAP:
+            mapped_sub = CATEGORY_MAP[sub]
+            it["subCategoryId"] = mapped_sub[2] or None
+        # 旧状态映射到新枚举
+        st = it.get("status")
+        if st == "collected":
+            it["status"] = "in_use"
+        elif st == "dropped":
+            it["status"] = "broken"
+        elif st == "empty":
+            it["status"] = "idle"
+            it.setdefault("remainLevel", "空")
+        it["taxonomy"] = 2
+    return items
+
+
 def load_db(acc_id):
     root = data_root()
     accounts = migrate_old_layout(root)
@@ -253,6 +381,7 @@ def load_db(acc_id):
     food = _read_json(os.path.join(d, "food.json"), {"schemaVersion": SCHEMA_VERSION, "records": []})
     events = _read_json(os.path.join(d, "events.json"), {"schemaVersion": SCHEMA_VERSION, "events": []})
     settings = _read_json(os.path.join(d, "settings.json"), {})
+    items["items"] = migrate_taxonomy(items.get("items", []))
 
     merged_settings = json.loads(json.dumps(DEFAULT_SETTINGS))
     merged_settings.update(settings.get("settings") or {})
@@ -260,15 +389,13 @@ def load_db(acc_id):
         merged_settings["planSections"] = DEFAULT_SETTINGS["planSections"]
     merged_cats = json.loads(json.dumps(DEFAULT_CATEGORIES))
     user_cats = settings.get("categories") or {}
-    for key in merged_cats:
+    # 物品分类树以服务端为准（v1.0.1 新分类）；用户可改的是枚举/标签/美食分类
+    user_editable = ("foodCuisine", "foodType", "meal", "foodTag", "occasion", "season",
+                     "tagPresets", "condition", "remainLevel", "sizeSystem", "skinType",
+                     "usageFreq", "washMethod")
+    for key in user_editable:
         if key in user_cats and user_cats[key]:
             merged_cats[key] = user_cats[key]
-    # v3.1 美食分类迁移：旧 foodType 列表 → 新菜系+品类
-    legacy_type = ["主食", "肉蛋", "蔬果", "汤粥", "甜品", "饮品", "零食", "其他"]
-    if merged_cats.get("foodType") == legacy_type:
-        merged_cats["foodType"] = DEFAULT_CATEGORIES["foodType"]
-    if not merged_cats.get("foodCuisine"):
-        merged_cats["foodCuisine"] = DEFAULT_CATEGORIES["foodCuisine"]
 
     return {
         "schemaVersion": SCHEMA_VERSION,

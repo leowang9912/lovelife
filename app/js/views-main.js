@@ -52,7 +52,7 @@ window.Views = (function () {
         return opts;
       }).join('') + '</select>' +
       '<select id="filter-status"><option value="">全部状态</option>' +
-      [['in_use', '在用'], ['idle', '闲置'], ['empty', '已用完'], ['sold', '已售'], ['gifted', '已转赠'], ['broken', '损坏']].map(function (s) {
+      [['in_use', '在用'], ['idle', '闲置'], ['borrowed', '借出'], ['to_sell', '待出闲置'], ['broken', '损坏报废'], ['sold', '已售出'], ['gifted', '已转赠']].map(function (s) {
         return '<option value="' + s[0] + '"' + (itemState.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +
@@ -186,8 +186,16 @@ window.Views = (function () {
         (item.kind === 'life' && lifeS && lifeS.paoState === 'near' ? '<span class="tag tag-warn">PAO 临期</span>' : '') +
         '</div>' +
         '<h4 class="detail-sub">基本信息</h4><div class="detail-kv">' +
-        kv('品牌', item.brand) + kv('规格', item.model || item.spec) + kv('色号', item.shade) +
-        kv('购买日期', U.cnDate(item.purchaseDate)) + kv('备注', item.notes) +
+        kv('品牌', item.brand) + kv('型号', item.model) + kv('规格/容量', item.spec || item.configText) +
+        kv('色号', item.shade) + kv('成色', item.condition) + kv('SN', item.serialNumber) +
+        kv('存放位置', item.storageLocation) + kv('购入渠道', item.channel) +
+        kv('购买日期', U.cnDate(item.purchaseDate)) +
+        kv('标签', (item.tags || []).join('、')) + kv('备注', item.notes) +
+        kv('保修截止', item.warrantyEnd) + kv('电池健康', item.batteryHealth !== null && item.batteryHealth !== undefined ? item.batteryHealth + '%' : '') +
+        kv('尺码', item.sizeSystem ? item.sizeSystem + ' ' + item.size : item.size) +
+        kv('清洗方式', item.washMethod) + kv('上次清洗', item.lastCleanedDate) +
+        kv('剩余量', item.remainLevel) + kv('使用频率', item.usageFreq) +
+        kv('肤质适配', (item.skinType || []).join('、')) + kv('致敏', item.allergenic) +
         '</div>' +
         (item.kind === 'life'
           ? '<button class="btn btn-primary btn-sm" id="btn-use-plus">✓ 使用一次（+1）</button>' +
@@ -282,7 +290,10 @@ window.Views = (function () {
     return '<div class="kv-row"><span>' + k + '</span><span>' + U.escapeHtml(String(v)) + '</span></div>';
   }
   function statusLabel(s) {
-    return { in_use: '在用', idle: '闲置', empty: '已用完', sold: '已售', gifted: '已转赠', broken: '损坏', collected: '收藏', dropped: '丢弃' }[s] || s || '在用';
+    return {
+      in_use: '在用', idle: '闲置', borrowed: '借出', to_sell: '待出闲置',
+      broken: '损坏报废', sold: '已售出', gifted: '已转赠'
+    }[s] || s || '在用';
   }
 
   /* =============== 穿搭日历 =============== */

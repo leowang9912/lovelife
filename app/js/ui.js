@@ -244,145 +244,184 @@ window.UI = (function () {
   }
 
   /* ---------- 物品表单 ---------- */
+  /* ---------- 分类解析（v1.0.1：digital 树统一） ---------- */
   function catsFor(db, kind) {
-    if (kind === 'digital') {
-      return (db.categories.device || []).map(function (c) { return Object.assign({}, c, { _kind: 'device' }); })
-        .concat((db.categories.game || []).map(function (c) { return Object.assign({}, c, { _kind: 'game' }); }));
-    }
-    return (db.categories[kind] || []).map(function (c) { return Object.assign({}, c, { _kind: kind }); });
+    const key = (kind === 'digital' || kind === 'device' || kind === 'game') ? 'digital' : kind;
+    return (db.categories[key] || []);
   }
 
-  function kindOfCategory(db, kind, categoryId) {
+  function kindOfCategory(db, kind, categoryId, subCategoryId) {
     if (kind !== 'digital') return kind;
-    return (db.categories.game || []).some(function (c) { return c.id === categoryId; }) ? 'game' : 'device';
+    return (categoryId === 'game' || String(subCategoryId || '').indexOf('gm_') === 0) ? 'game' : 'device';
   }
 
-  function isGameCategory(db, categoryId) {
-    return (db.categories.game || []).some(function (c) { return c.id === categoryId; });
+  function isGameCategory(db, categoryId, subCategoryId) {
+    return categoryId === 'game' || String(subCategoryId || '').indexOf('gm_') === 0;
   }
 
   function lab(req, key, text) {
     return text + (req[key] !== false ? '<span class="req-star"> *</span>' : '');
   }
 
+  const STATUS_OPTS = [
+    ['in_use', '在用'], ['idle', '闲置'], ['borrowed', '借出'],
+    ['to_sell', '待出闲置'], ['broken', '损坏报废'],
+    ['sold', '已售出（归档）'], ['gifted', '已转赠（归档）']
+  ];
+
+  function enumSel(list, cur, blank) {
+    return '<option value="">' + (blank || '（不指定）') + '</option>' +
+      (list || []).map(function (v) {
+        return '<option value="' + U.escapeHtml(v) + '"' + (String(cur || '') === String(v) ? ' selected' : '') + '>' + U.escapeHtml(v) + '</option>';
+      }).join('');
+  }
+
+  function chips(name, list, cur) {
+    const arr = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+    return (list || []).map(function (v) {
+      const on = arr.indexOf(v) >= 0;
+      return '<label class="chip-check"><input type="checkbox" name="' + name + '" value="' + U.escapeHtml(v) + '"' +
+        (on ? ' checked' : '') + '><span>' + U.escapeHtml(v) + '</span></label>';
+    }).join('');
+  }
+
   function itemFormHTML(db, item, kind) {
     const req = db.settings.requiredFields || {};
     const cats = catsFor(db, kind);
+    const isDigital = kind === 'digital' || item.kind === 'device' || item.kind === 'game';
+
     const catOpts = cats.map(function (c) {
-      return '<option value="' + c.id + '"' + (item.categoryId === c.id ? ' selected' : '') + '>' + U.escapeHtml(c.name) + '</option>';
+      return '<option value="' + c.id + '"' + (item.categoryId === c.id ? ' selected' : '') + '>' +
+        U.escapeHtml(c.name) + '</option>';
     }).join('');
-    const statusOpts = [
-      ['in_use', '在用'], ['idle', '闲置'], ['empty', '已用完'], ['sold', '已出售'],
-      ['gifted', '已转赠'], ['broken', '已损坏'], ['collected', '收藏'], ['dropped', '丢弃']
-    ].map(function (s) {
-      return '<option value="' + s[0] + '"' + ((item.status || 'in_use') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
+    const l1 = cats.find(function (c) { return c.id === item.categoryId; });
+    const subOpts = ((l1 && l1.children) || []).map(function (c) {
+      return '<option value="' + c.id + '"' + (item.subCategoryId === c.id ? ' selected' : '') + '>' +
+        U.escapeHtml(c.name) + '</option>';
     }).join('');
 
-    let html = '<div class="form-grid">' +
-      '<label class="f-full"><span class="f-label">' + lab(req, 'name', '名称') + '</span>' +
+    let html =
+      '<div class="form-section"><div class="form-section-title">基础信息</div><div class="form-grid">' +
+      '<label class="f-full"><span class="f-label">' + lab(req, 'name', '物品名称') + '</span>' +
       '<input name="name" value="' + U.escapeHtml(item.name || '') + '"></label>' +
-      '<label><span class="f-label">' + lab(req, 'category', '种类') + '</span>' +
-      '<select name="categoryId" id="f-cat"><option value="">请选择</option>' + catOpts + '</select></label>';
-
-    if (kind === 'life') {
-      const l1 = (db.categories.life || []).find(function (c) { return c.id === item.categoryId; });
-      const children = (l1 && l1.children) || [];
-      html += '<label><span class="f-label">子分类</span><select name="subCategoryId" id="f-sub"><option value="">（可选）</option>' +
-        children.map(function (c) {
-          return '<option value="' + c.id + '"' + (item.subCategoryId === c.id ? ' selected' : '') + '>' + U.escapeHtml(c.name) + '</option>';
-        }).join('') + '</select></label>';
-    }
-
-    html += '<label><span class="f-label">状态</span><select name="status">' + statusOpts + '</select></label>' +
+      '<label><span class="f-label">' + lab(req, 'category', '分类') + '</span>' +
+      '<select name="categoryId" id="f-cat"><option value="">请选择</option>' + catOpts + '</select></label>' +
+      '<label><span class="f-label">子分类</span><select name="subCategoryId" id="f-sub">' +
+      '<option value="">（可选）</option>' + subOpts + '</select></label>' +
       '<label><span class="f-label">' + lab(req, 'purchaseDate', '购买日期') + '</span>' +
       '<input type="date" name="purchaseDate" value="' + U.escapeHtml(item.purchaseDate || '') + '"></label>' +
-      '<label><span class="f-label">' + lab(req, 'purchasePrice', '购买价格') + '</span>' +
+      '<label><span class="f-label">' + lab(req, 'purchasePrice', '购入金额') + '</span>' +
       '<input type="number" step="0.01" name="purchasePrice" value="' +
       (item.purchasePrice !== null && item.purchasePrice !== undefined ? item.purchasePrice : '') + '"></label>' +
+      '<label><span class="f-label">购入渠道</span><input name="channel" value="' + U.escapeHtml(item.channel || '') + '" placeholder="京东/闲鱼/线下…"></label>' +
+      '<label><span class="f-label">存放位置</span><input name="storageLocation" value="' + U.escapeHtml(item.storageLocation || '') + '" placeholder="如：书房抽屉2"></label>' +
+      '<label><span class="f-label">状态</span><select name="status">' +
+      STATUS_OPTS.map(function (s) {
+        return '<option value="' + s[0] + '"' + ((item.status || 'in_use') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
+      }).join('') + '</select></label>' +
       '<label><span class="f-label">品牌</span><input name="brand" value="' + U.escapeHtml(item.brand || '') + '"></label>' +
-      '<label><span class="f-label">型号/规格</span><input name="model" value="' + U.escapeHtml(item.model || '') + '"></label>' +
-      '<label><span class="f-label">备注</span><input name="notes" value="' + U.escapeHtml(item.notes || '') + '"></label>';
+      '<label class="f-full"><span class="f-label">备注</span><input name="notes" value="' + U.escapeHtml(item.notes || '') + '"></label>' +
+      '<div class="f-full"><span class="f-label">标签（可多选）</span><div class="chip-row">' +
+      chips('tags', (db.categories.tagPresets || []).concat(item.tags || []).filter(function (v, i, a) { return a.indexOf(v) === i; }), item.tags) +
+      '</div></div></div></div>';
 
-    if (kind === 'digital' || kind === 'device' || kind === 'game') {
+    if (isDigital) {
       const deviceOpts = '<option value="">（无）</option>' + db.items.filter(function (i) {
         return (i.kind === 'device' || i.kind === 'game') && i.id !== item.id;
       }).map(function (i) {
         return '<option value="' + i.id + '"' + (item.parentItemId === i.id ? ' selected' : '') + '>' + U.escapeHtml(i.name) + '</option>';
       }).join('');
-      html += '<label><span class="f-label">序列号</span><input name="serialNumber" value="' + U.escapeHtml(item.serialNumber || '') + '"></label>';
-      html += '<label><span class="f-label">保修到期</span><input type="date" name="warrantyEnd" value="' + U.escapeHtml(item.warrantyEnd || '') + '"></label>';
-      html += '<label><span class="f-label">购买渠道</span><input name="channel" value="' + U.escapeHtml(item.channel || '') + '"></label>';
-      html += '<label><span class="f-label">归属主机</span><select name="parentItemId">' + deviceOpts + '</select></label>';
-      html += '<label><span class="f-label">预估寿命（年）</span><input type="number" step="0.5" name="estimatedLifeYears" value="' + (item.estimatedLifeYears || '') + '"></label>';
-      html += '<label><span class="f-label">残值率</span><input type="number" step="0.01" name="residualRate" value="' +
-        (item.residualRate !== null && item.residualRate !== undefined ? item.residualRate : '') + '"></label>';
-      html += '<label><span class="f-label">预估二手价</span><input type="number" step="0.01" name="estimatedResalePrice" value="' + (item.estimatedResalePrice || '') + '"></label>';
-      html += '<label><span class="f-label">最近使用日期</span><input type="date" name="lastUsedDate" value="' + U.escapeHtml(item.lastUsedDate || '') + '"></label>';
-      html += '<label class="game-only"><span class="f-label">游玩状态</span><select name="gameStatus">' +
+      html += '<div class="form-section"><div class="form-section-title">数码专属</div><div class="form-grid">' +
+        '<label><span class="f-label">SN 序列号</span><input name="serialNumber" value="' + U.escapeHtml(item.serialNumber || '') + '" placeholder="保修/验机/出二手必备"></label>' +
+        '<label><span class="f-label">型号</span><input name="model" value="' + U.escapeHtml(item.model || '') + '"></label>' +
+        '<label><span class="f-label">配置参数</span><input name="configText" value="' + U.escapeHtml(item.configText || '') + '" placeholder="内存/硬盘/版本…"></label>' +
+        '<label><span class="f-label">成色</span><select name="condition">' + enumSel(db.categories.condition, item.condition) + '</select></label>' +
+        '<label><span class="f-label">保修截止</span><input type="date" name="warrantyEnd" value="' + U.escapeHtml(item.warrantyEnd || '') + '"></label>' +
+        '<label><span class="f-label">固件版本</span><input name="firmware" value="' + U.escapeHtml(item.firmware || '') + '"></label>' +
+        '<label><span class="f-label">电池健康度 %</span><input type="number" min="0" max="100" name="batteryHealth" value="' + (item.batteryHealth !== null && item.batteryHealth !== undefined ? item.batteryHealth : '') + '"></label>' +
+        '<label><span class="f-label">绑定子配件</span><select name="parentItemId">' + deviceOpts + '</select></label>' +
+        '<label><span class="f-label">预估寿命（年）</span><input type="number" step="0.5" name="estimatedLifeYears" value="' + (item.estimatedLifeYears || '') + '"></label>' +
+        '<label><span class="f-label">预估二手价</span><input type="number" step="0.01" name="estimatedResalePrice" value="' + (item.estimatedResalePrice || '') + '"></label>' +
+        '<label class="game-only"><span class="f-label">游玩状态</span><select name="gameStatus">' +
         [['unopened', '未开坑'], ['playing', '在玩'], ['finished', '已通关'], ['dropped', '弃坑']].map(function (s) {
           return '<option value="' + s[0] + '"' + ((item.gameStatus || 'unopened') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
-        }).join('') + '</select></label>';
-      html += '<label class="game-only"><span class="f-label">游玩时长（小时）</span><input type="number" step="0.1" name="playHours" value="' + (item.playHours || '') + '"></label>';
+        }).join('') + '</select></label>' +
+        '<label class="game-only"><span class="f-label">游玩时长（小时）</span><input type="number" step="0.1" name="playHours" value="' + (item.playHours || '') + '"></label>' +
+        '</div></div>';
     }
 
-    if (kind === 'life') {
-      html += '<label><span class="f-label">色号/色名</span><input name="shade" value="' + U.escapeHtml(item.shade || '') + '"></label>';
-      html += '<label><span class="f-label">规格（ml/g）</span><input name="spec" value="' + U.escapeHtml(item.spec || '') + '"></label>';
-      html += '<label><span class="f-label">开封日期</span><input type="date" name="openedDate" value="' + U.escapeHtml(item.openedDate || '') + '"></label>';
-      html += '<label><span class="f-label">开封后可用（PAO）</span><select name="paoMonths">' +
-        [['', '不限'], ['3', '3 个月'], ['6', '6 个月'], ['12', '12 个月'], ['18', '18 个月'], ['24', '24 个月'], ['36', '36 个月']].map(function (s) {
+    if (kind === 'clothing' || item.kind === 'clothing') {
+      html += '<div class="form-section"><div class="form-section-title">服饰专属</div><div class="form-grid">' +
+        '<label><span class="f-label">颜色</span><input name="color" value="' + U.escapeHtml(item.color || '') + '"></label>' +
+        '<label><span class="f-label">尺码制</span><select name="sizeSystem">' + enumSel(db.categories.sizeSystem, item.sizeSystem) + '</select></label>' +
+        '<label><span class="f-label">号型/尺码</span><input name="size" value="' + U.escapeHtml(item.size || '') + '" placeholder="如 165/88A、M、42"></label>' +
+        '<label><span class="f-label">面料材质</span><input name="material" value="' + U.escapeHtml(item.material || '') + '"></label>' +
+        '<label><span class="f-label">款式类型</span><input name="styleType" value="' + U.escapeHtml(item.styleType || '') + '" placeholder="修身/宽松/工装…"></label>' +
+        '<label><span class="f-label">清洗方式</span><select name="washMethod">' + enumSel(db.categories.washMethod, item.washMethod) + '</select></label>' +
+        '<label><span class="f-label">上次清洗日期</span><input type="date" name="lastCleanedDate" value="' + U.escapeHtml(item.lastCleanedDate || '') + '"></label>' +
+        '<label><span class="f-label">手动穿着次数</span><input type="number" name="manualWearCount" value="' + (item.manualWearCount || 0) + '"></label>' +
+        '<div class="f-full"><div class="chip-row">' +
+        '<label class="chip-check"><input type="checkbox" name="wrinkleProne"' + (item.wrinkleProne ? ' checked' : '') + '><span>易皱</span></label>' +
+        '<label class="chip-check"><input type="checkbox" name="valuable"' + (item.valuable ? ' checked' : '') + '><span>贵重</span></label>' +
+        '<label class="chip-check"><input type="checkbox" name="keepTag"' + (item.keepTag ? ' checked' : '') + '><span>吊牌保留</span></label>' +
+        '</div></div>' +
+        '<div class="f-full"><span class="f-label">季节</span><div class="chip-row">' +
+        chips('season', db.categories.season, item.season) + '</div></div>' +
+        '<div class="f-full"><span class="f-label">适合场景</span><div class="chip-row">' +
+        chips('occasion', db.categories.occasion, item.occasion) + '</div></div>' +
+        '</div></div>';
+    }
+
+    if (kind === 'life' || item.kind === 'life') {
+      html += '<div class="form-section"><div class="form-section-title">美妆专属</div><div class="form-grid">' +
+        '<label><span class="f-label">色号/色名</span><input name="shade" value="' + U.escapeHtml(item.shade || '') + '"></label>' +
+        '<label><span class="f-label">容量/规格</span><input name="spec" value="' + U.escapeHtml(item.spec || '') + '" placeholder="30ml / 5g…"></label>' +
+        '<label><span class="f-label">开封日期（重点）</span><input type="date" name="openedDate" value="' + U.escapeHtml(item.openedDate || '') + '"></label>' +
+        '<label><span class="f-label">PAO 开封保质</span><select name="paoMonths">' +
+        [['', '不限'], ['3', '3M'], ['6', '6M'], ['12', '12M'], ['18', '18M'], ['24', '24M'], ['36', '36M']].map(function (s) {
           return '<option value="' + s[0] + '"' + (String(item.paoMonths || '') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
-        }).join('') + '</select></label>';
-      html += '<label><span class="f-label">用完日期（空瓶）</span><input type="date" name="emptyDate" value="' + U.escapeHtml(item.emptyDate || '') + '"></label>';
-      html += '<label><span class="f-label">使用次数</span><input type="number" name="useCount" id="f-use" value="' + (item.useCount || 0) + '"></label>';
-      html += '<div class="f-full"><label class="chip-check"><input type="checkbox" name="repurchase"' +
-        (item.repurchase ? ' checked' : '') + '><span>加入回购清单</span></label></div>';
+        }).join('') + '</select></label>' +
+        '<label><span class="f-label">未开封限用日期</span><input type="date" name="expiryDate" value="' + U.escapeHtml(item.expiryDate || '') + '"></label>' +
+        '<label><span class="f-label">剩余量</span><select name="remainLevel">' + enumSel(db.categories.remainLevel, item.remainLevel, '（未记录）') + '</select></label>' +
+        '<label><span class="f-label">使用频率</span><select name="usageFreq">' + enumSel(db.categories.usageFreq, item.usageFreq) + '</select></label>' +
+        '<label><span class="f-label">是否致敏</span><select name="allergenic">' +
+        ['', '是', '否', '不确定'].map(function (v) {
+          return '<option value="' + v + '"' + (item.allergenic === v ? ' selected' : '') + '>' + (v || '（不指定）') + '</option>';
+        }).join('') + '</select></label>' +
+        '<label><span class="f-label">使用次数</span><input type="number" name="useCount" value="' + (item.useCount || 0) + '"></label>' +
+        '<div class="f-full"><span class="f-label">肤质适配</span><div class="chip-row">' +
+        chips('skinType', db.categories.skinType, item.skinType) + '</div></div>' +
+        '<div class="f-full"><div class="chip-row">' +
+        '<label class="chip-check"><input type="checkbox" name="repurchase"' + (item.repurchase ? ' checked' : '') + '><span>加入回购清单</span></label>' +
+        '</div></div></div></div>';
     }
 
-    if (kind === 'clothing') {
-      html += '<label><span class="f-label">颜色</span><input name="color" value="' + U.escapeHtml(item.color || '') + '"></label>';
-      html += '<label><span class="f-label">尺码</span><input name="size" value="' + U.escapeHtml(item.size || '') + '"></label>';
-      html += '<label><span class="f-label">材质</span><input name="material" value="' + U.escapeHtml(item.material || '') + '"></label>';
-      html += '<label><span class="f-label">手动穿着次数</span><input type="number" name="manualWearCount" value="' + (item.manualWearCount || 0) + '"></label>';
-      const seasonList = db.categories.season || [];
-      const occasionList = db.categories.occasion || [];
-      html += '<div class="f-full"><span class="f-label">适用季节</span><div class="chip-row">' +
-        seasonList.map(function (s) {
-          const on = (item.season || []).indexOf(s) >= 0;
-          return '<label class="chip-check"><input type="checkbox" name="season" value="' + U.escapeHtml(s) + '"' + (on ? ' checked' : '') + '><span>' + U.escapeHtml(s) + '</span></label>';
-        }).join('') + '</div></div>';
-      html += '<div class="f-full"><span class="f-label">场合标签</span><div class="chip-row">' +
-        occasionList.map(function (s) {
-          const on = (item.occasion || []).indexOf(s) >= 0;
-          return '<label class="chip-check"><input type="checkbox" name="occasion" value="' + U.escapeHtml(s) + '"' + (on ? ' checked' : '') + '><span>' + U.escapeHtml(s) + '</span></label>';
-        }).join('') + '</div></div>';
-    }
-
-    html += '<div class="f-full"><span class="f-label">图片（上传时可裁切/抠图）</span><div id="form-img-uploader"></div></div></div>';
+    html += '<div class="form-section"><div class="form-grid"><div class="f-full">' +
+      '<span class="f-label">图片（上传时可裁切/抠图）</span><div id="form-img-uploader"></div></div></div></div>';
     return html;
   }
 
   function bindFormToggles(formEl, db, kind) {
     const sel = formEl.querySelector('[name=categoryId]');
+    const sub = formEl.querySelector('#f-sub');
     if (!sel) return;
     function update() {
-      if (kind === 'digital') {
-        const isGame = isGameCategory(db, sel.value);
-        formEl.querySelectorAll('.game-only').forEach(function (el) {
-          el.style.display = isGame ? '' : 'none';
-        });
-      }
-      if (kind === 'life') {
-        const l1 = (db.categories.life || []).find(function (c) { return c.id === sel.value; });
-        const sub = formEl.querySelector('#f-sub');
-        if (sub) {
-          sub.innerHTML = '<option value="">（可选）</option>' + ((l1 && l1.children) || []).map(function (c) {
-            return '<option value="' + c.id + '">' + U.escapeHtml(c.name) + '</option>';
+      const cats = catsFor(db, kind === 'digital' ? 'digital' : (kind || 'digital'));
+      const l1 = cats.find(function (c) { return c.id === sel.value; });
+      if (sub) {
+        const cur = sub.value;
+        sub.innerHTML = '<option value="">（可选）</option>' +
+          ((l1 && l1.children) || []).map(function (c) {
+            return '<option value="' + c.id + '"' + (cur === c.id ? ' selected' : '') + '>' + U.escapeHtml(c.name) + '</option>';
           }).join('');
-        }
       }
+      const isGame = isGameCategory(db, sel.value, sub && sub.value);
+      formEl.querySelectorAll('.game-only').forEach(function (el) {
+        el.style.display = isGame ? '' : 'none';
+      });
     }
     sel.addEventListener('change', update);
+    if (sub) sub.addEventListener('change', update);
     update();
   }
 
@@ -391,55 +430,73 @@ window.UI = (function () {
     const item = Object.assign({}, baseItem);
     const db = window.Storage.getDB();
     item.categoryId = fd.get('categoryId') || '';
+    item.subCategoryId = fd.get('subCategoryId') || '';
     item.name = (fd.get('name') || '').trim();
     item.status = fd.get('status') || 'in_use';
     item.purchaseDate = fd.get('purchaseDate') || '';
     const pp = fd.get('purchasePrice');
     item.purchasePrice = pp === '' || pp === null ? null : Number(pp);
     item.brand = (fd.get('brand') || '').trim();
-    item.model = (fd.get('model') || '').trim();
     item.notes = (fd.get('notes') || '').trim();
-    item.kind = kind === 'digital' ? (kindOfCategory(db, 'digital', item.categoryId) || 'device') : kind;
+    item.channel = (fd.get('channel') || '').trim();
+    item.storageLocation = (fd.get('storageLocation') || '').trim();
+    item.tags = fd.getAll('tags').filter(Boolean);
+    item.kind = kind === 'digital'
+      ? (kindOfCategory(db, 'digital', item.categoryId, item.subCategoryId) || 'device')
+      : kind;
 
     if (item.kind === 'device' || item.kind === 'game') {
       item.serialNumber = (fd.get('serialNumber') || '').trim();
+      item.model = (fd.get('model') || '').trim();
+      item.configText = (fd.get('configText') || '').trim();
+      item.condition = fd.get('condition') || '';
       item.warrantyEnd = fd.get('warrantyEnd') || '';
-      item.channel = (fd.get('channel') || '').trim();
+      item.firmware = (fd.get('firmware') || '').trim();
+      const bh = fd.get('batteryHealth');
+      item.batteryHealth = bh === '' ? null : Number(bh);
       item.parentItemId = fd.get('parentItemId') || '';
       const el = fd.get('estimatedLifeYears');
       item.estimatedLifeYears = el === '' ? null : Number(el);
-      const rr = fd.get('residualRate');
-      item.residualRate = rr === '' ? null : Number(rr);
       const er = fd.get('estimatedResalePrice');
       item.estimatedResalePrice = er === '' ? null : Number(er);
-      item.lastUsedDate = fd.get('lastUsedDate') || '';
     }
     if (item.kind === 'game') {
       item.gameStatus = fd.get('gameStatus') || 'unopened';
       const ph = fd.get('playHours');
       item.playHours = ph === '' ? null : Number(ph);
     }
+    if (item.kind === 'clothing') {
+      item.color = (fd.get('color') || '').trim();
+      item.sizeSystem = fd.get('sizeSystem') || '';
+      item.size = (fd.get('size') || '').trim();
+      item.material = (fd.get('material') || '').trim();
+      item.styleType = (fd.get('styleType') || '').trim();
+      item.washMethod = fd.get('washMethod') || '';
+      item.lastCleanedDate = fd.get('lastCleanedDate') || '';
+      item.manualWearCount = Number(fd.get('manualWearCount')) || 0;
+      item.wrinkleProne = fd.get('wrinkleProne') === 'on';
+      item.valuable = fd.get('valuable') === 'on';
+      item.keepTag = fd.get('keepTag') === 'on';
+      item.season = fd.getAll('season').filter(Boolean);
+      item.occasion = fd.getAll('occasion').filter(Boolean);
+    }
     if (item.kind === 'life') {
-      item.subCategoryId = fd.get('subCategoryId') || '';
       item.shade = (fd.get('shade') || '').trim();
       item.spec = (fd.get('spec') || '').trim();
       item.openedDate = fd.get('openedDate') || '';
       const pao = fd.get('paoMonths');
       item.paoMonths = pao === '' ? null : Number(pao);
-      item.emptyDate = fd.get('emptyDate') || '';
+      item.expiryDate = fd.get('expiryDate') || '';
+      item.remainLevel = fd.get('remainLevel') || '';
+      item.usageFreq = fd.get('usageFreq') || '';
+      item.allergenic = fd.get('allergenic') || '';
       item.useCount = Number(fd.get('useCount')) || 0;
+      item.skinType = fd.getAll('skinType').filter(Boolean);
       item.repurchase = fd.get('repurchase') === 'on';
-    }
-    if (item.kind === 'clothing') {
-      item.color = (fd.get('color') || '').trim();
-      item.size = (fd.get('size') || '').trim();
-      item.material = (fd.get('material') || '').trim();
-      item.manualWearCount = Number(fd.get('manualWearCount')) || 0;
-      item.season = fd.getAll('season').filter(Boolean);
-      item.occasion = fd.getAll('occasion').filter(Boolean);
     }
     return item;
   }
+
 
   /* ---------- 图文选择器（分类 tab + 搜索 + 图文卡片） ---------- */
   /**
@@ -519,7 +576,8 @@ window.UI = (function () {
 
   /* ---------- 卡片 ---------- */
   function catIcon(db, item) {
-    const list = (db && db.categories && db.categories[item.kind]) || [];
+    const key = (item.kind === 'device' || item.kind === 'game') ? 'digital' : item.kind;
+    const list = (db && db.categories && db.categories[key]) || [];
     const cat = list.find(function (c) { return c.id === item.categoryId; });
     if (cat && cat.icon) return cat.icon;
     if (cat && cat.children) {

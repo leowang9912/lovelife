@@ -57,14 +57,19 @@
 .remember { justify-content: center; margin-top: 4px; }
 
 /* 头像选择库 */
+.form-grid > .f-full { grid-column: 1 / -1; min-width: 0; }
 .avatar-grid {
-  display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px;
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: 10px; margin: 8px 0 4px;
 }
 .avatar-opt {
-  width: 42px; height: 42px; border-radius: 50%; font-size: 22px;
+  width: 100%; aspect-ratio: 1 / 1; max-width: 72px; justify-self: center;
+  border-radius: 50%; font-size: 26px;
   display: flex; align-items: center; justify-content: center;
   cursor: pointer; background: #f2f2f4; border: 2px solid transparent;
+  transition: .12s;
 }
+.avatar-opt:hover { transform: scale(1.08); }
 .avatar-opt.on { border-color: var(--accent); background: var(--accent-soft); }
 
 /* ---------- 顶部全局搜索 ---------- */
@@ -147,21 +152,35 @@
   display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap;
 }
 
-/* ---------- 我的统计：分组布局（修复间距/重叠） ---------- */
-.plan-wrap { display: flex; flex-direction: column; gap: 22px; }
-.plan-group { display: flex; flex-direction: column; gap: 12px; }
-.plan-group-title {
-  font-size: 12px; font-weight: 700; color: var(--text-3);
-  letter-spacing: 0.06em; padding-left: 4px;
-}
+/* ---------- 我的统计：自由拖动 + 宽度档位（12 列网格，三档全尺寸可区分） ---------- */
+.plan-wrap { display: flex; flex-direction: column; gap: 12px; }
 .plan-grid {
-  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px;
   align-items: start;
 }
 .plan-sec { min-width: 0; margin: 0 !important; }
-.plan-sec.span-2 { grid-column: span 2; }
-.plan-sec.span-3 { grid-column: span 3; }
+.plan-sec[data-size="s"] { grid-column: span 4; }
+.plan-sec[data-size="m"] { grid-column: span 6; }
+.plan-sec[data-size="l"] { grid-column: span 12; }
 .plan-sec.sec-off { opacity: .42; }
+.plan-sec.dragging { opacity: .45; outline: 2px dashed var(--accent); }
+.drag-placeholder {
+  border: 2px dashed var(--accent); border-radius: 16px;
+  background: var(--accent-soft); min-height: 90px;
+  grid-column: span 6;
+}
+.sec-drag-handle {
+  cursor: grab; color: var(--text-3); font-size: 14px; padding: 2px 6px;
+  user-select: none;
+}
+.sec-drag-handle:active { cursor: grabbing; }
+.sec-size-btns { display: flex; gap: 3px; }
+.sec-size-btn {
+  border: none; background: rgba(118, 118, 128, 0.12); color: var(--text-2);
+  font-size: 10.5px; padding: 3px 8px; border-radius: 980px; cursor: pointer;
+  font-family: inherit; font-weight: 600;
+}
+.sec-size-btn.on { background: var(--accent); color: #fff; }
 .sec-ctrl { display: flex; gap: 4px; align-items: center; }
 
 /* 统计组内 KPI 行（嵌套时不出血） */
@@ -257,11 +276,41 @@
   background: linear-gradient(135deg, #f2f2f4, #e8e8ee); font-size: 46px;
 }
 
-@media (max-width: 1100px) {
-  .plan-grid { grid-template-columns: 1fr 1fr; }
-  .plan-sec.span-3 { grid-column: span 2; }
+@media (max-width: 1280px) {
+  /* 中屏：小=1/3、大=2/3、整行 仍保持三档差异 */
+  .plan-sec[data-size="s"] { grid-column: span 4; }
+  .plan-sec[data-size="m"] { grid-column: span 8; }
+  .plan-sec[data-size="l"] { grid-column: span 12; }
 }
 @media (max-width: 860px) {
   .plan-grid { grid-template-columns: 1fr; }
-  .plan-sec.span-2, .plan-sec.span-3 { grid-column: span 1; }
+  .plan-sec[data-size] { grid-column: span 1 !important; }
+  .avatar-grid { grid-template-columns: repeat(auto-fill, minmax(48px, 1fr)); }
+  .detail-cols { grid-template-columns: 1fr; }
 }
+
+/* ---------- 表格与长文本流式适配 ---------- */
+.cat-table { width: 100%; min-width: 280px; }
+.cat-table input {
+  width: 100%; max-width: 92px; padding: 7px 8px;
+  border: 0.5px solid var(--line); border-radius: 8px;
+  font-family: inherit; font-size: 12.5px; outline: none;
+}
+.cat-table th, .cat-table td { padding: 8px 6px; }
+[data-id="data-root"], .path-text { word-break: break-all; }
+.form-grid input, .form-grid select { min-width: 0; width: 100%; }
+.filter-bar select { max-width: 100%; }
+
+/* ---------- 表单分区（v1.0.1） ---------- */
+.form-section {
+  margin-bottom: 18px; padding: 14px 16px 6px;
+  background: #fafafa; border-radius: 12px;
+}
+.form-section-title {
+  font-size: 11.5px; font-weight: 700; color: var(--accent);
+  letter-spacing: 0.05em; margin-bottom: 12px;
+}
+.form-section .form-grid { background: transparent; }
+
+/* 表格横向滚动容器（防止面板裁切） */
+.table-scroll { overflow-x: auto; max-width: 100%; }

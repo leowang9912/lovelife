@@ -92,7 +92,7 @@ window.App = (function () {
     });
     app.querySelector('#btn-new-acc').addEventListener('click', function () {
       window.UI.modal({
-        title: '新建账号', width: 420,
+        title: '新建账号', width: 560,
         bodyHTML: '<div class="form-grid">' +
           '<label class="f-full"><span class="f-label">昵称</span><input id="na-name" placeholder="如：我 / 妈妈"></label>' +
           '<div class="f-full"><span class="f-label">选择头像</span><input type="hidden" id="na-icon" value="😊">' +

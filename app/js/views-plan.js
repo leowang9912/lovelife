@@ -1,4 +1,4 @@
-/* views-plan.js — 我的统计（五组分块：核心/消费/使用/提醒/分品类） */
+/* views-plan.js — 我的统计：全页自由拖动排序 + 宽度档位（s/m/l/xl） */
 window.PlanView = (function () {
   const U = window.Utils;
   const M = window.Models;
@@ -6,51 +6,48 @@ window.PlanView = (function () {
   const UI = window.UI;
   const C = window.Charts;
 
-  /* 栏目定义：group 归属 + 布局宽度 */
+  /* 栏目定义：size = s(1/3) m(1/2) l(2/3) xl(全宽) */
   const SECTION_META = {
-    kpi: { name: 'KPI 总览', group: 'core', fixed: true, span: 3 },
-    composition: { name: '投入构成', group: 'core', fixed: true, span: 1 },
-    monthly: { name: '月度消费曲线', group: 'spend', span: 2 },
-    budget: { name: '预算进度', group: 'spend', span: 1 },
-    catRank: { name: '分类消费排行', group: 'spend', span: 1 },
-    cpw: { name: 'cost per wear 精算', group: 'usage', span: 1 },
-    useRank: { name: '使用频率排行', group: 'usage', span: 1 },
-    idle: { name: '吃灰预警', group: 'usage', span: 1 },
-    expiry: { name: '临期提醒', group: 'remind', span: 1 },
-    empty: { name: '空瓶/回购', group: 'remind', span: 1 },
-    game: { name: '游戏通关状态', group: 'category', span: 1 },
-    outfitStats: { name: '穿搭统计', group: 'category', span: 1 },
-    foodStats: { name: '美食统计', group: 'category', span: 1 }
+    kpi: { name: 'KPI 总览', fixed: true, size: 'l' },
+    composition: { name: '投入构成', fixed: true, size: 'm' },
+    monthly: { name: '月度消费曲线', size: 'l' },
+    budget: { name: '预算进度', size: 'm' },
+    catRank: { name: '分类消费排行', size: 's' },
+    cpw: { name: 'cost per wear 精算', size: 'm' },
+    useRank: { name: '使用频率排行', size: 'm' },
+    idle: { name: '吃灰预警', size: 'm' },
+    expiry: { name: '临期提醒', size: 'm' },
+    empty: { name: '空瓶/回购', size: 'm' },
+    game: { name: '游戏通关状态', size: 's' },
+    outfitStats: { name: '穿搭统计', size: 'm' },
+    foodStats: { name: '美食统计', size: 'm' }
   };
 
-  const GROUPS = [
-    { id: 'core', name: '核心' },
-    { id: 'spend', name: '消费' },
-    { id: 'usage', name: '使用' },
-    { id: 'remind', name: '提醒' },
-    { id: 'category', name: '分品类' }
-  ];
+  const SIZE_LABELS = { s: '小', m: '中', l: '大' };
 
   let editMode = false;
 
-  function defaultSections() {
-    return Object.keys(SECTION_META).map(function (id) {
-      return { id: id, enabled: SECTION_META[id].group !== 'category', fixed: !!SECTION_META[id].fixed };
-    });
-  }
-
-  /* 兼容旧配置：映射到新栏目集合 */
+  /* 只补齐缺失栏目，绝不打乱用户已有顺序（修复排序失效） */
   function normalizeSections(db) {
     const cur = (db.settings.planSections || []).filter(function (s) { return SECTION_META[s.id]; });
     const have = {};
     cur.forEach(function (s) { have[s.id] = true; });
-    // 补齐新增默认栏目
     Object.keys(SECTION_META).forEach(function (id) {
-      if (!have[id]) cur.push({ id: id, enabled: SECTION_META[id].group === 'core' || SECTION_META[id].group === 'spend', fixed: !!SECTION_META[id].fixed });
+      if (!have[id]) {
+        cur.push({
+          id: id,
+          enabled: id === 'kpi' || id === 'composition' || id === 'monthly',
+          fixed: !!SECTION_META[id].fixed,
+          size: SECTION_META[id].size
+        });
+      }
     });
-    // 按 meta 顺序排（GROUPS 顺序）
-    const order = Object.keys(SECTION_META);
-    cur.sort(function (a, b) { return order.indexOf(a.id) - order.indexOf(b.id); });
+    cur.forEach(function (s) {
+      if (!s.size || !SIZE_LABELS[s.size]) {
+        const def = SECTION_META[s.id].size || 'm';
+        s.size = def === 'xl' ? 'l' : def;   // 旧 xl 全宽 → 大
+      }
+    });
     return cur;
   }
 
@@ -67,41 +64,45 @@ window.PlanView = (function () {
       '<button class="btn btn-primary" data-act="add-device">＋ 记数码</button>' +
       '<button class="btn btn-primary" data-act="add-clothing">＋ 记衣服</button>' +
       '<button class="btn btn-ghost" data-act="outfit">今日打卡</button></div></div>' +
-      '<div class="plan-wrap" id="plan-wrap"></div>';
+      (editMode ? '<p class="muted pad-8">拖动面板标题栏可换位置；按钮可调宽度（小/中/大/全宽）、隐藏、上下移动。</p>' : '') +
+      '<div class="plan-wrap"><div class="plan-grid" id="plan-grid"></div></div>';
 
-    const wrap = root.querySelector('#plan-wrap');
-    let globalIdx = 0;
-    GROUPS.forEach(function (g) {
-      const gSecs = sections.filter(function (s) {
-        return (SECTION_META[s.id] || {}).group === g.id && (s.enabled || editMode);
-      });
-      if (!gSecs.length) return;
-      const gEl = document.createElement('div');
-      gEl.className = 'plan-group';
-      gEl.innerHTML = '<div class="plan-group-title">' + g.name + '</div><div class="plan-grid"></div>';
-      wrap.appendChild(gEl);
-      const grid = gEl.querySelector('.plan-grid');
-
-      gSecs.forEach(function (sec) {
-        const meta = SECTION_META[sec.id];
-        const idx = sections.indexOf(sec);
-        const el = document.createElement('div');
-        el.className = 'panel plan-sec span-' + (meta.span || 1) + (sec.enabled ? '' : ' sec-off');
-        el.innerHTML =
-          '<div class="panel-head"><h3>' + meta.name + '</h3>' +
-          (editMode
-            ? '<div class="sec-ctrl">' +
-            (meta.fixed ? '<span class="tag">固定</span>' :
-              '<button class="btn-icon" data-move="up" data-idx="' + idx + '">↑</button>' +
-              '<button class="btn-icon" data-move="down" data-idx="' + idx + '">↓</button>' +
-              '<button class="btn-icon" data-toggle="' + idx + '">' + (sec.enabled ? '👁' : '🚫') + '</button>') +
-            '</div>' : '') +
-          '</div><div class="panel-body" data-body="' + sec.id + '"></div>';
-        grid.appendChild(el);
-        renderSection(el.querySelector('[data-body]'), sec.id, db, sum);
-      });
+    const grid = root.querySelector('#plan-grid');
+    sections.forEach(function (sec, idx) {
+      const meta = SECTION_META[sec.id];
+      if (!sec.enabled && !editMode) return;
+      const el = document.createElement('div');
+      el.className = 'panel plan-sec' + (sec.enabled ? '' : ' sec-off');
+      el.setAttribute('data-size', sec.size || 'm');
+      el.setAttribute('data-idx', idx);
+      el.setAttribute('data-id', sec.id);
+      if (editMode && !meta.fixed) el.setAttribute('draggable', 'true');
+      el.innerHTML =
+        '<div class="panel-head">' +
+        (editMode && !meta.fixed ? '<span class="sec-drag-handle" title="拖动排序">⠿</span>' : '') +
+        '<h3>' + meta.name + '</h3>' +
+        (editMode
+          ? '<div class="sec-ctrl">' +
+          (meta.fixed ? '<span class="tag">固定</span>' :
+            '<div class="sec-size-btns">' +
+            Object.keys(SIZE_LABELS).map(function (sz) {
+              return '<button class="sec-size-btn' + ((sec.size || 'm') === sz ? ' on' : '') +
+                '" data-size-btn="' + idx + '" data-size-val="' + sz + '">' + SIZE_LABELS[sz] + '</button>';
+            }).join('') + '</div>' +
+            '<button class="btn-icon" data-move="up" data-idx="' + idx + '">↑</button>' +
+            '<button class="btn-icon" data-move="down" data-idx="' + idx + '">↓</button>' +
+            '<button class="btn-icon" data-toggle="' + idx + '">' + (sec.enabled ? '👁' : '🚫') + '</button>') +
+          '</div>' : '') +
+        '</div><div class="panel-body" data-body="' + sec.id + '"></div>';
+      grid.appendChild(el);
+      renderSection(el.querySelector('[data-body]'), sec.id, db, sum);
     });
 
+    bindControls(root, db);
+    if (editMode) bindDrag(root, db, grid);
+  }
+
+  function bindControls(root, db) {
     root.querySelector('#btn-edit-sections').addEventListener('click', function () {
       editMode = !editMode;
       render(root);
@@ -109,9 +110,8 @@ window.PlanView = (function () {
     root.querySelectorAll('[data-move]').forEach(function (b) {
       b.addEventListener('click', function () {
         const idx = Number(b.getAttribute('data-idx'));
-        const dir = b.getAttribute('data-move');
         const arr = db.settings.planSections;
-        const t = dir === 'up' ? idx - 1 : idx + 1;
+        const t = b.getAttribute('data-move') === 'up' ? idx - 1 : idx + 1;
         if (t < 0 || t >= arr.length) return;
         const tmp = arr[idx]; arr[idx] = arr[t]; arr[t] = tmp;
         S.saveSettings().then(function () { render(root); });
@@ -124,6 +124,13 @@ window.PlanView = (function () {
         S.saveSettings().then(function () { render(root); });
       });
     });
+    root.querySelectorAll('[data-size-btn]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const idx = Number(b.getAttribute('data-size-btn'));
+        db.settings.planSections[idx].size = b.getAttribute('data-size-val');
+        S.saveSettings().then(function () { render(root); });
+      });
+    });
     root.querySelectorAll('[data-act]').forEach(function (btn) {
       btn.addEventListener('click', function () {
         const act = btn.getAttribute('data-act');
@@ -131,6 +138,79 @@ window.PlanView = (function () {
         if (act === 'add-clothing') window.Views.openItemEditor(null, 'clothing');
         if (act === 'outfit') window.App.go('outfits');
       });
+    });
+  }
+
+  /* HTML5 拖拽排序：ID 定位，插入到占位符位置（避免下标漂移） */
+  function bindDrag(root, db, grid) {
+    let dragId = null;
+    let placeholder = null;
+
+    function ensurePlaceholder() {
+      if (!placeholder) {
+        placeholder = document.createElement('div');
+        placeholder.className = 'drag-placeholder';
+      }
+      return placeholder;
+    }
+
+    grid.querySelectorAll('.plan-sec[draggable]').forEach(function (el) {
+      el.addEventListener('dragstart', function (e) {
+        dragId = el.getAttribute('data-id');
+        el.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        try { e.dataTransfer.setData('text/plain', dragId); } catch (err) { /* noop */ }
+        const ph = ensurePlaceholder();
+        ph.style.minHeight = Math.max(90, el.offsetHeight) + 'px';
+        el.parentNode.insertBefore(ph, el.nextSibling);
+      });
+      el.addEventListener('dragend', function () {
+        el.classList.remove('dragging');
+        if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+        grid.querySelectorAll('.drag-over').forEach(function (x) { x.classList.remove('drag-over'); });
+      });
+    });
+
+    // 容器级 dragover：占位符跟随鼠标所在的面板
+    grid.addEventListener('dragover', function (e) {
+      if (!dragId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      const over = e.target.closest ? e.target.closest('.plan-sec') : null;
+      const ph = ensurePlaceholder();
+      if (!over || over.getAttribute('data-id') === dragId) return;
+      const rect = over.getBoundingClientRect();
+      const before = (e.clientY - rect.top) < rect.height / 2;
+      if (before) over.parentNode.insertBefore(ph, over);
+      else over.parentNode.insertBefore(ph, over.nextSibling);
+    });
+    grid.addEventListener('drop', function (e) {
+      if (!dragId) return;
+      e.preventDefault();
+      const ph = ensurePlaceholder();
+      const parent = ph.parentNode;
+      if (!parent) return;
+      // 计算占位符在 DOM 中的位置 → 映射到数组顺序
+      const domOrder = Array.prototype.slice.call(parent.children)
+        .filter(function (n) {
+          return n.classList.contains('plan-sec') || n === ph;
+        })
+        .map(function (n) {
+          return n === ph ? dragId : n.getAttribute('data-id');
+        });
+      const arr = db.settings.planSections;
+      // 按 DOM 顺序重排（只排序出现了的，未渲染的追加尾部）
+      const byId = {};
+      arr.forEach(function (sec) { byId[sec.id] = sec; });
+      const reordered = [];
+      domOrder.forEach(function (id) {
+        if (byId[id]) { reordered.push(byId[id]); delete byId[id]; }
+      });
+      Object.keys(byId).forEach(function (id) { reordered.push(byId[id]); });
+      db.settings.planSections = reordered;
+      dragId = null;
+      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+      S.saveSettings().then(function () { render(root); });
     });
   }
 
@@ -241,16 +321,12 @@ window.PlanView = (function () {
       return;
     }
     if (id === 'useRank') {
-      // 使用/穿着频率排行（含设备最近使用）
       const ranked = sum.items.slice().sort(function (a, b) {
         return (b.wearCount || b.useCount || 0) - (a.wearCount || a.useCount || 0);
       }).filter(function (i) { return (i.wearCount || i.useCount || 0) > 0; }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         const n = i.kind === 'clothing' ? i.wearCount : (i.useCount || 0);
-        return {
-          label: i.name, value: n,
-          valueText: n + (i.kind === 'clothing' ? ' 次穿着' : ' 次使用')
-        };
+        return { label: i.name, value: n, valueText: n + (i.kind === 'clothing' ? ' 次穿着' : ' 次使用') };
       })) : '<p class="empty-hint">暂无使用记录</p>';
       return;
     }
@@ -276,7 +352,6 @@ window.PlanView = (function () {
       return;
     }
     if (id === 'outfitStats') {
-      // 穿搭统计三合一：打卡趋势 + 场合分布
       const wearByMonth = {};
       db.outfits.forEach(function (o) {
         const k = U.monthKey(o.date);
@@ -322,5 +397,5 @@ window.PlanView = (function () {
       '<div class="kpi-value">' + value + '</div><div class="kpi-sub">' + U.escapeHtml(sub) + '</div></div>';
   }
 
-  return { render: render, defaultSections: defaultSections };
+  return { render: render };
 })();
