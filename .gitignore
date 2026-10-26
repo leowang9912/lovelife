@@ -1,0 +1,23 @@
+# ===== 个人数据（永不上传） =====
+data/
+backups/
+app-config.json
+*.tar.gz
+
+# ===== 构建产物与缓存 =====
+build-tmp/
+dist/
+*.tgz
+.port
+updater.cmd
+update-staging/
+
+# ===== 测试依赖 =====
+tests/node_modules/
+tests/package-lock.json
+
+# ===== 系统杂项 =====
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.log

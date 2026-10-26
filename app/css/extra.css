@@ -1,0 +1,267 @@
+/* extra.css — v3.1 组件：启动页、账号、搜索、选择器、裁切、统计分组、轮播 */
+
+/* ---------- 启动动画 ---------- */
+.splash {
+  min-height: 100vh; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 14px;
+  background: linear-gradient(160deg, #fbfbfd, #e8e8ee);
+}
+.splash-logo {
+  width: 96px; height: 96px; border-radius: 24px;
+  background: linear-gradient(135deg, #42a1ec, #0071e3);
+  color: #fff; font-size: 52px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 16px 48px rgba(0, 113, 227, .35);
+  animation: splash-in .6s cubic-bezier(.2, .8, .2, 1);
+}
+.splash-name {
+  font-size: 24px; font-weight: 700; letter-spacing: -0.03em;
+  animation: splash-in .8s cubic-bezier(.2, .8, .2, 1);
+}
+.splash-bar {
+  width: 160px; height: 3px; border-radius: 980px; background: rgba(0, 0, 0, .08); overflow: hidden;
+}
+.splash-bar i {
+  display: block; height: 100%; width: 40%; border-radius: 980px; background: #0071e3;
+  animation: splash-run 0.9s ease-in-out infinite;
+}
+@keyframes splash-in {
+  from { opacity: 0; transform: translateY(14px) scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes splash-run {
+  0% { margin-left: -40%; } 100% { margin-left: 100%; }
+}
+
+/* ---------- 账号选择（横向一排） ---------- */
+.acc-row {
+  display: flex; gap: 14px; margin: 26px 0 18px;
+  overflow-x: auto; overflow-y: hidden; padding: 8px 4px 12px;
+  scrollbar-width: thin;
+}
+.acc-card {
+  background: #fff; border-radius: 16px; padding: 14px 16px 12px;
+  text-align: center; cursor: pointer; transition: .15s; flex-shrink: 0;
+  box-shadow: inset 0 0 0 0.5px var(--line); min-width: 92px;
+}
+.acc-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
+.acc-card.on { box-shadow: 0 0 0 2px var(--accent); }
+.acc-avatar {
+  width: 52px; height: 52px; border-radius: 50%; background: var(--accent-soft);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 26px; margin: 0 auto 8px;
+}
+.acc-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.acc-add .acc-avatar { background: rgba(0, 0, 0, .05); color: var(--text-3); font-size: 24px; }
+.acc-name { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.remember { justify-content: center; margin-top: 4px; }
+
+/* 头像选择库 */
+.avatar-grid {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 6px 0 4px;
+}
+.avatar-opt {
+  width: 42px; height: 42px; border-radius: 50%; font-size: 22px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; background: #f2f2f4; border: 2px solid transparent;
+}
+.avatar-opt.on { border-color: var(--accent); background: var(--accent-soft); }
+
+/* ---------- 顶部全局搜索 ---------- */
+.top-search { position: relative; margin-bottom: 18px; z-index: 50; }
+.top-search input {
+  width: 100%; padding: 10px 16px; border-radius: 11px; border: none;
+  background: rgba(118, 118, 128, 0.12); font-size: 13.5px;
+  font-family: inherit; outline: none;
+}
+.top-search input:focus { background: #fff; box-shadow: 0 0 0 3.5px rgba(0, 113, 227, .18); }
+.search-results {
+  position: absolute; top: 100%; left: 0; right: 0; margin-top: 6px;
+  background: #fff; border-radius: 13px; box-shadow: var(--shadow-lg);
+  max-height: 380px; overflow-y: auto; display: none;
+}
+.search-results.show { display: block; }
+.sr-row {
+  display: flex; align-items: center; gap: 10px; padding: 11px 15px;
+  cursor: pointer; font-size: 13px; border-bottom: 0.5px solid var(--line-soft);
+}
+.sr-row:hover { background: #f5f5f7; }
+.sr-row:last-child { border-bottom: none; }
+
+/* ---------- 图文选择器 ---------- */
+.picker-search input {
+  width: 100%; padding: 8px 13px; border-radius: 9px;
+  border: 0.5px solid var(--line); font-family: inherit; outline: none;
+  font-size: 13px; margin-bottom: 10px;
+}
+.picker-tabs { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 12px; }
+.ptab {
+  border: none; background: rgba(118, 118, 128, 0.12); color: var(--text);
+  padding: 5px 13px; border-radius: 980px; cursor: pointer;
+  font-size: 12px; font-family: inherit; font-weight: 550;
+}
+.ptab.on { background: var(--accent); color: #fff; }
+.picker-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
+  gap: 10px; max-height: 320px; overflow-y: auto; padding: 2px;
+}
+.pick-card {
+  background: #fff; border-radius: 12px; overflow: hidden; cursor: pointer;
+  box-shadow: inset 0 0 0 0.5px var(--line-soft); transition: .14s;
+  text-align: center; position: relative;
+}
+.pick-card:hover { transform: translateY(-2px); box-shadow: var(--shadow); }
+.pick-card.on { box-shadow: 0 0 0 2px var(--accent); }
+.pick-card img, .pick-noimg {
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+}
+.pick-noimg {
+  background: #f2f2f4; font-size: 30px; opacity: .45;
+  display: flex; align-items: center; justify-content: center;
+}
+.pick-name {
+  font-size: 11px; padding: 6px 6px 8px; font-weight: 600;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pick-check {
+  position: absolute; top: 6px; right: 6px; width: 20px; height: 20px;
+  border-radius: 50%; background: var(--accent); color: #fff;
+  font-size: 12px; display: flex; align-items: center; justify-content: center;
+}
+
+/* ---------- 裁切 ---------- */
+.crop-frame {
+  width: 320px; height: 320px; margin: 8px auto 14px; position: relative;
+  border-radius: 13px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line);
+  cursor: grab; touch-action: none;
+}
+.crop-frame canvas { display: block; }
+.crop-grid {
+  position: absolute; inset: 0; pointer-events: none;
+  background:
+    linear-gradient(to right, transparent 33%, rgba(255, 255, 255, .45) 33%, rgba(255, 255, 255, .45) 33.5%, transparent 33.5%, transparent 66%, rgba(255, 255, 255, .45) 66%, rgba(255, 255, 255, .45) 66.5%, transparent 66.5%),
+    linear-gradient(to bottom, transparent 33%, rgba(255, 255, 255, .45) 33%, rgba(255, 255, 255, .45) 33.5%, transparent 33.5%, transparent 66%, rgba(255, 255, 255, .45) 66%, rgba(255, 255, 255, .45) 66.5%, transparent 66.5%);
+}
+.crop-controls input[type=range] { width: 100%; }
+.crop-actions {
+  display: flex; align-items: center; gap: 12px; margin-top: 12px; flex-wrap: wrap;
+}
+
+/* ---------- 我的统计：分组布局（修复间距/重叠） ---------- */
+.plan-wrap { display: flex; flex-direction: column; gap: 22px; }
+.plan-group { display: flex; flex-direction: column; gap: 12px; }
+.plan-group-title {
+  font-size: 12px; font-weight: 700; color: var(--text-3);
+  letter-spacing: 0.06em; padding-left: 4px;
+}
+.plan-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px;
+  align-items: start;
+}
+.plan-sec { min-width: 0; margin: 0 !important; }
+.plan-sec.span-2 { grid-column: span 2; }
+.plan-sec.span-3 { grid-column: span 3; }
+.plan-sec.sec-off { opacity: .42; }
+.sec-ctrl { display: flex; gap: 4px; align-items: center; }
+
+/* 统计组内 KPI 行（嵌套时不出血） */
+.plan-sec .kpi-row { margin: 0; }
+.kpi-mini-row {
+  display: flex; gap: 18px; flex-wrap: wrap; margin-top: 12px;
+  padding-top: 12px; border-top: 0.5px solid var(--line-soft);
+}
+.kpi-mini { font-size: 12px; color: var(--text-2); }
+.kpi-mini strong {
+  display: block; font-size: 15px; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---------- 快捷 +1 ---------- */
+.quick-add {
+  position: absolute; right: 8px; bottom: 8px; z-index: 2;
+  border: none; border-radius: 980px; padding: 5px 12px;
+  background: rgba(0, 113, 227, .92); color: #fff;
+  font-size: 12px; font-weight: 700; cursor: pointer;
+  backdrop-filter: blur(8px); font-family: inherit;
+}
+.quick-add:hover { background: var(--accent); transform: scale(1.06); }
+
+/* ---------- 日历：图片轮播 + 统一年月选择 ---------- */
+.cal-jump {
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.cal-jump select {
+  padding: 8px 12px; border: 0.5px solid var(--line); border-radius: 9px;
+  font-size: 13.5px; outline: none; font-family: inherit;
+  background: #fff; color: var(--text);
+}
+.cal-jump select:focus {
+  border-color: var(--accent); box-shadow: 0 0 0 3.5px rgba(0, 113, 227, .18);
+}
+
+.cal-cover {
+  position: relative; border-radius: 9px; overflow: hidden;
+  aspect-ratio: 1 / 1; margin-top: 4px;
+}
+.cal-cover img {
+  width: 100%; height: 100%; object-fit: cover;
+  transition: opacity .18s;
+}
+.cal-nav {
+  position: absolute; top: 50%; transform: translateY(-50%);
+  width: 22px; height: 22px; border-radius: 50%; border: none;
+  background: rgba(0, 0, 0, .45); color: #fff; font-size: 12px;
+  cursor: pointer; display: flex; align-items: center; justify-content: center;
+  opacity: 0; transition: .15s; padding: 0; z-index: 2;
+}
+.cal-cover:hover .cal-nav { opacity: 1; }
+.cal-nav.prev { left: 4px; }
+.cal-nav.next { right: 4px; }
+.cal-more {
+  position: absolute; right: 5px; bottom: 5px;
+  background: rgba(0, 0, 0, .6); color: #fff;
+  font-size: 10px; padding: 2px 7px; border-radius: 980px;
+}
+.cal-cell.cal-has { background: #fff; }
+.cal-cell .cal-day { position: relative; z-index: 1; }
+
+/* ---------- 使用流水 ---------- */
+.log-row {
+  display: flex; align-items: center; gap: 10px; padding: 8px 2px;
+  border-bottom: 0.5px solid var(--line-soft); font-size: 12.5px;
+}
+.log-delta {
+  font-weight: 700; font-variant-numeric: tabular-nums;
+  min-width: 38px; text-align: center;
+  border-radius: 6px; padding: 2px 8px;
+}
+.log-delta.up { background: rgba(52, 199, 89, .14); color: #1d7a3e; }
+.log-delta.down { background: rgba(255, 59, 48, .12); color: #c0392b; }
+
+/* 详情图放大 */
+.detail-imgs img { height: 170px; }
+
+/* 状态徽章补充 */
+.badge-empty { background: rgba(52, 199, 89, .92); color: #fff; }
+
+/* 更新日志 */
+.changelog-list {
+  margin: 6px 0 12px 18px; padding: 0;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.changelog-list li { font-size: 13px; color: var(--text); }
+
+/* 无图占位（品类图标） */
+.item-noimg {
+  width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(135deg, #f2f2f4, #e8e8ee); font-size: 46px;
+}
+
+@media (max-width: 1100px) {
+  .plan-grid { grid-template-columns: 1fr 1fr; }
+  .plan-sec.span-3 { grid-column: span 2; }
+}
+@media (max-width: 860px) {
+  .plan-grid { grid-template-columns: 1fr; }
+  .plan-sec.span-2, .plan-sec.span-3 { grid-column: span 1; }
+}
