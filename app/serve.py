@@ -621,21 +621,54 @@ def fetch_url(url, timeout=20):
         return resp.read()
 
 
+# 国内可用性较好的镜像前缀（会与 version.json 中的源合并去重）
+GH_RAW_PREFIXES = [
+    "https://ghfast.top/https://raw.githubusercontent.com/",
+    "https://cdn.jsdmirror.com/gh/",
+    "https://gh-proxy.com/https://raw.githubusercontent.com/",
+    "https://mirror.ghproxy.com/https://raw.githubusercontent.com/",
+    "https://raw.githubusercontent.com/",
+]
+
+
+def build_manifest_urls(local):
+    """合并 version.json 的 updateManifest + 根据 repo 生成的镜像链"""
+    urls = list(local.get("updateManifest") or [])
+    repo = local.get("repo") or ""
+    if repo and "/" in repo:
+        owner, name = repo.split("/", 1)
+        raw_path = "%s/%s/main/version.json" % (owner, name)
+        for p in GH_RAW_PREFIXES:
+            if p.endswith("/gh/"):
+                urls.append(p + owner + "/" + name + "@main/version.json")
+            else:
+                urls.append(p + raw_path)
+    # 去重 + 可靠源优先（jsdmirror/ghfast 实测国内可达率高）
+    seen, out = set(), []
+    def score(u):
+        return 0 if ("jsdmirror" in u or "ghfast" in u or "jsdelivr" in u) else 1
+    for u in sorted(urls, key=score):
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
 def check_update():
     local = read_version_manifest()
     local_ver = semver_tuple(local.get("version", "0"))
     remote = None
     used = ""
     errors = []
-    for base in (local.get("updateManifest") or []):
+    for base in build_manifest_urls(local):
         try:
-            data = json.loads(fetch_url(base, timeout=12).decode("utf-8"))
+            data = json.loads(fetch_url(base, timeout=8).decode("utf-8"))
             if isinstance(data, dict) and data.get("version"):
                 remote = data
                 used = base
                 break
         except Exception as e:
-            errors.append("%s: %s" % (base[:60], e))
+            errors.append("%s: %s" % (base[:50], e))
     if not remote:
         return {"ok": False, "error": "无法连接更新源", "details": errors[:3]}
     remote_ver = semver_tuple(remote.get("version", "0"))
@@ -657,9 +690,9 @@ def apply_update(url):
         shutil.rmtree(staging, ignore_errors=True)
     os.makedirs(staging, exist_ok=True)
 
-    # 镜像链：原始地址 + 常见加速前缀
+    # 镜像链：可靠加速源优先（国内下载 GitHub Release 依赖此加速）
     candidates = [url]
-    for prefix in ("https://mirror.ghproxy.com/", "https://ghfast.top/", "https://gh-proxy.com/"):
+    for prefix in ("https://ghfast.top/", "https://gh-proxy.com/", "https://mirror.ghproxy.com/"):
         if url.startswith("https://github.com/") or url.startswith("https://objects.githubusercontent.com/"):
             candidates.append(prefix + url)
 
@@ -667,7 +700,7 @@ def apply_update(url):
     used = ""
     for u in candidates:
         try:
-            data = fetch_url(u, timeout=300)
+            data = fetch_url(u, timeout=900)  # 大包慢网环境放宽到 15 分钟
             used = u
             break
         except Exception:
