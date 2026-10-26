@@ -336,6 +336,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._send_backup(self._acc(parsed))
         if path == "/api/version":
             return self._json(read_version_manifest())
+        if path == "/api/update/check":
+            return self._json(check_update())
         if path.startswith("/api/images/"):
             rest = path[len("/api/images/"):]
             return self._send_image(rest)
