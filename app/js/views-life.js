@@ -52,7 +52,7 @@ window.LifeView = (function () {
           }).join('');
       }).join('') + '</select>' +
       '<select id="life-status"><option value="">全部状态</option>' +
-      [['in_use', '在用'], ['idle', '闲置'], ['empty', '已用完'], ['dropped', '丢弃']].map(function (s) {
+      [['in_use', '在用'], ['idle', '闲置'], ['to_sell', '待出闲置'], ['broken', '损坏报废']].map(function (s) {
         return '<option value="' + s[0] + '"' + (state.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +

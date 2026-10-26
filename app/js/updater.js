@@ -6,7 +6,7 @@ window.Updater = (function () {
 
   async function check(silent) {
     try {
-      const r = await fetch('/api/update/check');
+      const r = await fetch('/api/update/check', { method: 'POST' });
       const out = await r.json();
       lastCheck = out;
       if (!out.ok) {

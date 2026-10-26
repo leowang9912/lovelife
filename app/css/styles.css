@@ -72,7 +72,10 @@ body {
 }
 
 /* ---------- 主区 ---------- */
-.main { flex: 1; padding: 28px 32px 64px; min-width: 0; }
+.main {
+  flex: 1; padding: 28px 32px 64px; min-width: 0;
+  max-width: 1720px; margin: 0 auto; width: 100%;
+}
 .page-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 22px; flex-wrap: wrap; gap: 12px;
@@ -125,17 +128,22 @@ body {
 .kpi-sub { font-size: 11.5px; color: var(--text-3); margin-top: 5px; }
 
 /* ---------- 面板 ---------- */
-.dash-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; }
+.dash-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 15px; align-items: start;
+}
+.dash-grid > .panel { min-width: 0; }
 .panel {
   background: var(--panel); border-radius: var(--radius-lg); box-shadow: var(--shadow);
-  overflow: hidden;
+  overflow: visible;
 }
 .panel.span-2 { grid-column: span 2; }
 .panel-head {
   padding: 16px 20px 8px; display: flex; justify-content: space-between; align-items: center;
+  gap: 10px; flex-wrap: wrap;
 }
 .panel-head h3 { font-size: 14px; font-weight: 650; letter-spacing: -0.015em; }
-.panel-body { padding: 6px 20px 18px; }
+.panel-body { padding: 6px 20px 18px; overflow-x: auto; min-width: 0; }
 .panel-body.center { text-align: center; }
 
 /* ---------- 图片墙 ---------- */
@@ -293,9 +301,13 @@ body {
 .modal-mask.show { opacity: 1; }
 .modal {
   background: #fff; border-radius: 14px; width: 100%; max-width: 560px;
+  max-height: 88vh; display: flex; flex-direction: column;
   box-shadow: 0 24px 64px rgba(0, 0, 0, .22); transform: translateY(10px) scale(.98);
   transition: transform .22s cubic-bezier(.2, .8, .2, 1);
 }
+.modal-body { overflow-y: auto; min-height: 0; }
+.modal-foot { flex-shrink: 0; }
+.modal-head { flex-shrink: 0; }
 .modal-mask.show .modal { transform: translateY(0) scale(1); }
 .modal-head {
   display: flex; justify-content: space-between; align-items: center;
@@ -307,7 +319,7 @@ body {
   line-height: 1; padding: 0 5px; border-radius: 50%;
 }
 .modal-close:hover { color: var(--text); background: rgba(0, 0, 0, .05); }
-.modal-body { padding: 6px 22px 18px; }
+.modal-body { padding: 6px 22px 18px; overflow-y: auto; min-height: 0; }
 .modal-foot {
   padding: 13px 22px 20px; display: flex; justify-content: flex-end; gap: 10px;
 }

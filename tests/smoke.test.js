@@ -26,13 +26,17 @@ function makeMemAPI() {
           makeupLooks: []
         },
         categories: {
-          device: [{ id: 'handheld', name: '掌机', lifeYears: 3, residualRate: 0.1, costModel: 'daily_dep' }],
-          game: [{ id: 'physical', name: '实体游戏', costModel: 'per_title' }],
-          clothing: [{ id: 'top', name: '上衣' }],
-          life: [
-            { id: 'skin', name: '护肤', icon: '🧴', children: [{ id: 'skin_cream', name: '面霜' }] },
-            { id: 'makeup', name: '彩妆', icon: '💄', children: [{ id: 'mk_lip', name: '唇妆' }] }
+          digital: [
+            { id: 'host', name: '主机类', lifeYears: 5, residualRate: 0.1, costModel: 'daily_dep', children: [{ id: 'host_phone', name: '手机' }, { id: 'host_handheld', name: '掌机' }] },
+            { id: 'game', name: '游戏', costModel: 'per_title', children: [{ id: 'gm_cartridge', name: '卡带' }, { id: 'gm_digital', name: '数字版' }] }
           ],
+          clothing: [{ id: 'top', name: '上装', children: [{ id: 'top_tee', name: 'T恤' }] }],
+          life: [
+            { id: 'skin', name: '护肤', icon: '🧴', children: [{ id: 'sk_cream', name: '面霜' }] },
+            { id: 'makeup', name: '彩妆', icon: '💄', children: [{ id: 'mk_lip', name: '口红' }] }
+          ],
+          tagPresets: ['送人', '贵重'], condition: ['全新', '9成新'], remainLevel: ['满', '½', '空'],
+          sizeSystem: ['中国码', '均码'], skinType: ['干皮', '通用'], usageFreq: ['偶尔用'], washMethod: ['机洗'],
           foodCuisine: ['中餐', '日料', '西餐', '火锅'], foodType: ['主食', '肉菜', '甜品'], meal: ['早餐', '午餐', '晚餐'],
           foodTag: ['自制', '外卖'], occasion: ['通勤'], season: ['春']
         }
@@ -150,11 +154,16 @@ async function main() {
   const S = window.Storage;
   const M = window.Models;
   await S.loadAll();
-  await S.saveItem({ id: 'cloth1', kind: 'clothing', categoryId: 'top', name: '卫衣', purchaseDate: '2025-01-01', purchasePrice: 299, status: 'in_use', manualWearCount: 2 });
-  await S.saveItem({ id: 'life1', kind: 'life', categoryId: 'skin', subCategoryId: 'skin_cream', name: '面霜', purchaseDate: '2025-02-01', purchasePrice: 500, openedDate: '2025-03-01', paoMonths: 6, useCount: 10, status: 'in_use' });
+  await S.saveItem({ id: 'cloth1', kind: 'clothing', categoryId: 'top', subCategoryId: 'top_tee', name: '卫衣', purchaseDate: '2025-01-01', purchasePrice: 299, status: 'in_use', manualWearCount: 2, tags: ['贵重'], storageLocation: '衣柜' });
+  await S.saveItem({ id: 'life1', kind: 'life', categoryId: 'skin', subCategoryId: 'sk_cream', name: '面霜', purchaseDate: '2025-02-01', purchasePrice: 500, openedDate: '2025-03-01', paoMonths: 6, useCount: 10, status: 'in_use' });
   await S.saveOutfit({ id: 'o1', date: '2025-03-10', itemIds: ['cloth1'], cosmeticIds: ['life1'], images: [], occasion: '通勤' });
   await S.saveFood({ id: 'f1', date: '2025-03-10', meal: '午餐', foodCuisine: '中餐', foodType: '主食', name: '牛肉面', price: 28, rating: 5, tags: ['外卖'], images: [] });
   console.log('✓ 录入 衣服+妆品+打卡+美食');
+  const c1 = S.getDB().items.find(i => i.id === 'cloth1');
+  if (c1.subCategoryId !== 'top_tee' || c1.storageLocation !== '衣柜' || c1.tags[0] !== '贵重') {
+    throw new Error('新字段保存失败');
+  }
+  console.log('✓ 新分类/存放位置/标签字段');
 
   // 3) 使用次数自动叠加（打卡 +1）
   let db = S.getDB();
@@ -202,7 +211,10 @@ async function main() {
   if (plan.indexOf('KPI 总览') < 0) throw new Error('统计缺 KPI');
   if (plan.indexOf('预算进度') < 0) throw new Error('统计缺预算');
   if (plan.indexOf('我的统计') < 0) throw new Error('未改名我的统计');
-  console.log('✓ 我的统计含 KPI/预算等栏目（已改名）');
+  if (plan.indexOf('data-size=') < 0) throw new Error('面板档位缺失');
+  if (plan.indexOf('KPI 总览') >= 0 && plan.indexOf('data-size="l"') < 0) throw new Error('KPI 大档位缺失');
+  if (plan.indexOf('data-size="xl"') >= 0) throw new Error('仍存在 xl 档位');
+  console.log('✓ 我的统计含 KPI/预算 + 三档位(s/m/l)');
 
   // 8) 全局搜索
   const gs = window.document.getElementById('global-search');
@@ -233,7 +245,7 @@ async function main() {
   await S.selectAccount(acc2.id);
   const db2 = S.getDB();
   if (db2.items.length !== 0) throw new Error('新账号数据应为空');
-  await S.saveItem({ id: 'x1', kind: 'life', categoryId: 'makeup', name: '口红', purchaseDate: '2025-01-01', purchasePrice: 200, status: 'in_use' });
+  await S.saveItem({ id: 'x1', kind: 'life', categoryId: 'makeup', subCategoryId: 'mk_lip', name: '口红', purchaseDate: '2025-01-01', purchasePrice: 200, status: 'in_use', remainLevel: '满' });
   if (S.getDB().items.length !== 1) throw new Error('新账号保存失败');
   console.log('✓ 账号数据隔离（新账号独立空数据）');
 

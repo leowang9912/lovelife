@@ -60,8 +60,9 @@ window.SettingsView = (function () {
       '</div></div>' +
 
       '<div class="panel span-2"><div class="panel-head"><h3>📊 成本模型（可修改）</h3></div><div class="panel-body">' +
-      catTable('device', '数码设备', cats.device) +
-      catTable('game', '游戏', cats.game) +
+      catTable('digital', '数码（含游戏）', cats.digital) +
+      catTable('clothing', '服饰（寿命参考）', cats.clothing) +
+      catTable('life', '美妆（寿命参考）', cats.life) +
       '<button class="btn btn-primary btn-sm" id="btn-save-cats">保存成本模型</button>' +
       '</div></div>' +
 
@@ -122,7 +123,7 @@ window.SettingsView = (function () {
         const id = b.getAttribute('data-rename');
         const a = accounts.find(function (x) { return x.id === id; });
         UI.modal({
-          title: '编辑账号', width: 420,
+          title: '编辑账号', width: 560,
           bodyHTML: '<div class="form-grid">' +
             '<label class="f-full"><span class="f-label">昵称</span><input id="acc-name" value="' + U.escapeHtml(a.name) + '"></label>' +
             '<div class="f-full"><span class="f-label">选择头像</span><input type="hidden" id="acc-icon" value="' + U.escapeHtml(a.icon || '😊') + '">' +
@@ -151,7 +152,7 @@ window.SettingsView = (function () {
     });
     root.querySelector('#btn-add-acc').addEventListener('click', function () {
       UI.modal({
-        title: '新建账号', width: 420,
+        title: '新建账号', width: 560,
         bodyHTML: '<div class="form-grid">' +
           '<label class="f-full"><span class="f-label">昵称</span><input id="acc-name" placeholder="如：妈妈 / 工作号"></label>' +
           '<div class="f-full"><span class="f-label">选择头像</span><input type="hidden" id="acc-icon" value="😊">' +
@@ -225,7 +226,8 @@ window.SettingsView = (function () {
         tbl.querySelectorAll('tr[data-cid]').forEach(function (tr) {
           const cat = (db.categories[kind] || []).find(function (c) { return c.id === tr.getAttribute('data-cid'); });
           if (!cat) return;
-          cat.lifeYears = Number(tr.querySelector('[data-f=life]').value) || cat.lifeYears;
+          const ly = Number(tr.querySelector('[data-f=life]').value);
+          if (ly > 0) cat.lifeYears = ly;
           const rv = Number(tr.querySelector('[data-f=res]').value);
           if (!isNaN(rv)) cat.residualRate = rv;
         });
@@ -242,13 +244,19 @@ window.SettingsView = (function () {
   }
 
   function catTable(kind, title, list) {
+    const rows = (list || []).map(function (c) {
+      return '<tr data-cid="' + c.id + '"><td>' + (c.icon || '') + ' ' + U.escapeHtml(c.name) +
+        (c.children && c.children.length ? '<span class="muted small">（' + c.children.length + ' 个子类）</span>' : '') +
+        '</td>' +
+        '<td><input type="number" step="0.5" data-f="life" value="' + (c.lifeYears || '') + '" placeholder="—"></td>' +
+        '<td><input type="number" step="0.01" data-f="res" value="' +
+        (c.residualRate !== undefined && c.residualRate !== null ? c.residualRate : '') + '" placeholder="—"></td></tr>';
+    }).join('');
     return '<h4 class="detail-sub">' + title + '</h4>' +
-      '<table class="cat-table" data-cat-kind="' + kind + '"><thead><tr><th>分类</th><th>寿命(年)</th><th>残值率</th></tr></thead><tbody>' +
-      (list || []).map(function (c) {
-        return '<tr data-cid="' + c.id + '"><td>' + (c.icon || '') + ' ' + U.escapeHtml(c.name) + '</td>' +
-          '<td><input type="number" step="0.5" data-f="life" value="' + (c.lifeYears || '') + '" style="width:80px"></td>' +
-          '<td><input type="number" step="0.01" data-f="res" value="' + (c.residualRate !== undefined ? c.residualRate : '') + '" style="width:80px"></td></tr>';
-      }).join('') + '</tbody></table>';
+      '<div class="table-scroll"><table class="cat-table" data-cat-kind="' + kind + '">' +
+      '<thead><tr><th>分类</th><th>寿命(年)</th><th>残值率</th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="3" class="muted">暂无分类</td></tr>') +
+      '</tbody></table></div>';
   }
 
   return { render: render };

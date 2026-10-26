@@ -3,10 +3,11 @@ window.Models = (function () {
   const U = window.Utils;
 
   function defaultCategories() {
-    // 与服务端 DEFAULT_CATEGORIES 一致（服务端持久化优先，此处兜底）
     return window.__DEFAULT_CATEGORIES__ || {
-      device: [], game: [], clothing: [], life: [],
-      foodType: [], meal: [], foodTag: [], occasion: [], season: []
+      digital: [], clothing: [], life: [],
+      foodCuisine: [], foodType: [], meal: [], foodTag: [],
+      occasion: [], season: [], tagPresets: [], condition: [],
+      remainLevel: [], sizeSystem: [], skinType: [], usageFreq: [], washMethod: []
     };
   }
 
@@ -43,16 +44,25 @@ window.Models = (function () {
     };
   }
 
-  /* ---------- 分类 ---------- */
+  /* ---------- 分类（v1.0.1：数码=device/game 共用 digital 树） ---------- */
+  function catList(db, kind) {
+    if (kind === 'device' || kind === 'game' || kind === 'digital') return db.categories.digital || [];
+    return db.categories[kind] || [];
+  }
+
   function findCategory(db, item) {
-    const list = (db.categories[item.kind] || []);
+    const list = catList(db, item.kind);
     return list.find(function (c) { return c.id === item.categoryId; }) || null;
   }
 
-  function lifeL2(db, item) {
-    const l1 = (db.categories.life || []).find(function (c) { return c.id === item.categoryId; });
+  function findSubCategory(db, item) {
+    const l1 = findCategory(db, item);
     if (!l1 || !l1.children) return null;
     return l1.children.find(function (c) { return c.id === item.subCategoryId; }) || null;
+  }
+
+  function isGameItem(item) {
+    return item.categoryId === 'game' || String(item.subCategoryId || '').indexOf('gm_') === 0;
   }
 
   /* ---------- 成本 ---------- */
@@ -364,7 +374,8 @@ window.Models = (function () {
 
   return {
     defaultCategories: defaultCategories, defaultSettings: defaultSettings, emptyDB: emptyDB,
-    findCategory: findCategory, lifeL2: lifeL2,
+    findCategory: findCategory, findSubCategory: findSubCategory,
+    catList: catList, isGameItem: isGameItem,
     ownInvested: ownInvested, totalInvested: totalInvested, calcItemCost: calcItemCost,
     autoWearMap: autoWearMap, totalWearCount: totalWearCount, itemsWithComputed: itemsWithComputed,
     logSum: logSum, appendUsageLog: appendUsageLog, removeUsageLogEntry: removeUsageLogEntry,
