@@ -2,6 +2,7 @@
   "version": "1.0.0",
   "minSchema": 3,
   "publishedAt": "2026-10-26",
+  "repo": "leowang9912/lovelife",
   "changelog": [
     "首个公开版本：我的统计 / 我的数码 / 我的衣橱 / 我的生活 / 穿搭日历 / 美食日历",
     "多账号隔离、启动页选择、预设头像库",
