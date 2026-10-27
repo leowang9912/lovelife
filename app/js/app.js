@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.0.4";
+  const FRONTEND_VERSION = "1.0.5";
 
   let current = 'plan';
   let booted = false;
@@ -163,7 +163,9 @@ window.App = (function () {
   }
 
   /* ---------- 全局搜索 ---------- */
+  let docClickBound = false;
   function bindSearch() {
+    // 输入框随外壳重建，每次都要绑；document 级监听只绑一次防泄漏
     const input = document.getElementById('global-search');
     const box = document.getElementById('search-results');
     if (!input) return;
@@ -211,9 +213,15 @@ window.App = (function () {
     input.addEventListener('focus', function () {
       if (input.value.trim()) doSearch();
     });
-    document.addEventListener('click', function (e) {
-      if (!e.target.closest('.top-search')) box.classList.remove('show');
-    });
+    if (!docClickBound) {
+      docClickBound = true;
+      document.addEventListener('click', function (e) {
+        if (!e.target.closest('.top-search')) {
+          const rb = document.getElementById('search-results'); // 实时查找，避免闭包旧元素
+          if (rb) rb.classList.remove('show');
+        }
+      });
+    }
   }
 
   function goPage(id) {

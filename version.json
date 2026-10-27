@@ -1,14 +1,14 @@
 {
-  "version": "1.0.4",
+  "version": "1.0.5",
   "minSchema": 3,
   "publishedAt": "2026-10-27",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "全站命名统一：列表页 ＋记数码/记衣服/记美妆，弹窗与按钮同名，保存反馈一致",
-    "我的统计数码块扩容：价格排行、单日使用成本排行、已购买时长排行、购机曲线、分类环图",
-    "日历交互重做：行高统一；点开已有记录=直接编辑；点图开对应条目；日期旁＋新增",
-    "新增穿搭组合：常穿衣服存成组合一键套用；妆容/穿搭组合支持范例图与编辑",
-    "条目详情页统一：数值字重、图片尺寸、列宽比例、按钮排布三类一致"
+    "启动脚本全面加固：未解压/杀软拦截/端口占用/启动失败均给出明确提示，不再误导装 Python",
+    "新增首次使用说明.txt；exe 增加版本元数据降低杀软误报；慢机器先等服务就绪再开浏览器",
+    "安全修复：账号删除与备份恢复接口补齐路径穿越拦截",
+    "数据修复：成本模型真正持久化；旧数据迁移不覆盖新数据；跨电脑拷贝路径失效自动回退",
+    "计数修复：穿搭编辑移除妆品正确回退；脏日期/坏 JSON 不再打死页面"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -16,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.4/lovelife-v1.0.4-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.5/lovelife-v1.0.5-win64.zip"
   }
 }

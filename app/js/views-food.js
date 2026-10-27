@@ -36,7 +36,7 @@ window.FoodView = (function () {
         '<div class="cal-day">' + d + '</div>' +
         (recs.length ? '<button class="cal-add-mini" title="再记一条">＋</button>' : '') +
         (imgs.length
-          ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs) + '\'>' +
+          ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs).replace(/'/g, '&#39;') + '\'>' +
           '<img data-path="' + U.escapeHtml(imgs[0].p) + '"/>' +
           (imgs.length > 1
             ? '<button class="cal-nav prev" data-nav-dir="-1">‹</button>' +
@@ -102,9 +102,9 @@ window.FoodView = (function () {
           UI.pickRecord('选择要查看的记录 · ' + U.cnDate(dateStr), recs.map(function (r) {
             return {
               id: r.id, thumbPath: (r.images && r.images[0]) || '', icon: '🍱',
-              text: U.escapeHtml(r.meal || '') + ' · ' + U.escapeHtml(r.foodCuisine || '') +
-                (r.foodType ? ' / ' + U.escapeHtml(r.foodType) : '') + ' · ' + U.escapeHtml(r.name || ''),
-              sub: U.formatMoney(r.price) + (r.location ? ' · ' + U.escapeHtml(r.location) : '')
+              text: (r.meal || '') + ' · ' + (r.foodCuisine || '') +
+                (r.foodType ? ' / ' + r.foodType : '') + ' · ' + (r.name || ''),
+              sub: U.formatMoney(r.price) + (r.location ? ' · ' + r.location : '')
             };
           }), function (rid) {
             if (rid === null) openEditor(dateStr, null);

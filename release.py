@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
 VERSION_FILE = os.path.join(ROOT, "version.json")
 
-INCLUDE = ["app", "lovelife.bat", "lovelife-server.exe", "README.md", "LICENSE", "CHANGELOG.md", "version.json"]
+INCLUDE = ["app", "lovelife.bat", "lovelife-server.exe", "README.md", "LICENSE", "CHANGELOG.md", "version.json", "首次使用说明.txt"]
 EXCLUDE_DIRS = {"__pycache__", ".browser-profile", "update-staging"}
 
 
@@ -73,6 +73,21 @@ def main():
                 with open(p, "w", encoding="utf-8", newline="") as f:
                     f.write(src2)
                 print("%s -> %s" % (rel, new_ver))
+        # 同步 exe 版本资源元数据（filevers/prodvers/字符串版本）
+        p = os.path.join(ROOT, "exe-version-info.txt")
+        if os.path.isfile(p):
+            with open(p, encoding="utf-8") as f:
+                src = f.read()
+            quad = ".".join(new_ver.split(".") + ["0"])
+            comma = ", ".join(new_ver.split(".") + ["0"])
+            src2 = re.sub(r"filevers=\(\d+, \d+, \d+, \d+\)", "filevers=(%s)" % comma, src)
+            src2 = re.sub(r"prodvers=\(\d+, \d+, \d+, \d+\)", "prodvers=(%s)" % comma, src2)
+            src2 = re.sub(r"StringStruct\('FileVersion', '[^']*'\)", "StringStruct('FileVersion', '%s')" % quad, src2)
+            src2 = re.sub(r"StringStruct\('ProductVersion', '[^']*'\)", "StringStruct('ProductVersion', '%s')" % quad, src2)
+            if src2 != src:
+                with open(p, "w", encoding="utf-8", newline="") as f:
+                    f.write(src2)
+                print("exe-version-info.txt -> %s" % quad)
 
     ver = manifest["version"]
     os.makedirs(DIST, exist_ok=True)

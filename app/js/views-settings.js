@@ -229,6 +229,9 @@ window.SettingsView = (function () {
       UI.toast('预算已保存', 'success');
     });
     root.querySelector('#btn-save-cats').addEventListener('click', async function () {
+      // 改动存 settings.costModelOverrides（服务端 load_db 会合并回分类树），
+      // 同步改内存里的分类树供本次会话即时生效
+      db.settings.costModelOverrides = db.settings.costModelOverrides || {};
       root.querySelectorAll('[data-cat-kind]').forEach(function (tbl) {
         const kind = tbl.getAttribute('data-cat-kind');
         tbl.querySelectorAll('tr[data-cid]').forEach(function (tr) {
@@ -238,6 +241,9 @@ window.SettingsView = (function () {
           if (ly > 0) cat.lifeYears = ly;
           const rv = Number(tr.querySelector('[data-f=res]').value);
           if (!isNaN(rv)) cat.residualRate = rv;
+          db.settings.costModelOverrides[cat.id] = {
+            lifeYears: cat.lifeYears, residualRate: cat.residualRate
+          };
         });
       });
       await S.saveSettings();

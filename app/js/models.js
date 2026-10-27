@@ -132,11 +132,11 @@ window.Models = (function () {
     return (item.usageLog || []).reduce(function (a, b) { return a + (Number(b.delta) || 0); }, 0);
   }
 
-  function appendUsageLog(item, delta, source, note) {
+  function appendUsageLog(item, delta, source, note, refId) {
     if (!item.usageLog) item.usageLog = [];
     item.usageLog.push({
       id: U.uid(), date: U.todayStr(), delta: delta,
-      source: source || 'manual', note: note || '',
+      source: source || 'manual', note: note || '', refId: refId || '',
       at: new Date().toISOString()
     });
     // 同步总数：衣服计入手动部分，其他计入 useCount
@@ -207,7 +207,7 @@ window.Models = (function () {
     return {
       openedDays: opened ? U.daysBetween(opened, now) : null,
       paoExpiry: paoExpiry, paoDaysLeft: daysLeft, paoState: state,
-      isEmptied: item.status === 'empty',
+      isEmptied: item.status === 'empty' || item.remainLevel === '空',
       emptyDate: item.emptyDate || '',
       repurchase: !!item.repurchase
     };
@@ -237,7 +237,7 @@ window.Models = (function () {
 
   function emptyList(db) {
     return db.items.filter(function (i) {
-      return i.kind === 'life' && (i.status === 'empty' || i.repurchase);
+      return i.kind === 'life' && (i.status === 'empty' || i.remainLevel === '空' || i.repurchase);
     });
   }
 
@@ -289,12 +289,16 @@ window.Models = (function () {
     const monthSpend = sum(monthNew, function (i) { return Number(i.purchasePrice) || 0; });
 
     const idleDays = function (i) {
-      if (i.lastUsedDate) return U.daysBetween(U.parseDate(i.lastUsedDate), now);
+      const d0 = function (s) {
+        const d = U.daysBetween(U.parseDate(s), now);
+        return d == null ? 0 : d;
+      };
+      if (i.lastUsedDate) return d0(i.lastUsedDate);
       if (i.kind === 'clothing') {
         const last = lastWearDate(db, i.id);
-        return last ? U.daysBetween(U.parseDate(last), now) : U.daysBetween(U.parseDate(i.purchaseDate), now);
+        return last ? d0(last) : d0(i.purchaseDate);
       }
-      return U.daysBetween(U.parseDate(i.purchaseDate), now);
+      return d0(i.purchaseDate);
     };
     const idleList = active.map(function (i) { return { item: i, idle: idleDays(i) }; })
       .sort(function (a, b) { return b.idle - a.idle; });
