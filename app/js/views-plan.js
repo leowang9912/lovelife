@@ -21,7 +21,12 @@ window.PlanView = (function () {
     catRank: { name: '分类消费排行', block: 'overall', size: 'm' },
     budget: { name: '预算进度', block: 'overall', size: 'l' },
     game: { name: '游戏通关状态', block: 'digital', size: 's' },
+    dPrice: { name: '数码价格排行', block: 'digital', size: 'm' },
     dUseRank: { name: '数码使用排行', block: 'digital', size: 'm' },
+    dCostRank: { name: '单日使用成本排行', block: 'digital', size: 'm' },
+    dHoldRank: { name: '已购买时长排行', block: 'digital', size: 'm' },
+    dBuyTrend: { name: '购机月度曲线', block: 'digital', size: 'm' },
+    dCatPie: { name: '数码分类构成', block: 'digital', size: 'm' },
     dWarranty: { name: '保修临期', block: 'digital', size: 'm' },
     resale: { name: '回血潜力', block: 'digital', size: 'm' },
     dIdle: { name: '数码吃灰排行', block: 'digital', size: 'm' },
@@ -59,6 +64,7 @@ window.PlanView = (function () {
 
   /* 新增栏目默认开启（老用户自动补到对应板块末尾） */
   const DEFAULT_ON = ['monthly', 'budget', 'cpw', 'game', 'foodStats',
+    'dPrice', 'dCostRank', 'dHoldRank', 'dBuyTrend', 'dCatPie',
     'cPrice', 'cWearRank', 'cOutfitRank', 'cNoWear', 'cBuyTrend', 'cStreak', 'cCatPie',
     'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie'];
 
@@ -389,6 +395,65 @@ window.PlanView = (function () {
         { label: '通关', value: gs.finished, color: '#34c759' },
         { label: '弃坑', value: gs.dropped, color: '#aeaeb2' }
       ], { centerText: Math.round(gs.finished / total * 100) + '%', centerSub: '通关率' });
+      return;
+    }
+    if (id === 'dPrice') {
+      const top = sum.items.filter(function (i) { return isDigital(i) && i.status !== 'sold' && i.status !== 'gifted'; })
+        .sort(function (a, b) { return (Number(b.purchasePrice) || 0) - (Number(a.purchasePrice) || 0); }).slice(0, 8);
+      body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
+        return { label: i.name, value: Number(i.purchasePrice) || 0, valueText: U.formatMoney(i.purchasePrice) };
+      })) : '<p class="empty-hint">暂无数码设备</p>';
+      return;
+    }
+    if (id === 'dCostRank') {
+      // 单日使用成本：总投入 / 持有天数（不依赖使用次数，所有在手设备可比）
+      const ranked = sum.items.filter(function (i) { return isDigital(i) && i.status !== 'sold' && i.status !== 'gifted'; })
+        .filter(function (i) { return i.cost && i.cost.dailyCost > 0; })
+        .sort(function (a, b) { return b.cost.dailyCost - a.cost.dailyCost; }).slice(0, 8);
+      body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
+        return { label: i.name, value: i.cost.dailyCost, valueText: U.formatCost(i.cost.dailyCost) + '/天' };
+      })) : '<p class="empty-hint">暂无在手设备</p>';
+      return;
+    }
+    if (id === 'dHoldRank') {
+      const ranked = sum.items.filter(function (i) { return isDigital(i) && i.status !== 'sold' && i.status !== 'gifted'; })
+        .filter(function (i) { return i.cost && i.cost.heldDays > 0; })
+        .sort(function (a, b) { return b.cost.heldDays - a.cost.heldDays; }).slice(0, 8);
+      body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
+        return { label: i.name, value: i.cost.heldDays, valueText: '已购 ' + i.cost.heldDays + ' 天' };
+      })) : '<p class="empty-hint">暂无在手设备</p>';
+      return;
+    }
+    if (id === 'dBuyTrend') {
+      const byMonth = {};
+      sum.items.forEach(function (i) {
+        if (!isDigital(i) || !i.purchaseDate) return;
+        const k = U.monthKey(i.purchaseDate);
+        byMonth[k] = (byMonth[k] || 0) + (Number(i.purchasePrice) || 0);
+      });
+      const trend = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = U.monthKey(U.todayStr(d));
+        trend.push({ label: key.slice(5) + '月', value: Math.round(byMonth[key] || 0) });
+      }
+      body.innerHTML = C.bar(trend);
+      return;
+    }
+    if (id === 'dCatPie') {
+      const byCat = {};
+      sum.items.forEach(function (i) {
+        if (!isDigital(i) || i.status === 'sold' || i.status === 'gifted') return;
+        const c = (db.categories.digital || []).find(function (x) { return x.id === i.categoryId; });
+        const name = c ? c.name : '其他';
+        byCat[name] = (byCat[name] || 0) + M.ownInvested(db, i);
+      });
+      const keys = Object.keys(byCat);
+      body.className = 'panel-body center';
+      body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
+        return { label: k, value: Math.round(byCat[k]), color: ['#0071e3', '#5ac8fa', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#ffcc00', '#aeaeb2'][n % 8] };
+      }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '数码总投入' })
+        : '<p class="empty-hint">暂无数码设备</p>';
       return;
     }
     if (id === 'dUseRank') {

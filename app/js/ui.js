@@ -641,11 +641,45 @@ window.UI = (function () {
       : '<p class="empty-hint">暂无使用记录</p>';
   }
 
+  /* ---------- 日历多条记录选择器（先选后编辑） ---------- */
+  function pickRecord(title, rows, cb) {
+    modal({
+      title: title, width: 520,
+      bodyHTML: rows.map(function (r) {
+        return '<div class="pick-rec-row" data-pick="' + r.id + '">' +
+          (r.thumbPath ? '<img data-path="' + U.escapeHtml(r.thumbPath) + '" alt=""/>'
+            : '<div class="pick-rec-thumb-empty">' + U.escapeHtml(r.icon || '📄') + '</div>') +
+          '<div class="flex1"><div>' + r.text + '</div>' +
+          (r.sub ? '<div class="muted small">' + r.sub + '</div>' : '') + '</div>' +
+          '<span class="muted">›</span></div>';
+      }).join(''),
+      footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +
+        '<button class="btn btn-primary" data-x="n">＋ 新增一条</button>',
+      onMount: function (wrap, close) {
+        wrap.querySelectorAll('img[data-path]').forEach(async function (img) {
+          const url = await window.Storage.getImageURL(img.getAttribute('data-path'));
+          if (url) img.src = url;
+        });
+        wrap.querySelectorAll('[data-pick]').forEach(function (row) {
+          row.addEventListener('click', function () {
+            close();
+            cb(row.getAttribute('data-pick'));
+          });
+        });
+        wrap.querySelector('[data-x=c]').addEventListener('click', close);
+        wrap.querySelector('[data-x=n]').addEventListener('click', function () {
+          close();
+          cb(null);
+        });
+      }
+    });
+  }
+
   return {
     toast: toast, modal: modal, confirmDialog: confirmDialog,
     cropImage: cropImage, imageUploader: imageUploader, picker: picker,
     itemFormHTML: itemFormHTML, bindFormToggles: bindFormToggles, readItemForm: readItemForm,
-    itemCard: itemCard, catsFor: catsFor, kindOfCategory: kindOfCategory,
+    itemCard: itemCard, catsFor: catsFor, kindOfCategory: kindOfCategory, pickRecord: pickRecord,
     isGameCategory: isGameCategory, usageLogHTML: usageLogHTML, catIcon: catIcon
   };
 })();

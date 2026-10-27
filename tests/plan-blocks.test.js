@@ -83,6 +83,10 @@ async function main() {
   if (clothHTML.indexOf('未穿着清单') < 0) throw new Error('衣橱未穿着清单缺失');
   if (lifeHTML.indexOf('开封新鲜度排行') < 0) throw new Error('生活新鲜度缺失');
   if (lifeHTML.indexOf('妆品搭配次数排行') < 0) throw new Error('生活搭配排行缺失');
+  // v1.0.4 数码新栏目
+  for (const t of ['数码价格排行', '单日使用成本排行', '已购买时长排行', '购机月度曲线', '数码分类构成']) {
+    if (digHTML.indexOf(t) < 0) throw new Error('数码新栏目缺失: ' + t);
+  }
   console.log('OK  1 四板块渲染 + 栏目归属');
 
   // 1b 快捷按钮：记美妆 + 穿搭打卡/饮食打卡直开弹窗（不跳转）
@@ -100,7 +104,7 @@ async function main() {
   w.document.querySelector('[data-act=food]').click();
   await new Promise(r => setTimeout(r, 300));
   const modal2 = w.document.querySelector('.modal');
-  if (!modal2 || modal2.textContent.indexOf('记一餐') < 0) throw new Error('饮食打卡未直开弹窗');
+  if (!modal2 || modal2.textContent.indexOf('饮食打卡') < 0) throw new Error('饮食打卡未直开弹窗');
   modal2.querySelector('.modal-close') && modal2.querySelector('.modal-close').click();
   await new Promise(r => setTimeout(r, 250));
   console.log('OK  1b 快捷按钮齐全且打卡直开弹窗');

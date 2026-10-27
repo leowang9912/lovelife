@@ -223,11 +223,14 @@ window.Storage = (function () {
   function saveOutfit(outfit) {
     const idx = db.outfits.findIndex(function (o) { return o.id === outfit.id; });
     const isNew = idx < 0;
+    const oldCos = isNew ? [] : (db.outfits[idx].cosmeticIds || []);
     if (!isNew) db.outfits[idx] = outfit;
     else db.outfits.push(outfit);
-    // 妆品使用次数：新打卡时自动 +1 并记流水
-    if (isNew && (outfit.cosmeticIds || []).length) {
-      outfit.cosmeticIds.forEach(function (cid) {
+    // 妆品使用次数：新打卡 +1；编辑时仅对新增妆品补 +1
+    const newCos = outfit.cosmeticIds || [];
+    const needLog = isNew ? newCos : newCos.filter(function (cid) { return oldCos.indexOf(cid) < 0; });
+    if (needLog.length) {
+      needLog.forEach(function (cid) {
         const it = db.items.find(function (i) { return i.id === cid; });
         if (it) M.appendUsageLog(it, 1, 'outfit', '穿搭打卡 ' + (outfit.date || ''));
       });

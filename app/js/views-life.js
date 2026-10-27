@@ -41,7 +41,7 @@ window.LifeView = (function () {
       '<div class="page-head"><h2>我的生活</h2><div class="page-actions">' +
       (expiring ? '<span class="tag tag-warn">' + expiring + ' 件临期</span>' : '') +
       '<button class="btn btn-ghost" id="btn-looks">💄 妆容组合</button>' +
-      '<button class="btn btn-primary" id="btn-add-life">＋ 添加</button></div></div>' +
+      '<button class="btn btn-primary" id="btn-add-life">＋ 记美妆</button></div></div>' +
       '<div class="filter-bar">' +
       '<input class="search-input" id="life-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(state.search) + '">' +
       '<select id="life-cat"><option value="">全部分类</option>' +
