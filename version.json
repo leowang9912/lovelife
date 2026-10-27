@@ -1,14 +1,14 @@
 {
-  "version": "1.0.3",
+  "version": "1.0.4",
   "minSchema": 3,
   "publishedAt": "2026-10-27",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "栏目排序可靠性：拖动改指针事件（触屏通用），保存有反馈，排序失效根治",
-    "版本三方自检（清单/程序/前端），半更新设备一眼定位；防浏览器旧缓存",
-    "快捷入口补全：＋记美妆；穿搭打卡/饮食打卡一键直开录入弹窗",
-    "衣橱统计扩容：价格/穿着/单次成本/搭配次数排行 + 未穿着清单、购衣曲线、季节分布、分类环图",
-    "生活统计扩容：价格/使用/单次成本/搭配次数排行 + 开封新鲜度、未开封库存预警、分类环图"
+    "全站命名统一：列表页 ＋记数码/记衣服/记美妆，弹窗与按钮同名，保存反馈一致",
+    "我的统计数码块扩容：价格排行、单日使用成本排行、已购买时长排行、购机曲线、分类环图",
+    "日历交互重做：行高统一；点开已有记录=直接编辑；点图开对应条目；日期旁＋新增",
+    "新增穿搭组合：常穿衣服存成组合一键套用；妆容/穿搭组合支持范例图与编辑",
+    "条目详情页统一：数值字重、图片尺寸、列宽比例、按钮排布三类一致"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -16,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.3/lovelife-v1.0.3-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.4/lovelife-v1.0.4-win64.zip"
   }
 }

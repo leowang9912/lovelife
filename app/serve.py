@@ -36,7 +36,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.0.3"
+SERVER_BUILD = "1.0.4"
 
 _lock = threading.Lock()
 

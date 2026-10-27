@@ -41,7 +41,7 @@ window.LifeView = (function () {
       '<div class="page-head"><h2>我的生活</h2><div class="page-actions">' +
       (expiring ? '<span class="tag tag-warn">' + expiring + ' 件临期</span>' : '') +
       '<button class="btn btn-ghost" id="btn-looks">💄 妆容组合</button>' +
-      '<button class="btn btn-primary" id="btn-add-life">＋ 添加</button></div></div>' +
+      '<button class="btn btn-primary" id="btn-add-life">＋ 记美妆</button></div></div>' +
       '<div class="filter-bar">' +
       '<input class="search-input" id="life-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(state.search) + '">' +
       '<select id="life-cat"><option value="">全部分类</option>' +
@@ -101,50 +101,19 @@ window.LifeView = (function () {
     });
   }
 
-  /* 妆容组合管理 */
+  /* 妆容组合管理（通用组合管理器：范例图 + 可编辑） */
   function openLooks(root) {
     const db = S.getDB();
-    const looks = db.settings.makeupLooks || [];
+    db.settings.makeupLooks = db.settings.makeupLooks || [];
     const lifes = M.itemsWithComputed(db).filter(function (i) { return i.kind === 'life'; });
-
-    UI.modal({
-      title: '妆容组合', width: 640,
-      bodyHTML:
-        (looks.length ? looks.map(function (lk, i) {
-          return '<div class="mini-row"><span class="flex1">✨ ' + U.escapeHtml(lk.name) + '（' + (lk.itemIds || []).length + ' 件）</span>' +
-            '<button class="btn-icon" data-del-look="' + i + '" title="删除">×</button></div>';
-        }).join('') : '<p class="empty-hint">还没有妆容组合</p>') +
-        '<h4 class="detail-sub">新建组合</h4>' +
-        '<div class="form-grid"><label class="f-full"><span class="f-label">组合名称</span>' +
-        '<input id="look-name" placeholder="如：日常通勤妆"></label></div>' +
-        '<div id="look-picker"></div>',
-      footerHTML: '<button class="btn btn-ghost" data-x="c">关闭</button><button class="btn btn-primary" data-x="s">保存组合</button>',
-      onMount: function (wrap, close) {
-        const items = lifes.map(function (i) {
-          const c = (db.categories.life || []).find(function (x) { return x.id === i.categoryId; });
-          return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
-        });
-        const pick = UI.picker(wrap.querySelector('#look-picker'), items, [], { icon: '💄' });
-        wrap.querySelector('[data-x=c]').addEventListener('click', close);
-        wrap.querySelectorAll('[data-del-look]').forEach(function (b) {
-          b.addEventListener('click', async function () {
-            looks.splice(Number(b.getAttribute('data-del-look')), 1);
-            db.settings.makeupLooks = looks;
-            await S.saveSettings();
-            close(); openLooks(root);
-          });
-        });
-        wrap.querySelector('[data-x=s]').addEventListener('click', async function () {
-          const name = wrap.querySelector('#look-name').value.trim();
-          const ids = pick.getSelected();
-          if (!name) { UI.toast('请填写组合名称', 'error'); return; }
-          if (!ids.length) { UI.toast('至少选择一件妆品', 'error'); return; }
-          looks.push({ id: U.uid(), name: name, itemIds: ids });
-          db.settings.makeupLooks = looks;
-          await S.saveSettings();
-          close(); UI.toast('妆容组合已保存', 'success');
-        });
-      }
+    const items = lifes.map(function (i) {
+      const c = (db.categories.life || []).find(function (x) { return x.id === i.categoryId; });
+      return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
+    });
+    UI.comboManager({
+      title: '💄 妆容组合', icon: '💄', items: items,
+      combos: db.settings.makeupLooks,
+      onChange: function () { S.saveSettings(); }
     });
   }
 

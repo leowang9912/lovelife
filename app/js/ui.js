@@ -641,11 +641,129 @@ window.UI = (function () {
       : '<p class="empty-hint">暂无使用记录</p>';
   }
 
+  /* ---------- 组合管理（妆容/穿搭通用）：列表 + 新建/编辑 + 范例图 ---------- */
+  function comboManager(cfg) {
+    // cfg: { title, icon, items, combos, onChange }
+    const combos = cfg.combos;
+    let editIdx = -1;
+
+    function open() {
+      modal({
+        title: cfg.title, width: 680,
+        bodyHTML:
+          (combos.length ? '<div class="combo-list">' + combos.map(function (c, i) {
+            return '<div class="mini-row combo-row">' +
+              (c.images && c.images[0]
+                ? '<img class="combo-thumb" data-path="' + U.escapeHtml(c.images[0]) + '" alt=""/>'
+                : '<div class="combo-thumb combo-thumb-empty">' + U.escapeHtml(cfg.icon || '✨') + '</div>') +
+              '<span class="flex1"><strong>' + U.escapeHtml(c.name) + '</strong>' +
+              '<span class="muted small">（' + (c.itemIds || []).length + ' 件' +
+              ((c.images || []).length ? ' · 范例图 ' + c.images.length : '') + '）</span></span>' +
+              '<button class="btn-icon" data-edit-combo="' + i + '" title="编辑">✎</button>' +
+              '<button class="btn-icon" data-del-combo="' + i + '" title="删除">×</button></div>';
+          }).join('') + '</div>' : '<p class="empty-hint">还没有' + U.escapeHtml(cfg.title) + '</p>') +
+          '<h4 class="detail-sub">' + (editIdx >= 0 ? '编辑组合' : '新建组合') + '</h4>' +
+          '<div class="form-grid"><label class="f-full"><span class="f-label">组合名称</span>' +
+          '<input id="combo-name" placeholder="如：日常通勤"></label></div>' +
+          '<div id="combo-picker"></div>' +
+          '<h4 class="detail-sub">范例图（可多张，便于打卡时对照参考）</h4>' +
+          '<div id="combo-imgs"></div>',
+        footerHTML: '<button class="btn btn-ghost" data-x="c">关闭</button>' +
+          '<button class="btn btn-primary" data-x="s">' + (editIdx >= 0 ? '保存修改' : '保存组合') + '</button>',
+        onMount: function (wrap, close) {
+          const editing = editIdx >= 0 ? combos[editIdx] : null;
+          if (editing) wrap.querySelector('#combo-name').value = editing.name || '';
+          let pick = picker(wrap.querySelector('#combo-picker'), cfg.items,
+            editing ? (editing.itemIds || []).slice() : [], {});
+          const uploader = imageUploader(wrap.querySelector('#combo-imgs'),
+            { paths: editing ? (editing.images || []).slice() : [] });
+          wrap.querySelectorAll('img[data-path]').forEach(async function (img) {
+            const url = await window.Storage.getImageURL(img.getAttribute('data-path'));
+            if (url) img.src = url;
+          });
+          wrap.querySelectorAll('[data-edit-combo]').forEach(function (b) {
+            b.addEventListener('click', function () {
+              editIdx = Number(b.getAttribute('data-edit-combo'));
+              close(); open();
+            });
+          });
+          wrap.querySelectorAll('[data-del-combo]').forEach(function (b) {
+            b.addEventListener('click', async function () {
+              if (!await confirmDialog('删除组合', '删除该组合？（不影响物品本身）')) return;
+              const i = Number(b.getAttribute('data-del-combo'));
+              combos.splice(i, 1);
+              if (editIdx === i) editIdx = -1;
+              cfg.onChange();
+              close(); open();
+            });
+          });
+          wrap.querySelector('[data-x=c]').addEventListener('click', function () {
+            editIdx = -1; close();
+          });
+          wrap.querySelector('[data-x=s]').addEventListener('click', async function () {
+            const name = wrap.querySelector('#combo-name').value.trim();
+            const ids = pick.getSelected();
+            if (!name) { toast('请填写组合名称', 'error'); return; }
+            if (!ids.length) { toast('至少选择一件物品', 'error'); return; }
+            const btn = wrap.querySelector('[data-x=s]');
+            btn.disabled = true;
+            try {
+              const images = await uploader.finalize();
+              const rec = { id: editing ? editing.id : U.uid(), name: name, itemIds: ids, images: images };
+              if (editing) combos[editIdx] = rec; else combos.push(rec);
+              cfg.onChange();
+              toast(editing ? '已保存' : '组合已保存', 'success');
+              editIdx = -1;
+              close(); open();
+            } catch (e) {
+              toast('保存失败：' + e.message, 'error'); btn.disabled = false;
+            }
+          });
+        }
+      });
+    }
+    open();
+  }
+
+  /* ---------- 日历多条记录选择器（先选后编辑） ---------- */
+  function pickRecord(title, rows, cb) {
+    modal({
+      title: title, width: 520,
+      bodyHTML: rows.map(function (r) {
+        return '<div class="pick-rec-row" data-pick="' + r.id + '">' +
+          (r.thumbPath ? '<img data-path="' + U.escapeHtml(r.thumbPath) + '" alt=""/>'
+            : '<div class="pick-rec-thumb-empty">' + U.escapeHtml(r.icon || '📄') + '</div>') +
+          '<div class="flex1"><div>' + r.text + '</div>' +
+          (r.sub ? '<div class="muted small">' + r.sub + '</div>' : '') + '</div>' +
+          '<span class="muted">›</span></div>';
+      }).join(''),
+      footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +
+        '<button class="btn btn-primary" data-x="n">＋ 新增一条</button>',
+      onMount: function (wrap, close) {
+        wrap.querySelectorAll('img[data-path]').forEach(async function (img) {
+          const url = await window.Storage.getImageURL(img.getAttribute('data-path'));
+          if (url) img.src = url;
+        });
+        wrap.querySelectorAll('[data-pick]').forEach(function (row) {
+          row.addEventListener('click', function () {
+            close();
+            cb(row.getAttribute('data-pick'));
+          });
+        });
+        wrap.querySelector('[data-x=c]').addEventListener('click', close);
+        wrap.querySelector('[data-x=n]').addEventListener('click', function () {
+          close();
+          cb(null);
+        });
+      }
+    });
+  }
+
   return {
     toast: toast, modal: modal, confirmDialog: confirmDialog,
     cropImage: cropImage, imageUploader: imageUploader, picker: picker,
     itemFormHTML: itemFormHTML, bindFormToggles: bindFormToggles, readItemForm: readItemForm,
-    itemCard: itemCard, catsFor: catsFor, kindOfCategory: kindOfCategory,
+    itemCard: itemCard, catsFor: catsFor, kindOfCategory: kindOfCategory, pickRecord: pickRecord, comboManager: comboManager,
     isGameCategory: isGameCategory, usageLogHTML: usageLogHTML, catIcon: catIcon
   };
 })();

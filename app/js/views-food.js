@@ -31,12 +31,13 @@ window.FoodView = (function () {
       const recs = byDate[dateStr] || [];
       const isToday = dateStr === U.todayStr();
       const imgs = [];
-      recs.forEach(function (r) { (r.images || []).forEach(function (p) { imgs.push(p); }); });
+      recs.forEach(function (r) { (r.images || []).forEach(function (p) { imgs.push({ p: p, rid: r.id }); }); });
       cells += '<div class="cal-cell' + (isToday ? ' cal-today' : '') + (recs.length ? ' cal-has' : '') + '" data-date="' + dateStr + '">' +
         '<div class="cal-day">' + d + '</div>' +
+        (recs.length ? '<button class="cal-add-mini" title="再记一条">＋</button>' : '') +
         (imgs.length
           ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs) + '\'>' +
-          '<img data-path="' + U.escapeHtml(imgs[0]) + '"/>' +
+          '<img data-path="' + U.escapeHtml(imgs[0].p) + '"/>' +
           (imgs.length > 1
             ? '<button class="cal-nav prev" data-nav-dir="-1">‹</button>' +
             '<button class="cal-nav next" data-nav-dir="1">›</button>' +
@@ -44,7 +45,7 @@ window.FoodView = (function () {
             : '') + '</div>'
           : recs.length
             ? '<div class="cal-outfits">' + recs.map(function (r) {
-              return '<div class="cal-outfit-chip"><span>' + U.escapeHtml(r.meal || '') + ' · ' +
+              return '<div class="cal-outfit-chip" data-open-rec="' + r.id + '"><span>' + U.escapeHtml(r.meal || '') + ' · ' +
                 U.escapeHtml(r.name || r.foodCuisine || '') + '</span></div>';
             }).join('') + '</div>'
             : '<div class="cal-hint">＋</div>') +
@@ -74,8 +75,47 @@ window.FoodView = (function () {
     root.querySelector('#btn-add-food').addEventListener('click', function () { openEditor(U.todayStr(), null); });
     root.querySelectorAll('.cal-cell[data-date]').forEach(function (cell) {
       cell.addEventListener('click', function (e) {
+        const dateStr = cell.getAttribute('data-date');
+        const recs = byDate[dateStr] || [];
         if (e.target.closest('[data-nav-dir]')) return;
-        openEditor(cell.getAttribute('data-date'), null);
+        if (e.target.closest('.cal-add-mini')) { openEditor(dateStr, null); return; }
+        const chip = e.target.closest('[data-open-rec]');
+        if (chip) {
+          const rec = recs.find(function (r) { return r.id === chip.getAttribute('data-open-rec'); });
+          if (rec) openEditor(dateStr, rec);
+          return;
+        }
+        const cover = e.target.closest('.cal-cover');
+        if (cover) {
+          // 点图打开当前轮播图对应的那条记录
+          let imgs = [];
+          try { imgs = JSON.parse(cover.getAttribute('data-carousel')); } catch (err) { imgs = []; }
+          const cur = Number(cover.querySelector('.cal-more') ? (cover.querySelector('.cal-more').textContent.split('/')[0]) - 1 : 0) || 0;
+          const hit = imgs[cur] && recs.find(function (r) { return r.id === imgs[cur].rid; });
+          if (hit) { openEditor(dateStr, hit); return; }
+          if (recs.length === 1) { openEditor(dateStr, recs[0]); return; }
+          if (!recs.length) { openEditor(dateStr, null); return; }
+          // 多条且无法定位图片归属 → 落入下方选择器
+        }
+        if (recs.length === 1) { openEditor(dateStr, recs[0]); return; }
+        if (recs.length > 1) {
+          UI.pickRecord('选择要查看的记录 · ' + U.cnDate(dateStr), recs.map(function (r) {
+            return {
+              id: r.id, thumbPath: (r.images && r.images[0]) || '', icon: '🍱',
+              text: U.escapeHtml(r.meal || '') + ' · ' + U.escapeHtml(r.foodCuisine || '') +
+                (r.foodType ? ' / ' + U.escapeHtml(r.foodType) : '') + ' · ' + U.escapeHtml(r.name || ''),
+              sub: U.formatMoney(r.price) + (r.location ? ' · ' + U.escapeHtml(r.location) : '')
+            };
+          }), function (rid) {
+            if (rid === null) openEditor(dateStr, null);
+            else {
+              const rec = recs.find(function (r) { return r.id === rid; });
+              if (rec) openEditor(dateStr, rec);
+            }
+          });
+          return;
+        }
+        openEditor(dateStr, null);
       });
     });
     root.querySelectorAll('img[data-path]').forEach(async function (img) {
@@ -95,7 +135,7 @@ window.FoodView = (function () {
       const label = box.querySelector('.cal-more');
       async function show(i) {
         idx = (i + imgs.length) % imgs.length;
-        const url = await S.getImageURL(imgs[idx]);
+        const url = await S.getImageURL(imgs[idx].p);
         if (url) img.src = url;
         if (label) label.textContent = (idx + 1) + '/' + imgs.length;
       }
@@ -110,18 +150,19 @@ window.FoodView = (function () {
 
   function openEditor(dateStr, rec) {
     const db = S.getDB();
-    const existing = db.food.filter(function (f) { return f.date === dateStr; });
+    const existing = rec ? [] : db.food.filter(function (f) { return f.date === dateStr; });
     const cuisines = db.categories.foodCuisine || [];
     const types = db.categories.foodType || [];
     const meals = db.categories.meal || [];
     const tags = db.categories.foodTag || [];
+    const isEdit = !!rec;
     rec = rec || {
       id: U.uid(), date: dateStr, meal: '', foodCuisine: '', foodType: '', name: '', price: '',
       tags: [], rating: 0, location: '', note: '', calories: '', fullness: '', images: []
     };
 
     UI.modal({
-      title: '记一餐 · ' + U.cnDate(dateStr), width: 700,
+      title: (isEdit ? '编辑饮食 · ' : '饮食打卡 · ') + U.cnDate(dateStr), width: 700,
       bodyHTML:
         (existing.length ? '<div class="existing-outfits">' + existing.map(function (f) {
           return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(f.meal || '') + ' · ' +
@@ -158,9 +199,17 @@ window.FoodView = (function () {
         }).join('') + '</div></div>' +
         '<div class="f-full"><span class="f-label">图片（可多张，自动裁切）</span><div id="food-imgs"></div></div>' +
         '</div></form>',
-      footerHTML: '<button class="btn btn-ghost" data-x="c">关闭</button><button class="btn btn-primary" data-x="s">保存</button>',
+      footerHTML: (isEdit ? '<button class="btn btn-danger" data-x="d">删除</button>' : '') +
+        '<button class="btn btn-ghost" data-x="c">关闭</button><button class="btn btn-primary" data-x="s">保存打卡</button>',
       onMount: function (wrap, close) {
         const uploader = UI.imageUploader(wrap.querySelector('#food-imgs'), { paths: rec.images || [] });
+        if (isEdit) {
+          wrap.querySelector('[data-x=d]').addEventListener('click', async function () {
+            if (!await UI.confirmDialog('删除记录', '删除这条美食记录？')) return;
+            await S.removeFood(rec.id);
+            close(); UI.toast('已删除', 'success'); window.App.refresh();
+          });
+        }
         wrap.querySelectorAll('[data-del-food]').forEach(function (b) {
           b.addEventListener('click', async function () {
             await S.removeFood(b.getAttribute('data-del-food'));
@@ -197,7 +246,7 @@ window.FoodView = (function () {
           try {
             data.images = await uploader.finalize();
             await S.saveFood(data);
-            close(); UI.toast('已记录', 'success'); window.App.refresh();
+            close(); UI.toast(isEdit ? '已保存' : '打卡成功', 'success'); window.App.refresh();
           } catch (e) {
             UI.toast('保存失败：' + e.message, 'error'); btn.disabled = false;
           }

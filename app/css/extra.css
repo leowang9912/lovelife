@@ -213,18 +213,32 @@
 .cal-jump {
   display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
 }
+/* 四键统一形态：同高、同宽、同圆角（颜色仅区分功能） */
 .cal-jump select {
-  padding: 8px 12px; border: 0.5px solid var(--line); border-radius: 9px;
+  height: 37px; min-width: 92px; padding: 0 28px 0 14px;
+  border: 0.5px solid var(--line); border-radius: 980px;
   font-size: 13.5px; outline: none; font-family: inherit;
-  background: #fff; color: var(--text);
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%238e8e93' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat right 12px center;
+  color: var(--text); appearance: none;
+  text-align: center; text-align-last: center; cursor: pointer;
+  transition: .15s;
+}
+.cal-jump .btn {
+  height: 37px; min-width: 92px; padding: 0 14px;
+  display: inline-flex; align-items: center; justify-content: center;
 }
 .cal-jump select:focus {
   border-color: var(--accent); box-shadow: 0 0 0 3.5px rgba(0, 113, 227, .18);
 }
 
+/* 日历格：固定高度 + 图片区填满，任何窗口宽度下行高一致 */
+.cal-cell {
+  height: 150px; min-height: 0; display: flex; flex-direction: column;
+  overflow: hidden;
+}
 .cal-cover {
   position: relative; border-radius: 9px; overflow: hidden;
-  aspect-ratio: 1 / 1; margin-top: 4px;
+  flex: 1; min-height: 0; margin-top: 4px;
 }
 .cal-cover img {
   width: 100%; height: 100%; object-fit: cover;
@@ -246,7 +260,33 @@
   font-size: 10px; padding: 2px 7px; border-radius: 980px;
 }
 .cal-cell.cal-has { background: #fff; }
-.cal-cell .cal-day { position: relative; z-index: 1; }
+.cal-cell .cal-day { position: relative; z-index: 1; flex-shrink: 0; }
+.cal-outfits { flex: 1; min-height: 0; overflow: hidden; }
+/* 日期旁的小「＋」：已有记录时的追加入口 */
+.cal-add-mini {
+  position: absolute; top: 6px; right: 6px; z-index: 3;
+  width: 22px; height: 22px; border-radius: 50%; border: none;
+  background: var(--accent); color: #fff; font-size: 13px; line-height: 1;
+  cursor: pointer; padding: 0; opacity: 0; transition: .15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.cal-cell:hover .cal-add-mini { opacity: 1; }
+/* 已有记录的选择列表弹窗 */
+.pick-rec-row {
+  display: flex; align-items: center; gap: 10px; padding: 9px 10px;
+  border: 0.5px solid var(--line); border-radius: 11px; margin-bottom: 8px;
+  cursor: pointer; transition: .13s; background: #fff;
+}
+.pick-rec-row:hover { border-color: var(--accent); background: var(--accent-soft); }
+.pick-rec-row img {
+  width: 46px; height: 46px; border-radius: 8px; object-fit: cover;
+  background: #f2f2f4; flex-shrink: 0;
+}
+.pick-rec-thumb-empty {
+  width: 46px; height: 46px; border-radius: 8px; background: #f2f2f4;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 17px; flex-shrink: 0;
+}
 
 /* ---------- 使用流水 ---------- */
 .log-row {
@@ -261,8 +301,11 @@
 .log-delta.up { background: rgba(52, 199, 89, .14); color: #1d7a3e; }
 .log-delta.down { background: rgba(255, 59, 48, .12); color: #c0392b; }
 
-/* 详情图放大 */
-.detail-imgs img { height: 170px; }
+/* 详情按钮统一：两列同高同排布 */
+.detail-btn-row { display: flex; gap: 8px; margin: 12px 0 4px; }
+.detail-btn-row .btn { height: 36px; display: inline-flex; align-items: center; }
+.detail-actions .btn { height: 36px; }
+.detail-actions { gap: 8px; }
 
 /* 状态徽章补充 */
 .badge-empty { background: rgba(52, 199, 89, .92); color: #fff; }

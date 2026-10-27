@@ -38,7 +38,8 @@ window.Views = (function () {
 
     root.innerHTML =
       '<div class="page-head"><h2>' + titles[kind] + '</h2><div class="page-actions">' +
-      '<button class="btn btn-primary" id="btn-add-item">＋ 添加' + (kind === 'digital' ? '数码' : '衣服') + '</button></div></div>' +
+      (kind === 'clothing' ? '<button class="btn btn-ghost" id="btn-outfit-looks">👗 穿搭组合</button>' : '') +
+      '<button class="btn btn-primary" id="btn-add-item">＋ 记' + (kind === 'digital' ? '数码' : '衣服') + '</button></div></div>' +
       '<div class="filter-bar">' +
       '<input class="search-input" id="item-search" placeholder="搜索名称 / 品牌 / 备注…" value="' + U.escapeHtml(itemState.search) + '">' +
       '<select id="filter-cat"><option value="">全部种类</option>' +
@@ -63,6 +64,8 @@ window.Views = (function () {
         : '<div class="empty-state"><div class="empty-icon">' + icons[kind] + '</div><p>还没有记录</p></div>');
 
     root.querySelector('#btn-add-item').addEventListener('click', function () { openItemEditor(null, kind); });
+    const btnLooks = root.querySelector('#btn-outfit-looks');
+    if (btnLooks) btnLooks.addEventListener('click', function () { openOutfitLooks(root); });
     root.querySelector('#item-search').addEventListener('input', U.debounce(function (e) {
       itemState.search = e.target.value;
       items(root, kind);
@@ -113,7 +116,7 @@ window.Views = (function () {
     if (!item) return;
     const formKind = kind || item.kind;
     UI.modal({
-      title: (id ? '编辑' : '添加') + (formKind === 'digital' ? '数码' : formKind === 'life' ? '生活' : kindLabel(item.kind || formKind)),
+      title: (id ? '编辑' : '记') + (formKind === 'digital' ? '数码' : formKind === 'life' ? '美妆' : kindLabel(item.kind || formKind)),
       width: 720,
       bodyHTML: '<form id="item-form">' + UI.itemFormHTML(db, item, formKind) + '</form>',
       footerHTML: '<button class="btn btn-ghost" data-act="cancel">取消</button><button class="btn btn-primary" data-act="save">保存</button>',
@@ -198,10 +201,11 @@ window.Views = (function () {
         kv('肤质适配', (item.skinType || []).join('、')) + kv('致敏', item.allergenic) +
         '</div>' +
         (item.kind === 'life'
-          ? '<button class="btn btn-primary btn-sm" id="btn-use-plus">✓ 使用一次（+1）</button>' +
-          '<button class="btn btn-ghost btn-sm" id="btn-use-edit" style="margin-left:8px">编辑使用次数</button>'
+          ? '<div class="detail-btn-row">' +
+          '<button class="btn btn-primary" id="btn-use-plus">✓ 使用一次（+1）</button>' +
+          '<button class="btn btn-ghost" id="btn-use-edit">编辑使用次数</button></div>'
           : item.kind === 'clothing'
-            ? '<button class="btn btn-primary btn-sm" id="btn-wear-plus">✓ 穿了一次（+1）</button>' : '') +
+            ? '<div class="detail-btn-row"><button class="btn btn-primary" id="btn-wear-plus">✓ 穿了一次（+1）</button></div>' : '') +
         '<h4 class="detail-sub">使用记录（可单条删除）</h4><div id="usage-log">' +
         UI.usageLogHTML(item) + '</div>' +
         '<h4 class="detail-sub">生命周期流水</h4><div>' +
@@ -287,7 +291,7 @@ window.Views = (function () {
   function row(k, v) { return '<div class="kv-row"><span>' + k + '</span><strong>' + v + '</strong></div>'; }
   function kv(k, v) {
     if (v === undefined || v === null || v === '') return '';
-    return '<div class="kv-row"><span>' + k + '</span><span>' + U.escapeHtml(String(v)) + '</span></div>';
+    return '<div class="kv-row"><span>' + k + '</span><strong>' + U.escapeHtml(String(v)) + '</strong></div>';
   }
   function statusLabel(s) {
     return {
@@ -323,14 +327,15 @@ window.Views = (function () {
       const dateStr = key + '-' + String(d).padStart(2, '0');
       const outs = byDate[dateStr] || [];
       const isToday = dateStr === U.todayStr();
-      // 收集当天所有图片用于轮播
+      // 收集当天所有图片用于轮播（保留记录归属，点图可开对应条目）
       const imgs = [];
-      outs.forEach(function (o) { (o.images || []).forEach(function (p) { imgs.push(p); }); });
+      outs.forEach(function (o) { (o.images || []).forEach(function (p) { imgs.push({ p: p, rid: o.id }); }); });
       cells += '<div class="cal-cell' + (isToday ? ' cal-today' : '') + (outs.length ? ' cal-has' : '') + '" data-date="' + dateStr + '">' +
         '<div class="cal-day">' + d + '</div>' +
+        (outs.length ? '<button class="cal-add-mini" title="再记一条">＋</button>' : '') +
         (imgs.length
           ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs) + '\'>' +
-          '<img data-path="' + U.escapeHtml(imgs[0]) + '"/>' +
+          '<img data-path="' + U.escapeHtml(imgs[0].p) + '"/>' +
           (imgs.length > 1
             ? '<button class="cal-nav prev" data-nav-dir="-1">‹</button>' +
             '<button class="cal-nav next" data-nav-dir="1">›</button>' +
@@ -338,7 +343,7 @@ window.Views = (function () {
             : '') + '</div>'
           : outs.length
             ? '<div class="cal-outfits">' + outs.map(function (o) {
-              return '<div class="cal-outfit-chip"><span>' + ((o.itemIds || []).length) + ' 件' +
+              return '<div class="cal-outfit-chip" data-open-rec="' + o.id + '"><span>' + ((o.itemIds || []).length) + ' 件' +
                 (o.occasion ? ' · ' + U.escapeHtml(o.occasion) : '') + '</span></div>';
             }).join('') + '</div>'
             : '<div class="cal-hint">＋</div>') +
@@ -373,8 +378,47 @@ window.Views = (function () {
     });
     root.querySelectorAll('.cal-cell[data-date]').forEach(function (cell) {
       cell.addEventListener('click', function (e) {
-        if (e.target.closest('[data-nav-dir]')) return; // 轮播按钮不触发打卡
-        openOutfitEditor(cell.getAttribute('data-date'));
+        const dateStr = cell.getAttribute('data-date');
+        const recs = byDate[dateStr] || [];
+        if (e.target.closest('[data-nav-dir]')) return; // 轮播按钮不触发
+        if (e.target.closest('.cal-add-mini')) { openOutfitEditor(dateStr); return; }
+        const chip = e.target.closest('[data-open-rec]');
+        if (chip) {
+          const rec = recs.find(function (o) { return o.id === chip.getAttribute('data-open-rec'); });
+          if (rec) openOutfitEditor(dateStr, rec);
+          return;
+        }
+        const cover = e.target.closest('.cal-cover');
+        if (cover) {
+          // 点图打开当前轮播图对应的那条记录
+          let imgs = [];
+          try { imgs = JSON.parse(cover.getAttribute('data-carousel')); } catch (err) { imgs = []; }
+          const cur = Number(cover.querySelector('.cal-more') ? (cover.querySelector('.cal-more').textContent.split('/')[0]) - 1 : 0) || 0;
+          const hit = imgs[cur] && recs.find(function (o) { return o.id === imgs[cur].rid; });
+          if (hit) { openOutfitEditor(dateStr, hit); return; }
+          if (recs.length === 1) { openOutfitEditor(dateStr, recs[0]); return; }
+          if (!recs.length) { openOutfitEditor(dateStr); return; }
+          // 多条且无法定位图片归属 → 落入下方选择器
+        }
+        if (recs.length === 1) { openOutfitEditor(dateStr, recs[0]); return; }
+        if (recs.length > 1) {
+          UI.pickRecord('选择要查看的记录 · ' + U.cnDate(dateStr), recs.map(function (o) {
+            return {
+              id: o.id, thumbPath: (o.images && o.images[0]) || '', icon: '👗',
+              text: ((o.itemIds || []).length) + ' 件衣服 · ' + ((o.cosmeticIds || []).length) + ' 件妆品' +
+                (o.occasion ? ' · ' + U.escapeHtml(o.occasion) : ''),
+              sub: U.escapeHtml(o.note || o.weather || '')
+            };
+          }), function (rid) {
+            if (rid === null) openOutfitEditor(dateStr);
+            else {
+              const rec = recs.find(function (o) { return o.id === rid; });
+              if (rec) openOutfitEditor(dateStr, rec);
+            }
+          });
+          return;
+        }
+        openOutfitEditor(dateStr);
       });
     });
     bindImages(root);
@@ -392,7 +436,7 @@ window.Views = (function () {
       const label = box.querySelector('.cal-more');
       async function show(i) {
         idx = (i + imgs.length) % imgs.length;
-        const url = await S.getImageURL(imgs[idx]);
+        const url = await S.getImageURL(imgs[idx].p);
         if (url) img.src = url;
         if (label) label.textContent = (idx + 1) + '/' + imgs.length;
       }
@@ -405,8 +449,26 @@ window.Views = (function () {
     });
   }
 
-  /* 穿搭打卡编辑器：大图、分类勾选、妆容整合 */
-  function openOutfitEditor(dateStr) {
+  /* 穿搭组合管理（仅衣服；通用组合管理器：范例图 + 可编辑） */
+  function openOutfitLooks(root) {
+    const db = S.getDB();
+    db.settings.outfitLooks = db.settings.outfitLooks || [];
+    const clothes = M.itemsWithComputed(db).filter(function (i) {
+      return i.kind === 'clothing' && i.status !== 'sold' && i.status !== 'gifted';
+    });
+    const items = clothes.map(function (i) {
+      const c = (db.categories.clothing || []).find(function (x) { return x.id === i.categoryId; });
+      return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
+    });
+    UI.comboManager({
+      title: '👗 穿搭组合', icon: '👗', items: items,
+      combos: db.settings.outfitLooks,
+      onChange: function () { S.saveSettings(); }
+    });
+  }
+
+  /* 穿搭打卡编辑器：大图、分类勾选、妆容整合（rec 传入=编辑该条） */
+  function openOutfitEditor(dateStr, rec) {
     const db = S.getDB();
     const clothes = M.itemsWithComputed(db).filter(function (i) {
       return i.kind === 'clothing' && i.status !== 'sold' && i.status !== 'gifted';
@@ -422,12 +484,14 @@ window.Views = (function () {
       return { id: i.id, name: i.name, brand: i.brand, thumb: i.images && i.images[0] ? null : null, images: i.images, categoryName: catName(i) };
     });
     // 预加载缩略图 URL（异步填充）
-    const existing = db.outfits.filter(function (o) { return o.date === dateStr; });
+    const existing = rec ? [] : db.outfits.filter(function (o) { return o.date === dateStr; });
     const looks = db.settings.makeupLooks || [];
+    const outfitLooks = db.settings.outfitLooks || [];
     const occasions = db.categories.occasion || [];
+    const rv = rec || {};
 
     UI.modal({
-      title: '穿搭打卡 · ' + U.cnDate(dateStr), width: 760,
+      title: (rec ? '编辑穿搭 · ' : '穿搭打卡 · ') + U.cnDate(dateStr), width: 760,
       bodyHTML:
         (existing.length ? '<div class="existing-outfits">' + existing.map(function (o) {
           return '<div class="mini-row"><span class="flex1">' +
@@ -437,15 +501,22 @@ window.Views = (function () {
         }).join('') + '</div>' : '') +
         '<form id="outfit-form"><div class="form-grid">' +
         '<label><span class="f-label">场合（选填）</span><select name="occasion"><option value="">（不指定）</option>' +
-        occasions.map(function (o) { return '<option value="' + U.escapeHtml(o) + '">' + U.escapeHtml(o) + '</option>'; }).join('') + '</select></label>' +
-        '<label><span class="f-label">天气（选填）</span><select name="weather">' +
-        ['晴', '多云', '阴', '小雨', '大雨', '雪', '风'].map(function (w) { return '<option value="' + w + '">' + w + '</option>'; }).join('') + '</select></label>' +
-        '<label><span class="f-label">温度 ℃</span><input type="number" name="temperature"></label>' +
-        '<label class="f-full"><span class="f-label">备注（选填）</span><input name="note"></label>' +
+        occasions.map(function (o) {
+          return '<option value="' + U.escapeHtml(o) + '"' + (rv.occasion === o ? ' selected' : '') + '>' + U.escapeHtml(o) + '</option>';
+        }).join('') + '</select></label>' +
+        '<label><span class="f-label">天气（选填）</span><select name="weather"><option value="">（不指定）</option>' +
+        ['晴', '多云', '阴', '小雨', '大雨', '雪', '风'].map(function (w) {
+          return '<option value="' + w + '"' + (rv.weather === w ? ' selected' : '') + '>' + w + '</option>';
+        }).join('') + '</select></label>' +
+        '<label><span class="f-label">温度 ℃</span><input type="number" name="temperature" value="' + (rv.temperature == null ? '' : rv.temperature) + '"></label>' +
+        '<label class="f-full"><span class="f-label">备注（选填）</span><input name="note" value="' + U.escapeHtml(rv.note || '') + '"></label>' +
         '</div>' +
-        '<h4 class="detail-sub">👗 勾选今天穿的衣服</h4>' +
+        '<h4 class="detail-sub">👗 勾选这天穿的衣服</h4>' +
+        (outfitLooks.length ? '<div class="chip-row" style="margin-bottom:8px">' + outfitLooks.map(function (lk, i) {
+          return '<button type="button" class="btn btn-ghost btn-sm" data-olook="' + i + '">👗 ' + U.escapeHtml(lk.name) + '</button>';
+        }).join('') + '</div>' : '') +
         '<div id="cloth-picker"></div>' +
-        '<h4 class="detail-sub">💄 勾选今天用的妆品（自动计一次使用）</h4>' +
+        '<h4 class="detail-sub">💄 勾选这天用的妆品（自动计一次使用）</h4>' +
         (looks.length ? '<div class="chip-row" style="margin-bottom:8px">' + looks.map(function (lk, i) {
           return '<button type="button" class="btn btn-ghost btn-sm" data-look="' + i + '">✨ ' + U.escapeHtml(lk.name) + '</button>';
         }).join('') + '</div>' : '') +
@@ -453,13 +524,14 @@ window.Views = (function () {
         '<h4 class="detail-sub">📷 OOTD 照片（有图日历将显示大图）</h4>' +
         '<div id="outfit-imgs"></div>' +
         '</form>',
-      footerHTML: '<button class="btn btn-ghost" data-act="cancel">关闭</button><button class="btn btn-primary" data-act="save">保存打卡</button>',
+      footerHTML: (rec ? '<button class="btn btn-danger" data-act="del">删除</button>' : '') +
+        '<button class="btn btn-ghost" data-act="cancel">关闭</button><button class="btn btn-primary" data-act="save">保存打卡</button>',
       onMount: function (wrap, close) {
         const cosItems = cosmetics.map(function (i) {
           return { id: i.id, name: i.name, brand: i.brand, shade: i.shade, images: i.images, thumb: null, categoryName: catName(i) };
         });
-        let clothPick = UI.picker(wrap.querySelector('#cloth-picker'), clothPickerItems, [], {});
-        let cosPick = UI.picker(wrap.querySelector('#cos-picker'), cosItems, [], { icon: '💄' });
+        let clothPick = UI.picker(wrap.querySelector('#cloth-picker'), clothPickerItems, (rv.itemIds || []).slice(), {});
+        let cosPick = UI.picker(wrap.querySelector('#cos-picker'), cosItems, (rv.cosmeticIds || []).slice(), { icon: '💄' });
         // 异步填充缩略图后重绘
         async function fillThumbs(items, mapTo) {
           for (const it of items) {
@@ -484,13 +556,30 @@ window.Views = (function () {
             UI.toast('已套用妆容：' + lk.name, 'success');
           });
         });
+        wrap.querySelectorAll('[data-olook]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            const lk = outfitLooks[Number(b.getAttribute('data-olook'))];
+            if (!lk) return;
+            const cur = clothPick.getSelected();
+            (lk.itemIds || []).forEach(function (id) { if (cur.indexOf(id) < 0) cur.push(id); });
+            clothPick.setSelected(cur);
+            UI.toast('已套用穿搭：' + lk.name, 'success');
+          });
+        });
         wrap.querySelectorAll('[data-del-out]').forEach(function (btn) {
           btn.addEventListener('click', async function () {
             await S.removeOutfit(btn.getAttribute('data-del-out'));
             close(); UI.toast('已删除', 'success'); openOutfitEditor(dateStr);
           });
         });
-        const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), {});
+        const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), { paths: (rv.images || []).slice() });
+        if (rec) {
+          wrap.querySelector('[data-act=del]').addEventListener('click', async function () {
+            if (!await UI.confirmDialog('删除穿搭', '删除这条穿搭记录？妆品使用次数将同步撤销。')) return;
+            await S.removeOutfit(rec.id);
+            close(); UI.toast('已删除', 'success'); window.App.refresh();
+          });
+        }
         wrap.querySelector('[data-act=cancel]').addEventListener('click', function () { close(); window.App.refresh(); });
         wrap.querySelector('[data-act=save]').addEventListener('click', async function () {
           const fd = new FormData(wrap.querySelector('#outfit-form'));
@@ -504,14 +593,14 @@ window.Views = (function () {
           try {
             const images = await uploader.finalize();
             await S.saveOutfit({
-              id: U.uid(), date: dateStr,
+              id: rec ? rec.id : U.uid(), date: dateStr,
               occasion: fd.get('occasion') || '', weather: fd.get('weather') || '',
               temperature: fd.get('temperature') === '' ? null : Number(fd.get('temperature')),
               note: (fd.get('note') || '').trim(),
               itemIds: itemIds, cosmeticIds: cosmeticIds, images: images
             });
             // 妆品使用 +1 已在存储层处理
-            close(); UI.toast('打卡成功', 'success'); window.App.refresh();
+            close(); UI.toast(rec ? '已保存' : '打卡成功', 'success'); window.App.refresh();
           } catch (e) {
             UI.toast('保存失败：' + e.message, 'error'); btn.disabled = false;
           }
