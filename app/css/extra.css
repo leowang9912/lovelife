@@ -301,8 +301,11 @@
 .log-delta.up { background: rgba(52, 199, 89, .14); color: #1d7a3e; }
 .log-delta.down { background: rgba(255, 59, 48, .12); color: #c0392b; }
 
-/* 详情图放大 */
-.detail-imgs img { height: 170px; }
+/* 详情按钮统一：两列同高同排布 */
+.detail-btn-row { display: flex; gap: 8px; margin: 12px 0 4px; }
+.detail-btn-row .btn { height: 36px; display: inline-flex; align-items: center; }
+.detail-actions .btn { height: 36px; }
+.detail-actions { gap: 8px; }
 
 /* 状态徽章补充 */
 .badge-empty { background: rgba(52, 199, 89, .92); color: #fff; }

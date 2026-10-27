@@ -325,14 +325,15 @@ body {
 }
 .confirm-text { padding: 8px 0 16px; color: var(--text); }
 
-/* ---------- 详情 ---------- */
+/* ---------- 详情（三类条目共用，左右列统一） ---------- */
 .detail-imgs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 12px; }
-.detail-imgs img { height: 150px; border-radius: 11px; object-fit: cover; flex-shrink: 0; }
-.detail-cols { display: grid; grid-template-columns: 1.4fr 1fr; gap: 24px; }
+.detail-imgs img { height: 160px; border-radius: 11px; object-fit: cover; flex-shrink: 0; }
+.detail-cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; align-items: start; }
 .detail-sub {
   font-size: 12px; font-weight: 650; margin: 18px 0 8px;
   color: var(--text-2); text-transform: none; letter-spacing: -0.01em;
 }
+.detail-cols > div > .detail-sub:first-child { margin-top: 0; }
 .detail-tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .detail-kv { display: flex; flex-direction: column; }
 .kv-row {

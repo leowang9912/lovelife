@@ -38,6 +38,7 @@ window.Views = (function () {
 
     root.innerHTML =
       '<div class="page-head"><h2>' + titles[kind] + '</h2><div class="page-actions">' +
+      (kind === 'clothing' ? '<button class="btn btn-ghost" id="btn-outfit-looks">👗 穿搭组合</button>' : '') +
       '<button class="btn btn-primary" id="btn-add-item">＋ 记' + (kind === 'digital' ? '数码' : '衣服') + '</button></div></div>' +
       '<div class="filter-bar">' +
       '<input class="search-input" id="item-search" placeholder="搜索名称 / 品牌 / 备注…" value="' + U.escapeHtml(itemState.search) + '">' +
@@ -63,6 +64,8 @@ window.Views = (function () {
         : '<div class="empty-state"><div class="empty-icon">' + icons[kind] + '</div><p>还没有记录</p></div>');
 
     root.querySelector('#btn-add-item').addEventListener('click', function () { openItemEditor(null, kind); });
+    const btnLooks = root.querySelector('#btn-outfit-looks');
+    if (btnLooks) btnLooks.addEventListener('click', function () { openOutfitLooks(root); });
     root.querySelector('#item-search').addEventListener('input', U.debounce(function (e) {
       itemState.search = e.target.value;
       items(root, kind);
@@ -198,10 +201,11 @@ window.Views = (function () {
         kv('肤质适配', (item.skinType || []).join('、')) + kv('致敏', item.allergenic) +
         '</div>' +
         (item.kind === 'life'
-          ? '<button class="btn btn-primary btn-sm" id="btn-use-plus">✓ 使用一次（+1）</button>' +
-          '<button class="btn btn-ghost btn-sm" id="btn-use-edit" style="margin-left:8px">编辑使用次数</button>'
+          ? '<div class="detail-btn-row">' +
+          '<button class="btn btn-primary" id="btn-use-plus">✓ 使用一次（+1）</button>' +
+          '<button class="btn btn-ghost" id="btn-use-edit">编辑使用次数</button></div>'
           : item.kind === 'clothing'
-            ? '<button class="btn btn-primary btn-sm" id="btn-wear-plus">✓ 穿了一次（+1）</button>' : '') +
+            ? '<div class="detail-btn-row"><button class="btn btn-primary" id="btn-wear-plus">✓ 穿了一次（+1）</button></div>' : '') +
         '<h4 class="detail-sub">使用记录（可单条删除）</h4><div id="usage-log">' +
         UI.usageLogHTML(item) + '</div>' +
         '<h4 class="detail-sub">生命周期流水</h4><div>' +
@@ -287,7 +291,7 @@ window.Views = (function () {
   function row(k, v) { return '<div class="kv-row"><span>' + k + '</span><strong>' + v + '</strong></div>'; }
   function kv(k, v) {
     if (v === undefined || v === null || v === '') return '';
-    return '<div class="kv-row"><span>' + k + '</span><span>' + U.escapeHtml(String(v)) + '</span></div>';
+    return '<div class="kv-row"><span>' + k + '</span><strong>' + U.escapeHtml(String(v)) + '</strong></div>';
   }
   function statusLabel(s) {
     return {
@@ -445,6 +449,24 @@ window.Views = (function () {
     });
   }
 
+  /* 穿搭组合管理（仅衣服；通用组合管理器：范例图 + 可编辑） */
+  function openOutfitLooks(root) {
+    const db = S.getDB();
+    db.settings.outfitLooks = db.settings.outfitLooks || [];
+    const clothes = M.itemsWithComputed(db).filter(function (i) {
+      return i.kind === 'clothing' && i.status !== 'sold' && i.status !== 'gifted';
+    });
+    const items = clothes.map(function (i) {
+      const c = (db.categories.clothing || []).find(function (x) { return x.id === i.categoryId; });
+      return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
+    });
+    UI.comboManager({
+      title: '👗 穿搭组合', icon: '👗', items: items,
+      combos: db.settings.outfitLooks,
+      onChange: function () { S.saveSettings(); }
+    });
+  }
+
   /* 穿搭打卡编辑器：大图、分类勾选、妆容整合（rec 传入=编辑该条） */
   function openOutfitEditor(dateStr, rec) {
     const db = S.getDB();
@@ -464,6 +486,7 @@ window.Views = (function () {
     // 预加载缩略图 URL（异步填充）
     const existing = rec ? [] : db.outfits.filter(function (o) { return o.date === dateStr; });
     const looks = db.settings.makeupLooks || [];
+    const outfitLooks = db.settings.outfitLooks || [];
     const occasions = db.categories.occasion || [];
     const rv = rec || {};
 
@@ -489,6 +512,9 @@ window.Views = (function () {
         '<label class="f-full"><span class="f-label">备注（选填）</span><input name="note" value="' + U.escapeHtml(rv.note || '') + '"></label>' +
         '</div>' +
         '<h4 class="detail-sub">👗 勾选这天穿的衣服</h4>' +
+        (outfitLooks.length ? '<div class="chip-row" style="margin-bottom:8px">' + outfitLooks.map(function (lk, i) {
+          return '<button type="button" class="btn btn-ghost btn-sm" data-olook="' + i + '">👗 ' + U.escapeHtml(lk.name) + '</button>';
+        }).join('') + '</div>' : '') +
         '<div id="cloth-picker"></div>' +
         '<h4 class="detail-sub">💄 勾选这天用的妆品（自动计一次使用）</h4>' +
         (looks.length ? '<div class="chip-row" style="margin-bottom:8px">' + looks.map(function (lk, i) {
@@ -528,6 +554,16 @@ window.Views = (function () {
             lk.itemIds.forEach(function (id) { if (cur.indexOf(id) < 0) cur.push(id); });
             cosPick.setSelected(cur);
             UI.toast('已套用妆容：' + lk.name, 'success');
+          });
+        });
+        wrap.querySelectorAll('[data-olook]').forEach(function (b) {
+          b.addEventListener('click', function () {
+            const lk = outfitLooks[Number(b.getAttribute('data-olook'))];
+            if (!lk) return;
+            const cur = clothPick.getSelected();
+            (lk.itemIds || []).forEach(function (id) { if (cur.indexOf(id) < 0) cur.push(id); });
+            clothPick.setSelected(cur);
+            UI.toast('已套用穿搭：' + lk.name, 'success');
           });
         });
         wrap.querySelectorAll('[data-del-out]').forEach(function (btn) {
