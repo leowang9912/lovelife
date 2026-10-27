@@ -34,6 +34,7 @@ function makeWindow() {
     if (u.includes('/api/session')) return ok({ ok: true, accounts, lastAccountId: 'me', dataRoot: 'D:\\x\\data', schemaVersion: 3 });
     if (u.includes('/api/ping')) return ok({ ok: true });
     if (u.includes('/api/update/check')) return ok({ ok: true, localVersion: '1.0.1', remoteVersion: '1.0.1', hasUpdate: false, changelog: [] });
+    if (u.includes('/api/desktop-shortcut')) return ok({ ok: true, path: 'C:\\Users\\me\\Desktop\\人生管家.lnk', name: '人生管家' });
     if (u.includes('/api/version')) return ok({ version: '1.0.1', minSchema: 3, changelog: ['a'] });
     if (u.includes('/api/backup')) return ok(new Uint8Array([1]));
     if (u.includes('/api/account')) {
@@ -175,7 +176,15 @@ async function main() {
   if (!last || last.body.data.length !== 0) throw new Error('清空数据未生效');
   console.log('OK  10 清空当前账号数据');
 
-  console.log('========== 设置页 10 项功能全部可用 ==========');
+  // 11 桌面快捷方式
+  root2.querySelector('#btn-shortcut').click();
+  await new Promise(r => setTimeout(r, 350));
+  if (!calls.some(c => c.url.includes('/api/desktop-shortcut'))) throw new Error('快捷方式接口未调用');
+  const btnS = w.document.getElementById('btn-shortcut');
+  if (btnS.disabled) throw new Error('按钮未恢复可用');
+  console.log('OK  11 创建桌面快捷方式');
+
+  console.log('========== 设置页 11 项功能全部可用 ==========');
   process.exit(0);
 }
 
