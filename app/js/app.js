@@ -3,6 +3,10 @@ window.App = (function () {
   const S = window.Storage;
   const U = window.Utils;
 
+  /* 前端资源版本：与 version.json 的程序版本分开校验。
+     两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
+  const FRONTEND_VERSION = '1.0.3';
+
   let current = 'plan';
   let booted = false;
 
@@ -287,6 +291,6 @@ window.App = (function () {
     go: go, refresh: refresh, render: render,
     showAccountPicker: showAccountPicker,
     avatarPickerHTML: avatarPickerHTML, bindAvatarPicker: bindAvatarPicker,
-    AVATARS: AVATARS
+    AVATARS: AVATARS, FRONTEND_VERSION: FRONTEND_VERSION
   };
 })();
