@@ -6,11 +6,17 @@ app-config.json
 
 # ===== 构建产物与缓存 =====
 build-tmp/
+build/
+build-exe/
 dist/
+*.spec
 *.tgz
 .port
+port-busy.log
 updater.cmd
 update-staging/
+__pycache__/
+*.pyc
 
 # ===== 测试依赖 =====
 tests/node_modules/
