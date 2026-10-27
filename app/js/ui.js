@@ -179,9 +179,12 @@ window.UI = (function () {
     options = options || {};
     let paths = (options.paths || []).slice();
     let pendingBlobs = [];
+    let liveURLs = []; // 追踪 objectURL，重绘前回收防泄漏
     const Storage = window.Storage;
 
     function render() {
+      liveURLs.forEach(function (u) { URL.revokeObjectURL(u); });
+      liveURLs = [];
       container.className = 'img-uploader';
       let html = '';
       paths.forEach(function (p, i) {
@@ -201,7 +204,11 @@ window.UI = (function () {
       });
       container.querySelectorAll('img[data-fidx]').forEach(function (img) {
         const f = pendingBlobs[Number(img.getAttribute('data-fidx'))];
-        if (f) img.src = URL.createObjectURL(f.blob || f);
+        if (f) {
+          const u = URL.createObjectURL(f.blob || f);
+          liveURLs.push(u);
+          img.src = u;
+        }
       });
 
       container.querySelector('input[type=file]').addEventListener('change', async function (e) {
@@ -383,6 +390,7 @@ window.UI = (function () {
         }).join('') + '</select></label>' +
         '<label><span class="f-label">未开封限用日期</span><input type="date" name="expiryDate" value="' + U.escapeHtml(item.expiryDate || '') + '"></label>' +
         '<label><span class="f-label">剩余量</span><select name="remainLevel">' + enumSel(db.categories.remainLevel, item.remainLevel, '（未记录）') + '</select></label>' +
+        '<label><span class="f-label">用完日期（剩余量选「空」后填写）</span><input type="date" name="emptyDate" value="' + U.escapeHtml(item.emptyDate || '') + '"></label>' +
         '<label><span class="f-label">使用频率</span><select name="usageFreq">' + enumSel(db.categories.usageFreq, item.usageFreq) + '</select></label>' +
         '<label><span class="f-label">是否致敏</span><select name="allergenic">' +
         ['', '是', '否', '不确定'].map(function (v) {
@@ -488,6 +496,7 @@ window.UI = (function () {
       item.paoMonths = pao === '' ? null : Number(pao);
       item.expiryDate = fd.get('expiryDate') || '';
       item.remainLevel = fd.get('remainLevel') || '';
+      item.emptyDate = fd.get('emptyDate') || '';
       item.usageFreq = fd.get('usageFreq') || '';
       item.allergenic = fd.get('allergenic') || '';
       item.useCount = Number(fd.get('useCount')) || 0;
@@ -594,7 +603,7 @@ window.UI = (function () {
     const db = window.Storage.getDB();
     let badges = '';
     if (item.status === 'sold') badges += '<span class="badge badge-sold">已售</span>';
-    else if (item.status === 'empty') badges += '<span class="badge badge-empty">空瓶</span>';
+    else if (item.status === 'empty' || item.remainLevel === '空') badges += '<span class="badge badge-empty">空瓶</span>';
     else if (item.status === 'idle') badges += '<span class="badge badge-idle">闲置</span>';
     if (item.kind === 'game' && item.gameStatus) {
       badges += '<span class="badge badge-game">' + { unopened: '未开坑', playing: '在玩', finished: '通关', dropped: '弃坑' }[item.gameStatus] + '</span>';
@@ -633,7 +642,7 @@ window.UI = (function () {
         return '<div class="log-row">' +
           '<span class="log-delta ' + (l.delta >= 0 ? 'up' : 'down') + '">' + (l.delta >= 0 ? '+' : '') + l.delta + '</span>' +
           '<span class="muted">' + U.escapeHtml(l.date || '') + '</span>' +
-          '<span class="tag">' + (sourceLabel[l.source] || l.source || '手动') + '</span>' +
+          '<span class="tag">' + (sourceLabel[l.source] || U.escapeHtml(l.source || '手动')) + '</span>' +
           '<span class="flex1">' + U.escapeHtml(l.note || '') + '</span>' +
           '<button class="btn-icon" data-del-log="' + l.id + '" title="删除此条">×</button>' +
           '</div>';
@@ -692,7 +701,9 @@ window.UI = (function () {
               if (!await confirmDialog('删除组合', '删除该组合？（不影响物品本身）')) return;
               const i = Number(b.getAttribute('data-del-combo'));
               combos.splice(i, 1);
+              // 删除使下标前移：编辑目标要跟着调整，否则保存会写错槽位
               if (editIdx === i) editIdx = -1;
+              else if (editIdx > i) editIdx--;
               cfg.onChange();
               close(); open();
             });
@@ -733,8 +744,8 @@ window.UI = (function () {
         return '<div class="pick-rec-row" data-pick="' + r.id + '">' +
           (r.thumbPath ? '<img data-path="' + U.escapeHtml(r.thumbPath) + '" alt=""/>'
             : '<div class="pick-rec-thumb-empty">' + U.escapeHtml(r.icon || '📄') + '</div>') +
-          '<div class="flex1"><div>' + r.text + '</div>' +
-          (r.sub ? '<div class="muted small">' + r.sub + '</div>' : '') + '</div>' +
+          '<div class="flex1"><div>' + U.escapeHtml(r.text) + '</div>' +
+          (r.sub ? '<div class="muted small">' + U.escapeHtml(r.sub) + '</div>' : '') + '</div>' +
           '<span class="muted">›</span></div>';
       }).join(''),
       footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +

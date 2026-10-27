@@ -19,6 +19,7 @@ window.Utils = (function () {
   }
 
   function daysBetween(a, b) {
+    if (!a || !b) return null; // 脏数据兜底：缺日期返回 null，不抛错
     const ms = (b.getTime() - a.getTime());
     return Math.floor(ms / 86400000);
   }

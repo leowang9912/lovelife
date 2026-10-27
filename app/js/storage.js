@@ -226,17 +226,27 @@ window.Storage = (function () {
     const oldCos = isNew ? [] : (db.outfits[idx].cosmeticIds || []);
     if (!isNew) db.outfits[idx] = outfit;
     else db.outfits.push(outfit);
-    // 妆品使用次数：新打卡 +1；编辑时仅对新增妆品补 +1
+    // 妆品使用次数：新打卡 +1；编辑时新增妆品补 +1、移除妆品补 -1（对称）
     const newCos = outfit.cosmeticIds || [];
-    const needLog = isNew ? newCos : newCos.filter(function (cid) { return oldCos.indexOf(cid) < 0; });
-    if (needLog.length) {
-      needLog.forEach(function (cid) {
-        const it = db.items.find(function (i) { return i.id === cid; });
-        if (it) M.appendUsageLog(it, 1, 'outfit', '穿搭打卡 ' + (outfit.date || ''));
+    const added = newCos.filter(function (cid) { return oldCos.indexOf(cid) < 0; });
+    const removed = oldCos.filter(function (cid) { return newCos.indexOf(cid) < 0; });
+    let touched = false;
+    added.forEach(function (cid) {
+      const it = db.items.find(function (i) { return i.id === cid; });
+      if (it) { M.appendUsageLog(it, 1, 'outfit', '穿搭打卡 ' + (outfit.date || ''), outfit.id); touched = true; }
+    });
+    removed.forEach(function (cid) {
+      const it = db.items.find(function (i) { return i.id === cid; });
+      if (!it) return;
+      // 精确撤销该打卡的 +1 流水（按 refId 锚定，老数据退回按日期匹配）
+      const log = (it.usageLog || []).find(function (l) {
+        return l.source === 'outfit' && (l.refId === outfit.id ||
+          (!l.refId && l.note && l.note.indexOf(outfit.date || '') >= 0));
       });
-      return Promise.all([persist('outfits'), persist('items')]);
-    }
-    return persist('outfits');
+      if (log) M.removeUsageLogEntry(it, log.id);
+      touched = true;
+    });
+    return touched ? Promise.all([persist('outfits'), persist('items')]) : persist('outfits');
   }
 
   function removeOutfit(id) {
@@ -246,11 +256,17 @@ window.Storage = (function () {
       o.cosmeticIds.forEach(function (cid) {
         const it = db.items.find(function (i) { return i.id === cid; });
         if (!it) return;
+        // 精确匹配 refId，老数据退回按日期匹配
         const logIdx = (it.usageLog || []).findIndex(function (l) {
-          return l.source === 'outfit' && l.note && l.note.indexOf(o.date) >= 0;
+          return l.source === 'outfit' && (l.refId === o.id ||
+            (!l.refId && l.note && o.date && l.note.indexOf(o.date) >= 0));
         });
         if (logIdx >= 0) M.removeUsageLogEntry(it, it.usageLog[logIdx].id);
-        else if (Number(it.useCount) > 0) it.useCount = Number(it.useCount) - 1;
+        else if (!(it.usageLog || []).length && Number(it.useCount) > 0) {
+          // 仅对完全没有流水记录的老数据兜底扣减；
+          // 有流水但匹配不到 = 用户已手动删过该条，不能再扣（防双扣）
+          it.useCount = Number(it.useCount) - 1;
+        }
       });
     }
     db.outfits = db.outfits.filter(function (x) { return x.id !== id; });

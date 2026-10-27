@@ -36,7 +36,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.0.4"
+SERVER_BUILD = "1.0.5"
 
 _lock = threading.Lock()
 
@@ -60,7 +60,13 @@ def write_app_config(cfg):
 def data_root():
     cfg = read_app_config()
     root = cfg.get("dataRoot") or os.path.join(ROOT, "data")
-    os.makedirs(root, exist_ok=True)
+    try:
+        os.makedirs(root, exist_ok=True)
+    except OSError:
+        # 配置的绝对路径不可用（如整包拷到别的电脑后盘符不存在）：
+        # 回退到安装目录下的 data，保证能启动且数据随文件夹走
+        root = os.path.join(ROOT, "data")
+        os.makedirs(root, exist_ok=True)
     return root
 
 
@@ -253,7 +259,12 @@ def migrate_old_layout(root):
         for name in legacy:
             src = os.path.join(root, name)
             if os.path.isfile(src):
-                shutil.move(src, os.path.join(dest, name))
+                d = os.path.join(dest, name)
+                if os.path.exists(d):
+                    # 账号目录里已有同名新数据：旧平铺文件改名留存，绝不覆盖
+                    os.replace(src, src + ".legacy")
+                else:
+                    shutil.move(src, d)
         old_img = os.path.join(root, "images")
         new_img = os.path.join(dest, "images")
         if os.path.isdir(old_img):
@@ -277,7 +288,9 @@ def _read_json(path, fallback):
     try:
         with open(path, "r", encoding="utf-8") as f:
             raw = f.read().strip()
-            return json.loads(raw) if raw else fallback
+            data = json.loads(raw) if raw else fallback
+            # 类型防御：null / 数组等非法内容不让它流进业务层
+            return data if isinstance(data, dict) else fallback
     except (OSError, ValueError):
         return fallback
 
@@ -400,6 +413,23 @@ def load_db(acc_id):
     for key in user_editable:
         if key in user_cats and user_cats[key]:
             merged_cats[key] = user_cats[key]
+    # 成本模型（寿命/残值率）：用户改动存 settings.costModelOverrides，
+    # 加载时合并回分类树（分类树本身以服务端为准，防漂移）
+    overrides = (settings.get("settings") or {}).get("costModelOverrides") or {}
+
+    def _apply_cost_overrides(nodes):
+        for n in nodes:
+            ov = overrides.get(n.get("id"))
+            if ov:
+                if ov.get("lifeYears"):
+                    n["lifeYears"] = ov["lifeYears"]
+                if ov.get("residualRate") is not None:
+                    n["residualRate"] = ov["residualRate"]
+            if n.get("children"):
+                _apply_cost_overrides(n["children"])
+
+    for k in ("digital", "clothing", "life"):
+        _apply_cost_overrides(merged_cats.get(k) or [])
 
     return {
         "schemaVersion": SCHEMA_VERSION,
@@ -571,9 +601,12 @@ class Handler(BaseHTTPRequestHandler):
             header_blob, _, content = part.partition(b"\r\n\r\n")
             if b'name="file"' not in header_blob:
                 continue
-            content = content.rstrip(b"\r\n")
-            if content.endswith(b"--"):
-                content = content[:-2].rstrip(b"\r\n")
+            # 按 multipart 规范精确剥离：按 boundary 切分后，正文尾部恰好多一个
+            # 分隔 CRLF；不能 rstrip 全剥——文件合法尾部的 \r\n / "--" 会被吃掉
+            if content.endswith(b"\r\n"):
+                content = content[:-2]
+            if content.endswith(b"--") and not content.endswith(b"\r\n--"):
+                content = content[:-2]
             ext = ".png" if b"image/png" in header_blob else ".webp"
             fm = re.search(r'filename="([^"]*)"', header_blob.decode("utf-8", "ignore"))
             if fm and "." in fm.group(1):
@@ -630,10 +663,15 @@ class Handler(BaseHTTPRequestHandler):
             target = payload.get("id")
             if len(accounts) <= 1:
                 return self._json({"error": "至少保留一个账号"}, 400)
+            # 只允许删除真实存在的账号，且 id 不得含路径字符（防 ".." 穿越删目录）
+            if not target or any(ch in target for ch in ("/", "\\", "..")):
+                return self._json({"error": "非法账号 id"}, 400)
+            if not any(a["id"] == target for a in accounts):
+                return self._json({"error": "账号不存在"}, 404)
             accounts = [a for a in accounts if a["id"] != target]
             write_accounts(root, accounts)
             if payload.get("purge"):
-                d = os.path.join(root, target)
+                d = acc_dir(root, target)
                 if os.path.isdir(d):
                     shutil.rmtree(d, ignore_errors=True)
             return self._json({"ok": True, "accounts": accounts})
@@ -654,16 +692,19 @@ class Handler(BaseHTTPRequestHandler):
         cfg = read_app_config()
         old_root = data_root()
         os.makedirs(new_root, exist_ok=True)
-        if os.path.abspath(old_root) != new_root and payload.get("move"):
-            for fn in os.listdir(old_root):
-                s = os.path.join(old_root, fn)
-                d = os.path.join(new_root, fn)
-                if os.path.isdir(s):
-                    shutil.copytree(s, d, dirs_exist_ok=True)
-                else:
-                    shutil.copy2(s, d)
-        cfg["dataRoot"] = new_root
-        write_app_config(cfg)
+        # 迁移全程持锁：防迁移期间的保存写进旧根目录后丢失
+        with _lock:
+            if os.path.abspath(old_root) != new_root and payload.get("move"):
+                for fn in os.listdir(old_root):
+                    s = os.path.join(old_root, fn)
+                    d = os.path.join(new_root, fn)
+                    if os.path.isdir(s):
+                        shutil.copytree(s, d, dirs_exist_ok=True)
+                    else:
+                        if not os.path.exists(d):
+                            shutil.copy2(s, d)
+            cfg["dataRoot"] = new_root
+            write_app_config(cfg)
         return self._json({"ok": True, "dataRoot": new_root})
 
     # ---------- 应用内更新（异步下载 + 进度状态机） ----------
@@ -716,8 +757,14 @@ class Handler(BaseHTTPRequestHandler):
         accounts = migrate_old_layout(root)
         if not acc_id:
             acc_id = accounts[0]["id"]
+        # 与其他接口对齐：只允许恢复到真实账号，且 id 不得含路径字符
+        if not acc_id or any(ch in acc_id for ch in ("/", "\\", "..")):
+            return self._json({"error": "非法账号 id"}, 400)
+        if not any(a["id"] == acc_id for a in accounts):
+            return self._json({"error": "账号不存在"}, 404)
         d = acc_dir(root, acc_id)
         body = self._read_body()
+        base = os.path.realpath(d)
         with tarfile.open(fileobj=io.BytesIO(body), mode="r:gz") as tar:
             for member in tar.getmembers():
                 if not member.isfile():
@@ -725,10 +772,12 @@ class Handler(BaseHTTPRequestHandler):
                 name = member.name.replace("\\", "/")
                 rel = name.split("/", 1)[1] if "/" in name else name
                 rel = rel.split("/", 1)[1] if rel.startswith(acc_id + "/") else rel
-                if rel.startswith("..") or rel.startswith("/"):
+                # 逐段过滤路径穿越（x/../.. 形态也要拦）
+                parts = [p for p in rel.split("/") if p not in ("", ".", "..")]
+                if not parts:
                     continue
-                dest = os.path.normpath(os.path.join(d, rel))
-                if not dest.startswith(os.path.normpath(d)):
+                dest = os.path.realpath(os.path.join(d, *parts))
+                if not (dest == base or dest.startswith(base + os.sep)):
                     continue
                 os.makedirs(os.path.dirname(dest), exist_ok=True)
                 src = tar.extractfile(member)
@@ -991,7 +1040,9 @@ def _stage_and_install(data):
         r'if exist "update-staging\LICENSE" copy /y "update-staging\LICENSE" "LICENSE" >nul',
         'rmdir /s /q "update-staging" >nul 2>&1',
         'start "" "%~dp0lovelife-server.exe"',
-        'start "" cmd /c "ping -n 4 127.0.0.1 >nul & del /q \"%~f0\""',
+        # 延迟后末行自删（cmd 的 \" 不是转义，start 嵌套引号版会失效残留）
+        'ping -n 3 127.0.0.1 >nul',
+        'del /q "%~f0"',
     ]
     updater = os.path.join(ROOT, "updater.cmd")
     with open(updater, "w", encoding="ascii", newline="") as f:
@@ -1003,6 +1054,13 @@ def _stage_and_install(data):
 
 def main():
     if not port_free(PORT):
+        # 端口被占：多半是软件已在运行；静默退出（bat 侧会直接开窗）
+        # 若是被第三方占用，写日志便于排查而不是无声消失
+        try:
+            with open(os.path.join(ROOT, "port-busy.log"), "a", encoding="utf-8") as f:
+                f.write("%s port %d busy, exit\n" % (time.strftime("%Y-%m-%d %H:%M:%S"), PORT))
+        except OSError:
+            pass
         return
     data_root()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()

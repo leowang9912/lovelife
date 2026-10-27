@@ -650,7 +650,7 @@ window.PlanView = (function () {
     }
     if (id === 'lStock') {
       const unopened = sum.items.filter(function (i) {
-        return i.kind === 'life' && !i.openedDate && ['sold', 'gifted', 'dropped'].indexOf(i.status) < 0;
+        return i.kind === 'life' && !i.openedDate && ['sold', 'gifted'].indexOf(i.status) < 0;
       });
       const near = unopened.filter(function (i) {
         const dd = U.parseDate(i.expiryDate);

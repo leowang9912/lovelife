@@ -12,7 +12,15 @@ window.Updater = (function () {
    */
   async function check(silent) {
     try {
-      const r = await fetch('/api/update/check', { method: 'POST' });
+      // 30 秒超时：服务端多源检测最坏情况较慢，但不能让按钮无限转圈
+      const ac = new AbortController();
+      const timer = setTimeout(function () { ac.abort(); }, 30000);
+      let r;
+      try {
+        r = await fetch('/api/update/check', { method: 'POST', signal: ac.signal });
+      } finally {
+        clearTimeout(timer);
+      }
       const out = await r.json();
       lastCheck = out;
       if (!out.ok) {

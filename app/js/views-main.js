@@ -109,11 +109,17 @@ window.Views = (function () {
   /* ---------- 编辑器 ---------- */
   function openItemEditor(id, kind) {
     const db = S.getDB();
-    const item = id ? Object.assign({}, db.items.find(function (i) { return i.id === id; })) : {
-      id: U.uid(), kind: kind === 'digital' ? 'device' : kind,
-      status: 'in_use', purchaseDate: U.todayStr(), images: [], gameStatus: 'unopened', useCount: 0
-    };
-    if (!item) return;
+    let item;
+    if (id) {
+      const found = db.items.find(function (i) { return i.id === id; });
+      if (!found) { UI.toast('物品不存在（可能已被删除）', 'error'); return; }
+      item = Object.assign({}, found);
+    } else {
+      item = {
+        id: U.uid(), kind: kind === 'digital' ? 'device' : kind,
+        status: 'in_use', purchaseDate: U.todayStr(), images: [], gameStatus: 'unopened', useCount: 0
+      };
+    }
     const formKind = kind || item.kind;
     UI.modal({
       title: (id ? '编辑' : '记') + (formKind === 'digital' ? '数码' : formKind === 'life' ? '美妆' : kindLabel(item.kind || formKind)),
@@ -334,7 +340,7 @@ window.Views = (function () {
         '<div class="cal-day">' + d + '</div>' +
         (outs.length ? '<button class="cal-add-mini" title="再记一条">＋</button>' : '') +
         (imgs.length
-          ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs) + '\'>' +
+          ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs).replace(/'/g, '&#39;') + '\'>' +
           '<img data-path="' + U.escapeHtml(imgs[0].p) + '"/>' +
           (imgs.length > 1
             ? '<button class="cal-nav prev" data-nav-dir="-1">‹</button>' +
@@ -406,8 +412,8 @@ window.Views = (function () {
             return {
               id: o.id, thumbPath: (o.images && o.images[0]) || '', icon: '👗',
               text: ((o.itemIds || []).length) + ' 件衣服 · ' + ((o.cosmeticIds || []).length) + ' 件妆品' +
-                (o.occasion ? ' · ' + U.escapeHtml(o.occasion) : ''),
-              sub: U.escapeHtml(o.note || o.weather || '')
+                (o.occasion ? ' · ' + o.occasion : ''),
+              sub: o.note || o.weather || ''
             };
           }), function (rid) {
             if (rid === null) openOutfitEditor(dateStr);
@@ -474,7 +480,7 @@ window.Views = (function () {
       return i.kind === 'clothing' && i.status !== 'sold' && i.status !== 'gifted';
     });
     const cosmetics = M.itemsWithComputed(db).filter(function (i) {
-      return i.kind === 'life' && i.status !== 'sold' && i.status !== 'dropped';
+      return i.kind === 'life' && i.status !== 'sold' && i.status !== 'gifted';
     });
     const catName = function (i) {
       const c = (db.categories[i.kind] || []).find(function (x) { return x.id === i.categoryId; });

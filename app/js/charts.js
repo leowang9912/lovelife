@@ -1,6 +1,11 @@
 /* charts.js — 轻量 SVG 图表：折线、柱状、环图、排行条 */
 window.Charts = (function () {
   const PALETTE = ['#4f6ef7', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#64748b'];
+  // 图表内所有用户可控文本（物品名/分类名）统一转义，防注入破坏 SVG
+  function esc(t) {
+    return String(t == null ? '' : t)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 
   function svgEl(w, h) {
     return '<svg viewBox="0 0 ' + w + ' ' + h + '" width="100%" height="' + h + '" xmlns="http://www.w3.org/2000/svg" style="overflow:visible">';
@@ -28,13 +33,13 @@ window.Charts = (function () {
     s += '<path d="' + area + '" fill="rgba(79,110,247,0.12)"/>';
     s += '<path d="' + path + '" fill="none" stroke="#4f6ef7" stroke-width="2.5" stroke-linejoin="round"/>';
     pts.forEach(function (p, i) {
-      s += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="3.5" fill="#fff" stroke="#4f6ef7" stroke-width="2"><title>' + data[i].label + ': ' + data[i].value + '</title></circle>';
+      s += '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="3.5" fill="#fff" stroke="#4f6ef7" stroke-width="2"><title>' + esc(data[i].label) + ': ' + esc(data[i].value) + '</title></circle>';
     });
     // x 轴标签（稀疏显示）
     const every = Math.ceil(data.length / 8);
     data.forEach(function (d, i) {
       if (i % every === 0 || i === data.length - 1) {
-        s += '<text x="' + pts[i][0] + '" y="' + (h - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + d.label + '</text>';
+        s += '<text x="' + pts[i][0] + '" y="' + (h - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + esc(d.label) + '</text>';
       }
     });
     s += '</svg>';
@@ -59,8 +64,8 @@ window.Charts = (function () {
       const bh = (d.value / max) * ih;
       const x = padL + step * i + (step - bw) / 2;
       const y = padT + ih - bh;
-      s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + Math.max(bh, 1) + '" rx="4" fill="' + (d.color || PALETTE[i % PALETTE.length]) + '"><title>' + d.label + ': ' + d.value + '</title></rect>';
-      s += '<text x="' + (x + bw / 2) + '" y="' + (h - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + d.label + '</text>';
+      s += '<rect x="' + x + '" y="' + y + '" width="' + bw + '" height="' + Math.max(bh, 1) + '" rx="4" fill="' + (d.color || PALETTE[i % PALETTE.length]) + '"><title>' + esc(d.label) + ': ' + esc(d.value) + '</title></rect>';
+      s += '<text x="' + (x + bw / 2) + '" y="' + (h - 8) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + esc(d.label) + '</text>';
     });
     s += '</svg>';
     return s;
@@ -86,7 +91,7 @@ window.Charts = (function () {
         const x3 = cx + r2 * Math.cos(a2), y3 = cy + r2 * Math.sin(a2);
         const x4 = cx + r2 * Math.cos(angle), y4 = cy + r2 * Math.sin(angle);
         s += '<path d="M' + x1 + ' ' + y1 + ' A' + r + ' ' + r + ' 0 ' + large + ' 1 ' + x2 + ' ' + y2 +
-          ' L' + x3 + ' ' + y3 + ' A' + r2 + ' ' + r2 + ' 0 ' + large + ' 0 ' + x4 + ' ' + y4 + ' Z" fill="' + color + '"><title>' + d.label + ': ' + d.value + '</title></path>';
+          ' L' + x3 + ' ' + y3 + ' A' + r2 + ' ' + r2 + ' 0 ' + large + ' 0 ' + x4 + ' ' + y4 + ' Z" fill="' + color + '"><title>' + esc(d.label) + ': ' + esc(d.value) + '</title></path>';
       }
       angle = a2;
     });
@@ -105,9 +110,9 @@ window.Charts = (function () {
     return data.map(function (d, i) {
       const pct = Math.round((d.value / max) * 100);
       return '<div class="rank-row">' +
-        '<div class="rank-label">' + (opts.fmt ? opts.fmt(d) : d.label) + '</div>' +
+        '<div class="rank-label">' + (opts.fmt ? opts.fmt(d) : esc(d.label)) + '</div>' +
         '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' + pct + '%;background:' + (d.color || PALETTE[i % PALETTE.length]) + '"></div></div>' +
-        '<div class="rank-value">' + (d.valueText || d.value) + '</div>' +
+        '<div class="rank-value">' + esc(d.valueText || d.value) + '</div>' +
         '</div>';
     }).join('');
   }
