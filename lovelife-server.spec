@@ -2,7 +2,7 @@
 
 
 a = Analysis(
-    ['app\\serve.py'],
+    ['D:\\lovelife\\app\\serve.py'],
     pathex=[],
     binaries=[],
     datas=[],
@@ -35,4 +35,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    version='D:\\lovelife\\exe-version-info.txt',
 )

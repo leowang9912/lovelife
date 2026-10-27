@@ -81,7 +81,9 @@ window.SettingsView = (function () {
         '<p class="muted">启动时自动检测新版；更新只替换程序文件，数据不受影响。</p>' +
         '<div class="btn-row">' +
         '<button class="btn btn-primary" id="btn-check-update">检查更新</button>' +
-        '<button class="btn btn-ghost" id="btn-view-log">查看更新日志</button></div>' +
+        '<button class="btn btn-ghost" id="btn-view-log">查看更新日志</button>' +
+        '<button class="btn btn-ghost" id="btn-shortcut">🖥️ 创建桌面快捷方式</button></div>' +
+        '<p class="muted small">在桌面创建「人生管家」快捷方式，双击即可启动（自动打开应用窗口）。</p>' +
         '<div id="update-info" class="muted small"></div>') +
 
       /* 6️⃣ 危险操作 */
@@ -300,6 +302,22 @@ window.SettingsView = (function () {
           }).join('') + '</ul>'
         });
       });
+    });
+    root.querySelector('#btn-shortcut').addEventListener('click', async function () {
+      const btn = root.querySelector('#btn-shortcut');
+      btn.disabled = true; btn.textContent = '创建中…';
+      try {
+        const r = await fetch('/api/desktop-shortcut', { method: 'POST' });
+        const out = await r.json();
+        if (out.ok) {
+          UI.toast('桌面快捷方式已创建：' + (out.name || '人生管家'), 'success');
+        } else {
+          UI.toast(out.error || '创建失败', 'error');
+        }
+      } catch (e) {
+        UI.toast('创建失败：' + e.message, 'error');
+      }
+      btn.disabled = false; btn.textContent = '🖥️ 创建桌面快捷方式';
     });
 
     /* 危险操作 */

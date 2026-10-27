@@ -36,7 +36,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.0.5"
+SERVER_BUILD = "1.0.6"
 
 _lock = threading.Lock()
 
@@ -528,6 +528,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_update_check()
             if path == "/api/update/apply":
                 return self._handle_update_apply()
+            if path == "/api/desktop-shortcut":
+                return self._handle_desktop_shortcut()
         except Exception as e:
             return self._json({"error": str(e)}, 500)
         return self._json({"error": "not found"}, 404)
@@ -706,6 +708,60 @@ class Handler(BaseHTTPRequestHandler):
             cfg["dataRoot"] = new_root
             write_app_config(cfg)
         return self._json({"ok": True, "dataRoot": new_root})
+
+    # ---------- 桌面快捷方式 ----------
+    def _handle_desktop_shortcut(self):
+        """在用户桌面创建指向 lovelife.bat 的快捷方式（.lnk，带应用图标）
+
+        实现：PowerShell WScript.Shell COM 建 .lnk（内联 -Command，纯 ASCII 脚本
+        规避编码与脚本策略问题），建好后 Python 重命名为中文名。
+        """
+        bat = os.path.join(ROOT, "lovelife.bat")
+        if not os.path.isfile(bat):
+            return self._json({"ok": False, "error": "未找到 lovelife.bat，无法创建快捷方式"}, 400)
+        ico = os.path.join(APP_DIR, "favicon.ico")
+        if not os.path.isfile(ico):
+            ico = os.path.join(APP_DIR, "icon-256.png")
+
+        def ps_quote(s):
+            # PowerShell 单引号字符串：' → ''，其余原样
+            return "'" + str(s).replace("'", "''") + "'"
+
+        tmp_name = "lovelife-shortcut.tmp.lnk"
+        ps = (
+            "[Console]::OutputEncoding = [Text.Encoding]::UTF8; "
+            "$desktop = [Environment]::GetFolderPath('Desktop'); "
+            "$ws = New-Object -ComObject WScript.Shell; "
+            "$lnk = $ws.CreateShortcut((Join-Path $desktop {name})); "
+            "$lnk.TargetPath = {bat}; "
+            "$lnk.WorkingDirectory = {root}; "
+            "$lnk.IconLocation = {ico}; "
+            "$lnk.Description = {desc}; "
+            "$lnk.Save(); "
+            "Write-Output $lnk.FullName"
+        ).format(name=ps_quote(tmp_name), bat=ps_quote(bat), root=ps_quote(ROOT),
+                 ico=ps_quote(ico), desc=ps_quote("lovelife - life keeper"))
+        try:
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                capture_output=True, timeout=30,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+            # PowerShell 重定向输出默认 UTF-16LE，PS 端已强制 UTF-8，这里双解码兜底
+            raw = r.stdout or b""
+            out = (raw.decode("utf-16-le", "ignore") if b"\x00" in raw[:32]
+                   else raw.decode("utf-8", "ignore")).strip()
+            if r.returncode != 0:
+                err = (r.stderr or b"").decode("gbk", "ignore").strip() or out
+                return self._json({"ok": False, "error": "创建失败：%s" % err[:200]}, 500)
+            tmp_path = out.splitlines()[-1] if out else ""
+            if not tmp_path or not os.path.isfile(tmp_path):
+                return self._json({"ok": False, "error": "创建失败：未生成快捷方式"}, 500)
+            # 纯 ASCII 脚本生成后重命名为中文名（同名存在则覆盖）
+            final = os.path.join(os.path.dirname(tmp_path), "人生管家.lnk")
+            os.replace(tmp_path, final)
+            return self._json({"ok": True, "path": final, "name": "人生管家"})
+        except (OSError, subprocess.SubprocessError) as e:
+            return self._json({"ok": False, "error": "创建失败：%s" % e}, 500)
 
     # ---------- 应用内更新（异步下载 + 进度状态机） ----------
     def _handle_update_check(self):

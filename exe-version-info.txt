@@ -2,8 +2,8 @@
 # exe 版本资源：给杀软/文件属性看的元数据（降低未签名程序误报率）
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 5, 0),
-    prodvers=(1, 0, 5, 0),
+    filevers=(1, 0, 6, 0),
+    prodvers=(1, 0, 6, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -18,12 +18,12 @@ VSVersionInfo(
           '080404b0',
           [StringStruct('CompanyName', 'lovelife'),
            StringStruct('FileDescription', '人生管家 Life Keeper - 本地数据服务'),
-           StringStruct('FileVersion', '1.0.5.0'),
+           StringStruct('FileVersion', '1.0.6.0'),
            StringStruct('InternalName', 'lovelife-server'),
            StringStruct('LegalCopyright', 'MIT License - lovelife project'),
            StringStruct('OriginalFilename', 'lovelife-server.exe'),
            StringStruct('ProductName', '人生管家 lovelife'),
-           StringStruct('ProductVersion', '1.0.5.0'),
+           StringStruct('ProductVersion', '1.0.6.0'),
            StringStruct('Comments', 'Local data server for lovelife. No network upload.')]
         )
       ]
