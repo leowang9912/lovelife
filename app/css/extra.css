@@ -314,3 +314,18 @@
 
 /* 表格横向滚动容器（防止面板裁切） */
 .table-scroll { overflow-x: auto; max-width: 100%; }
+
+/* ---------- 更新进度与三态提示 ---------- */
+.dl-wrap { margin: 14px 0 6px; }
+.dl-track {
+  height: 8px; background: #f2f2f4; border-radius: 980px; overflow: hidden;
+}
+.dl-bar {
+  height: 100%; width: 0%; border-radius: 980px; background: var(--accent);
+  transition: width .3s ease;
+}
+.dl-text { font-size: 12px; color: var(--text-2); margin-top: 8px; line-height: 1.6; }
+.update-warn { color: #b45309; }
+.update-warn em { font-style: normal; font-weight: 700; }
+.update-ok { color: #1d7a3e; }
+.update-found { color: var(--accent); font-weight: 600; }
