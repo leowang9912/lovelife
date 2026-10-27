@@ -329,3 +329,35 @@
 .update-warn em { font-style: normal; font-weight: 700; }
 .update-ok { color: #1d7a3e; }
 .update-found { color: var(--accent); font-weight: 600; }
+
+/* ---------- 设置页：单列等宽纵向排列（任何窗口下一致） ---------- */
+.settings-stack {
+  display: flex; flex-direction: column; gap: 16px;
+  max-width: 100%;
+}
+.settings-stack > .panel { width: 100%; max-width: 100%; }
+.settings-stack .form-grid { max-width: 760px; }
+.panel-danger { border-left: 3px solid var(--red); }
+.panel-danger .panel-head h3 { color: var(--red); }
+
+/* ---------- 我的统计：板块分块 ---------- */
+.plan-block {
+  margin-bottom: 26px;
+}
+.plan-block.block-off { opacity: .55; }
+.plan-block-head {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 12px; padding: 6px 2px;
+}
+.plan-block-title {
+  font-size: 15px; font-weight: 700; letter-spacing: -0.02em;
+}
+.plan-block-title::before {
+  content: ''; display: inline-block; width: 4px; height: 15px;
+  background: var(--accent); border-radius: 980px; margin-right: 8px;
+  vertical-align: -2px;
+}
+.block-eye {
+  margin-left: auto; font-size: 15px;
+}
+.plan-block .plan-grid { min-height: 8px; }
