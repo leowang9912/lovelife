@@ -90,13 +90,23 @@ window.SettingsView = (function () {
       btn.disabled = true; btn.textContent = '检查中…';
       const info = await window.Updater.check(false);
       btn.disabled = false; btn.textContent = '检查更新';
-      if (info && info.ok) {
-        if (info.hasUpdate) {
-          window.Updater.showUpdateDialog(info);
-        } else {
-          root.querySelector('#update-info').textContent = '已是最新版本 v' + info.localVersion;
-          UI.toast('已是最新版本', 'success');
-        }
+      const out = root.querySelector('#update-info');
+      if (!info || !info.ok) {
+        // 检测失败 ≠ 没有新版：明确区分
+        const msg = (info && info.error) ? info.error : '网络异常';
+        out.innerHTML = '<span class="update-warn">⚠️ <strong>检测失败</strong>：' + U.escapeHtml(msg) +
+          '。这<em>不代表</em>没有新版，请稍后点「重试」。</span>';
+        return;
+      }
+      if (info.hasUpdate) {
+        out.innerHTML = '<span class="update-found">发现新版本 v' + U.escapeHtml(info.remoteVersion) + '，已弹出更新窗口</span>';
+        window.Updater.showUpdateDialog(info);
+      } else {
+        const t = new Date();
+        const hh = String(t.getHours()).padStart(2, '0') + ':' + String(t.getMinutes()).padStart(2, '0');
+        out.innerHTML = '<span class="update-ok">✅ <strong>已是最新版本</strong> v' + U.escapeHtml(info.localVersion) +
+          '（远端 v' + U.escapeHtml(info.remoteVersion) + ' 已确认 · 检查于 ' + hh + '）</span>';
+        UI.toast('已是最新版本', 'success');
       }
     });
     root.querySelector('#btn-view-log').addEventListener('click', function () {
