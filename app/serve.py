@@ -797,36 +797,56 @@ def build_manifest_urls(local):
     return out
 
 
+def _manifest_fetch(base):
+    """取 version.json：先带 cache-buster 穿透 CDN 缓存，失败退回原 URL"""
+    sep = "&" if "?" in base else "?"
+    for u in (base + sep + "t=%d" % int(time.time()), base):
+        try:
+            data = json.loads(fetch_url(u, timeout=8).decode("utf-8"))
+            if isinstance(data, dict) and data.get("version"):
+                return data
+        except Exception:
+            continue
+    return None
+
+
 def check_update():
+    """遍历全部镜像源、取版本号最高者。
+
+    不再"第一个源成功就采纳"——CDN（jsdelivr/jsdmirror）可能压着旧
+    version.json 缓存（stale-while-revalidate 可达 24h），单源命中缓存
+    会把真实新版误报成"已是最新"。cache-buster 逐源穿透缓存；只要任一
+    源报出更高版本即认定有更新；全部失败才算"检测失败"（≠无更新）。
+    """
     local = read_version_manifest()
     local_ver = semver_tuple(local.get("version", "0"))
-    remote = None
-    used = ""
+    best, best_ver, used = None, (0, 0, 0), ""
     errors = []
     for base in build_manifest_urls(local):
-        try:
-            data = json.loads(fetch_url(base, timeout=8).decode("utf-8"))
-            if isinstance(data, dict) and data.get("version"):
-                remote = data
-                used = base
-                break
-        except Exception as e:
-            errors.append("%s: %s" % (base[:50], e))
-    if not remote:
+        data = _manifest_fetch(base)
+        if not data:
+            errors.append("%s: unreachable" % base[:50])
+            continue
+        used = base
+        ver = semver_tuple(data.get("version", "0"))
+        if best is None or ver > best_ver:
+            best, best_ver = data, ver
+        if ver > local_ver:
+            break  # 已确认有新版，无需再问其它源
+    if not best:
         return {"ok": False, "error": "无法连接更新源", "details": errors[:3]}
-    remote_ver = semver_tuple(remote.get("version", "0"))
     return {
         "ok": True,
         "localVersion": local.get("version"),
-        "remoteVersion": remote.get("version"),
-        "hasUpdate": remote_ver > local_ver,
-        "changelog": remote.get("changelog") or [],
-        "assets": remote.get("assets") or {},
+        "remoteVersion": best.get("version"),
+        "hasUpdate": best_ver > local_ver,
+        "changelog": best.get("changelog") or [],
+        "assets": best.get("assets") or {},
         "source": used,
     }
 
 
-# ---------------- 更新状态机：idle / downloading / done / failed ----------------
+
 UPDATE_STATE = {
     "state": "idle",
     "downloaded": 0,
@@ -952,13 +972,13 @@ def _stage_and_install(data):
         'cd /d "%~dp0"',
         "ping -n 4 127.0.0.1 >nul",
         'taskkill /f /im lovelife-server.exe >nul 2>&1',
-        'if exist "update-staging\app" robocopy "update-staging\app" "app" /E /PURGE >nul',
-        'if exist "update-staging\lovelife-server.exe" copy /y "update-staging\lovelife-server.exe" "lovelife-server.exe" >nul',
-        'if exist "update-staging\lovelife.bat" copy /y "update-staging\lovelife.bat" "lovelife.bat" >nul',
-        'if exist "update-staging\version.json" copy /y "update-staging\version.json" "version.json" >nul',
-        'if exist "update-staging\README.md" copy /y "update-staging\README.md" "README.md" >nul',
-        'if exist "update-staging\CHANGELOG.md" copy /y "update-staging\CHANGELOG.md" "CHANGELOG.md" >nul',
-        'if exist "update-staging\LICENSE" copy /y "update-staging\LICENSE" "LICENSE" >nul',
+        r'if exist "update-staging\app" robocopy "update-staging\app" "app" /E /PURGE >nul',
+        r'if exist "update-staging\lovelife-server.exe" copy /y "update-staging\lovelife-server.exe" "lovelife-server.exe" >nul',
+        r'if exist "update-staging\lovelife.bat" copy /y "update-staging\lovelife.bat" "lovelife.bat" >nul',
+        r'if exist "update-staging\version.json" copy /y "update-staging\version.json" "version.json" >nul',
+        r'if exist "update-staging\README.md" copy /y "update-staging\README.md" "README.md" >nul',
+        r'if exist "update-staging\CHANGELOG.md" copy /y "update-staging\CHANGELOG.md" "CHANGELOG.md" >nul',
+        r'if exist "update-staging\LICENSE" copy /y "update-staging\LICENSE" "LICENSE" >nul',
         'rmdir /s /q "update-staging" >nul 2>&1',
         'start "" "%~dp0lovelife-server.exe"',
         'start "" cmd /c "ping -n 4 127.0.0.1 >nul & del /q \"%~f0\""',
@@ -969,175 +989,6 @@ def _stage_and_install(data):
     subprocess.Popen(["cmd", "/c", updater], cwd=ROOT,
                      creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
     return True
-
-
-def port_free(p):
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.connect(("127.0.0.1", p))
-        return False
-    except OSError:
-        return True
-    finally:
-        s.close()
-
-
-# ---------------- 版本与应用内更新 ----------------
-def read_version_manifest():
-    path = os.path.join(ROOT, "version.json")
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return {"version": "0.0.0", "minSchema": SCHEMA_VERSION, "changelog": []}
-
-
-def semver_tuple(v):
-    try:
-        return tuple(int(x) for x in str(v).lstrip("v").split(".")[:3])
-    except ValueError:
-        return (0, 0, 0)
-
-
-def fetch_url(url, timeout=20):
-    """urllib 下载（供更新检查/下载使用）"""
-    req = urllib.request.Request(url, headers={"User-Agent": "lovelife-updater/1.0"})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return resp.read()
-
-
-# 国内可用性较好的镜像前缀（会与 version.json 中的源合并去重）
-GH_RAW_PREFIXES = [
-    "https://ghfast.top/https://raw.githubusercontent.com/",
-    "https://cdn.jsdmirror.com/gh/",
-    "https://gh-proxy.com/https://raw.githubusercontent.com/",
-    "https://mirror.ghproxy.com/https://raw.githubusercontent.com/",
-    "https://raw.githubusercontent.com/",
-]
-
-
-def build_manifest_urls(local):
-    """合并 version.json 的 updateManifest + 根据 repo 生成的镜像链"""
-    urls = list(local.get("updateManifest") or [])
-    repo = local.get("repo") or ""
-    if repo and "/" in repo:
-        owner, name = repo.split("/", 1)
-        raw_path = "%s/%s/main/version.json" % (owner, name)
-        for p in GH_RAW_PREFIXES:
-            if p.endswith("/gh/"):
-                urls.append(p + owner + "/" + name + "@main/version.json")
-            else:
-                urls.append(p + raw_path)
-    # 去重 + 可靠源优先（jsdmirror/ghfast 实测国内可达率高）
-    seen, out = set(), []
-    def score(u):
-        return 0 if ("jsdmirror" in u or "ghfast" in u or "jsdelivr" in u) else 1
-    for u in sorted(urls, key=score):
-        if u not in seen:
-            seen.add(u)
-            out.append(u)
-    return out
-
-
-def check_update():
-    local = read_version_manifest()
-    local_ver = semver_tuple(local.get("version", "0"))
-    remote = None
-    used = ""
-    errors = []
-    for base in build_manifest_urls(local):
-        try:
-            data = json.loads(fetch_url(base, timeout=8).decode("utf-8"))
-            if isinstance(data, dict) and data.get("version"):
-                remote = data
-                used = base
-                break
-        except Exception as e:
-            errors.append("%s: %s" % (base[:50], e))
-    if not remote:
-        return {"ok": False, "error": "无法连接更新源", "details": errors[:3]}
-    remote_ver = semver_tuple(remote.get("version", "0"))
-    return {
-        "ok": True,
-        "localVersion": local.get("version"),
-        "remoteVersion": remote.get("version"),
-        "hasUpdate": remote_ver > local_ver,
-        "changelog": remote.get("changelog") or [],
-        "assets": remote.get("assets") or {},
-        "source": used,
-    }
-
-
-def apply_update(url):
-    """下载 zip → 解压到 update-staging → 生成 updater.cmd 并执行"""
-    staging = os.path.join(ROOT, "update-staging")
-    if os.path.isdir(staging):
-        shutil.rmtree(staging, ignore_errors=True)
-    os.makedirs(staging, exist_ok=True)
-
-    # 镜像链：可靠加速源优先（国内下载 GitHub Release 依赖此加速）
-    candidates = [url]
-    for prefix in ("https://ghfast.top/", "https://gh-proxy.com/", "https://mirror.ghproxy.com/"):
-        if url.startswith("https://github.com/") or url.startswith("https://objects.githubusercontent.com/"):
-            candidates.append(prefix + url)
-
-    data = None
-    used = ""
-    for u in candidates:
-        try:
-            data = fetch_url(u, timeout=900)  # 大包慢网环境放宽到 15 分钟
-            used = u
-            break
-        except Exception:
-            continue
-    if not data:
-        return {"ok": False, "error": "下载失败，请检查网络"}
-
-    zpath = os.path.join(staging, "update.zip")
-    with open(zpath, "wb") as f:
-        f.write(data)
-    with zipfile.ZipFile(zpath, "r") as z:
-        z.extractall(staging)
-    os.remove(zpath)
-
-    # zip 内可能是 lovelife/ 根目录
-    inner = os.path.join(staging, "lovelife")
-    if os.path.isdir(inner):
-        for name in os.listdir(inner):
-            shutil.move(os.path.join(inner, name), os.path.join(staging, name))
-        shutil.rmtree(inner, ignore_errors=True)
-
-    # 校验关键文件
-    if not os.path.isfile(os.path.join(staging, "app", "serve.py")):
-        return {"ok": False, "error": "更新包格式不正确"}
-
-    # 生成更新器（ASCII + CRLF，等待本进程退出后替换）
-    bat_lines = [
-        "@echo off",
-        "setlocal",
-        'cd /d "%~dp0"',
-        "rem wait for server exit",
-        "ping -n 4 127.0.0.1 >nul",
-        'taskkill /f /im lovelife-server.exe >nul 2>&1',
-        'if exist "update-staging\\app" robocopy "update-staging\\app" "app" /E /PURGE >nul',
-        'if exist "update-staging\\lovelife-server.exe" copy /y "update-staging\\lovelife-server.exe" "lovelife-server.exe" >nul',
-        'if exist "update-staging\\lovelife.bat" copy /y "update-staging\\lovelife.bat" "lovelife.bat" >nul',
-        'if exist "update-staging\\version.json" copy /y "update-staging\\version.json" "version.json" >nul',
-        'if exist "update-staging\\README.md" copy /y "update-staging\\README.md" "README.md" >nul',
-        'if exist "update-staging\\CHANGELOG.md" copy /y "update-staging\\CHANGELOG.md" "CHANGELOG.md" >nul',
-        'if exist "update-staging\\LICENSE" copy /y "update-staging\\LICENSE" "LICENSE" >nul',
-        'rmdir /s /q "update-staging" >nul 2>&1',
-        'start "" "%~dp0lovelife-server.exe"',
-        'start "" cmd /c "ping -n 4 127.0.0.1 >nul & del /q \"%~f0\""',
-    ]
-    updater = os.path.join(ROOT, "updater.cmd")
-    with open(updater, "w", encoding="ascii", newline="") as f:
-        f.write("\r\n".join(bat_lines) + "\r\n")
-
-    # 启动更新器后本进程退出
-    subprocess.Popen(["cmd", "/c", updater], cwd=ROOT,
-                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return {"ok": True, "message": "更新已开始", "source": used}
 
 
 def main():
