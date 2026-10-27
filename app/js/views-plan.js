@@ -25,11 +25,23 @@ window.PlanView = (function () {
     dWarranty: { name: '保修临期', block: 'digital', size: 'm' },
     resale: { name: '回血潜力', block: 'digital', size: 'm' },
     dIdle: { name: '数码吃灰排行', block: 'digital', size: 'm' },
-    cpw: { name: 'cost per wear 精算', block: 'clothing', size: 'm' },
+    cPrice: { name: '衣物价格排行', block: 'clothing', size: 'm' },
+    cWearRank: { name: '穿着次数排行', block: 'clothing', size: 'm' },
+    cpw: { name: '单次穿着成本排行', block: 'clothing', size: 'm' },
+    cOutfitRank: { name: '穿搭搭配次数排行', block: 'clothing', size: 'm' },
+    cNoWear: { name: '未穿着清单', block: 'clothing', size: 'm' },
+    cBuyTrend: { name: '购衣月度曲线', block: 'clothing', size: 'm' },
+    cStreak: { name: '打卡连续与季节分布', block: 'clothing', size: 'm' },
+    cCatPie: { name: '衣橱分类构成', block: 'clothing', size: 'm' },
     outfitStats: { name: '穿搭统计', block: 'clothing', size: 'l' },
     cIdle: { name: '衣物吃灰排行', block: 'clothing', size: 'm' },
-    lCpw: { name: '美妆单次成本', block: 'life', size: 'm' },
-    lUseRank: { name: '美妆使用频率', block: 'life', size: 'm' },
+    lPrice: { name: '美妆价格排行', block: 'life', size: 'm' },
+    lCpw: { name: '单次使用成本排行', block: 'life', size: 'm' },
+    lUseRank: { name: '使用次数排行', block: 'life', size: 'm' },
+    lOutfitRank: { name: '妆品搭配次数排行', block: 'life', size: 'm' },
+    lFresh: { name: '开封新鲜度排行', block: 'life', size: 'm' },
+    lStock: { name: '未开封库存', block: 'life', size: 'm' },
+    lCatPie: { name: '生活分类构成', block: 'life', size: 'm' },
     lExpiry: { name: 'PAO 临期', block: 'life', size: 'm' },
     empty: { name: '空瓶/回购', block: 'life', size: 'm' },
     foodStats: { name: '美食统计', block: 'life', size: 'm' }
@@ -44,6 +56,11 @@ window.PlanView = (function () {
     useRank: ['dUseRank'], idle: ['dIdle', 'cIdle'],
     expiry: ['dWarranty', 'lExpiry'], cpwLife: ['lCpw'], lifeUseRank: ['lUseRank']
   };
+
+  /* 新增栏目默认开启（老用户自动补到对应板块末尾） */
+  const DEFAULT_ON = ['monthly', 'budget', 'cpw', 'game', 'foodStats',
+    'cPrice', 'cWearRank', 'cOutfitRank', 'cNoWear', 'cBuyTrend', 'cStreak', 'cCatPie',
+    'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie'];
 
   /* 补齐/迁移栏目，保留用户已有顺序（块内相对顺序不变） */
   function normalizeSections(db) {
@@ -66,7 +83,7 @@ window.PlanView = (function () {
       if (!have[id]) {
         flat.push({
           id: id,
-          enabled: SECTION_META[id].fixed || ['monthly', 'budget', 'cpw', 'game', 'foodStats'].indexOf(id) >= 0,
+          enabled: SECTION_META[id].fixed || DEFAULT_ON.indexOf(id) >= 0,
           fixed: !!SECTION_META[id].fixed
         });
       }
@@ -95,7 +112,9 @@ window.PlanView = (function () {
       '<button class="btn btn-ghost" id="btn-edit-sections">' + (editMode ? '完成' : '⚙️ 栏目设置') + '</button>' +
       '<button class="btn btn-primary" data-act="add-device">＋ 记数码</button>' +
       '<button class="btn btn-primary" data-act="add-clothing">＋ 记衣服</button>' +
-      '<button class="btn btn-ghost" data-act="outfit">今日打卡</button></div></div>' +
+      '<button class="btn btn-primary" data-act="add-life">＋ 记美妆</button>' +
+      '<button class="btn btn-ghost" data-act="outfit">👗 穿搭打卡</button>' +
+      '<button class="btn btn-ghost" data-act="food">🍱 饮食打卡</button></div></div>' +
       (editMode ? '<p class="muted pad-8">拖动面板可块内换序；按钮调宽度/隐藏/上下移；👁 可整块屏蔽。</p>' : '') +
       '<div class="plan-wrap" id="plan-wrap"></div>';
 
@@ -149,7 +168,11 @@ window.PlanView = (function () {
             '</div>' : '') +
           '</div><div class="panel-body" data-body="' + sec.id + '"></div>';
         grid.appendChild(el);
-        renderSection(el.querySelector('[data-body]'), sec.id, db, sum);
+        try {
+          renderSection(el.querySelector('[data-body]'), sec.id, db, sum);
+        } catch (err) {
+          el.querySelector('[data-body]').innerHTML = '<p class="empty-hint">该栏目渲染失败：' + U.escapeHtml(String(err && err.message || err)) + '</p>';
+        }
       });
     });
 
@@ -186,21 +209,21 @@ window.PlanView = (function () {
         while (t >= 0 && t < arr.length && (SECTION_META[arr[t].id] || {}).block !== block) t += dir;
         if (t < 0 || t >= arr.length) return;
         const tmp = arr[idx]; arr[idx] = arr[t]; arr[t] = tmp;
-        S.saveSettings().then(function () { render(root); });
+        S.saveSettings().then(function () { UI.toast('顺序已保存', 'success'); render(root); }).catch(function () { UI.toast('保存失败，顺序未生效', 'error'); });
       });
     });
     root.querySelectorAll('[data-toggle]').forEach(function (b) {
       b.addEventListener('click', function () {
         const idx = Number(b.getAttribute('data-toggle'));
         db.settings.planSections[idx].enabled = !db.settings.planSections[idx].enabled;
-        S.saveSettings().then(function () { render(root); });
+        S.saveSettings().then(function () { render(root); }).catch(function () { UI.toast('保存失败', 'error'); });
       });
     });
     root.querySelectorAll('[data-size-btn]').forEach(function (b) {
       b.addEventListener('click', function () {
         const idx = Number(b.getAttribute('data-size-btn'));
         db.settings.planSections[idx].size = b.getAttribute('data-size-val');
-        S.saveSettings().then(function () { render(root); });
+        S.saveSettings().then(function () { render(root); }).catch(function () { UI.toast('保存失败', 'error'); });
       });
     });
     root.querySelectorAll('[data-act]').forEach(function (btn) {
@@ -208,14 +231,16 @@ window.PlanView = (function () {
         const act = btn.getAttribute('data-act');
         if (act === 'add-device') window.Views.openItemEditor(null, 'digital');
         if (act === 'add-clothing') window.Views.openItemEditor(null, 'clothing');
-        if (act === 'outfit') window.App.go('outfits');
+        if (act === 'add-life') window.Views.openItemEditor(null, 'life');
+        if (act === 'outfit') window.Views.openOutfitEditor(U.todayStr());
+        if (act === 'food' && window.FoodView && window.FoodView.openFoodEditor) window.FoodView.openFoodEditor(U.todayStr(), null);
       });
     });
   }
 
-  /* 拖动排序：仅同一板块内 */
+  /* 拖动排序：Pointer Events（鼠标/触屏/手写笔通用），仅同一板块内 */
   function bindDrag(root, db) {
-    let dragId = null;
+    let dragEl = null;
     let placeholder = null;
     function ph() {
       if (!placeholder) {
@@ -224,65 +249,63 @@ window.PlanView = (function () {
       }
       return placeholder;
     }
-    root.querySelectorAll('.plan-sec[draggable]').forEach(function (el) {
-      el.addEventListener('dragstart', function (e) {
-        dragId = el.getAttribute('data-id');
-        el.classList.add('dragging');
-        e.dataTransfer.effectAllowed = 'move';
-        try { e.dataTransfer.setData('text/plain', dragId); } catch (err) { /* noop */ }
-        const p = ph();
-        p.style.minHeight = Math.max(90, el.offsetHeight) + 'px';
-        el.parentNode.insertBefore(p, el.nextSibling);
-      });
-      el.addEventListener('dragend', function () {
-        el.classList.remove('dragging');
-        if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
-      });
-    });
-    root.querySelectorAll('.plan-grid').forEach(function (grid) {
-      grid.addEventListener('dragover', function (e) {
-        if (!dragId) return;
-        e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        const over = e.target.closest ? e.target.closest('.plan-sec') : null;
-        const p = ph();
-        // 只允许同块内移动
-        const dragEl = root.querySelector('.plan-sec[data-id="' + dragId + '"]');
-        if (!dragEl || dragEl.parentNode !== grid) return;
-        if (!over || over.getAttribute('data-id') === dragId) return;
-        const rect = over.getBoundingClientRect();
-        const before = (e.clientY - rect.top) < rect.height / 2;
-        if (before) grid.insertBefore(p, over);
-        else grid.insertBefore(p, over.nextSibling);
-      });
-      grid.addEventListener('drop', function (e) {
-        if (!dragId) return;
-        e.preventDefault();
-        const p = ph();
+    function commit() {
+      const p = placeholder;
+      if (p && p.parentNode) {
         const parent = p.parentNode;
-        if (!parent) return;
+        const dragId = dragEl.getAttribute('data-id');
         // 块内 DOM 顺序 → 重排该块在数组里的相对顺序
         const domIds = Array.prototype.slice.call(parent.children)
           .filter(function (n) { return n.classList.contains('plan-sec') || n === p; })
           .map(function (n) { return n === p ? dragId : n.getAttribute('data-id'); });
         const arr = db.settings.planSections;
         const block = (SECTION_META[dragId] || {}).block;
-        // 抽出该块的栏目按 DOM 序放回
         const blockIdxs = [];
         arr.forEach(function (s, i) { if ((SECTION_META[s.id] || {}).block === block) blockIdxs.push(i); });
-        const blockSecs = blockIdxs.map(function (i) { return arr[i]; });
         const byId = {};
-        blockSecs.forEach(function (s) { byId[s.id] = s; });
+        blockIdxs.forEach(function (i) { byId[arr[i].id] = arr[i]; });
         const reordered = [];
         domIds.forEach(function (id) {
           if (byId[id]) { reordered.push(byId[id]); delete byId[id]; }
         });
         Object.keys(byId).forEach(function (id) { reordered.push(byId[id]); });
         blockIdxs.forEach(function (arrI, k) { arr[arrI] = reordered[k]; });
-        dragId = null;
-        if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
-        S.saveSettings().then(function () { render(root); });
+        S.saveSettings().then(function () { UI.toast('顺序已保存', 'success'); render(root); }).catch(function () { UI.toast('保存失败，顺序未生效', 'error'); });
+      }
+      if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
+      if (dragEl) dragEl.classList.remove('dragging');
+      dragEl = null;
+      placeholder = null;
+    }
+    root.querySelectorAll('.plan-sec[draggable]').forEach(function (el) {
+      el.addEventListener('pointerdown', function (e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        // 只允许从面板头起拖，避免误触面板内滚动/图表；按钮点击不触发拖动
+        const head = e.target.closest ? e.target.closest('.panel-head') : null;
+        if (!head) return;
+        if (e.target.closest('button, input, select, a')) return;
+        e.preventDefault();
+        dragEl = el;
+        el.classList.add('dragging');
+        const p = ph();
+        p.style.minHeight = Math.max(90, el.offsetHeight) + 'px';
+        el.parentNode.insertBefore(p, el.nextSibling);
+        try { el.setPointerCapture(e.pointerId); } catch (err) { /* noop */ }
       });
+      el.addEventListener('pointermove', function (e) {
+        if (!dragEl || dragEl !== el) return;
+        const grid = el.parentNode;
+        const over = document.elementFromPoint(e.clientX, e.clientY);
+        const sec = over && over.closest ? over.closest('.plan-sec') : null;
+        const p = ph();
+        if (!sec || sec === el || sec.parentNode !== grid) return;
+        const rect = sec.getBoundingClientRect();
+        const before = (e.clientY - rect.top) < rect.height / 2;
+        if (before) grid.insertBefore(p, sec);
+        else grid.insertBefore(p, sec.nextSibling);
+      });
+      el.addEventListener('pointerup', function () { if (dragEl === el) commit(); });
+      el.addEventListener('pointercancel', function () { if (dragEl === el) commit(); });
     });
   }
 
@@ -398,12 +421,101 @@ window.PlanView = (function () {
       })) : '<p class="empty-hint">没有吃灰物品，状态很好</p>';
       return;
     }
+    if (id === 'cPrice') {
+      const top = sum.items.filter(function (i) { return i.kind === 'clothing' && i.status !== 'sold' && i.status !== 'gifted'; })
+        .sort(function (a, b) { return (Number(b.purchasePrice) || 0) - (Number(a.purchasePrice) || 0); }).slice(0, 8);
+      body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
+        return { label: i.name, value: Number(i.purchasePrice) || 0, valueText: U.formatMoney(i.purchasePrice) };
+      })) : '<p class="empty-hint">暂无衣物</p>';
+      return;
+    }
+    if (id === 'cWearRank') {
+      const ranked = sum.items.filter(function (i) { return i.kind === 'clothing'; })
+        .filter(function (i) { return (i.wearCount || 0) > 0; })
+        .sort(function (a, b) { return (b.wearCount || 0) - (a.wearCount || 0); }).slice(0, 8);
+      body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
+        return { label: i.name, value: i.wearCount, valueText: i.wearCount + ' 次' };
+      })) : '<p class="empty-hint">还没有穿着记录</p>';
+      return;
+    }
     if (id === 'cpw') {
       const good = sum.cpwList.filter(function (c) { return c.wear > 0 && c.cpw != null; }).slice(0, 8);
-      body.innerHTML = good.length ? good.map(function (c) {
-        return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(c.item.name) + '</span>' +
-          '<span class="muted">穿 ' + c.wear + ' 次</span><strong>' + U.formatCost(c.cpw) + '/次</strong></div>';
-      }).join('') : '<p class="empty-hint">还没有穿着记录</p>';
+      body.innerHTML = good.length ? C.rankBars(good.map(function (c) {
+        return { label: c.item.name, value: c.cpw, valueText: U.formatCost(c.cpw) + '/次（穿 ' + c.wear + ' 次）' };
+      })) : '<p class="empty-hint">还没有穿着记录</p>';
+      return;
+    }
+    if (id === 'cOutfitRank') {
+      const ranked = sum.items.filter(function (i) { return i.kind === 'clothing' && (i.autoWear || 0) > 0; })
+        .sort(function (a, b) { return (b.autoWear || 0) - (a.autoWear || 0); }).slice(0, 8);
+      body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
+        return { label: i.name, value: i.autoWear, valueText: i.autoWear + ' 次搭配' };
+      })) : '<p class="empty-hint">穿搭打卡勾选衣物后自动统计</p>';
+      return;
+    }
+    if (id === 'cNoWear') {
+      const list = sum.items.filter(function (i) {
+        return i.kind === 'clothing' && ['in_use', 'idle', 'to_sell'].indexOf(i.status) >= 0 && (i.wearCount || 0) === 0;
+      }).slice(0, 8);
+      body.innerHTML = list.length ? '<div class="mini-table">' + list.map(function (i) {
+        return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(i.name) + '</span>' +
+          (i.keepTag ? '<span class="tag">吊牌在</span>' : '') +
+          '<span class="muted">' + U.formatMoney(i.purchasePrice) + '</span></div>';
+      }).join('') + '</div>' : '<p class="empty-hint">每件都穿过，没有闲置新衣</p>';
+      return;
+    }
+    if (id === 'cBuyTrend') {
+      const byMonth = {};
+      sum.items.forEach(function (i) {
+        if (i.kind !== 'clothing' || !i.purchaseDate) return;
+        const k = U.monthKey(i.purchaseDate);
+        byMonth[k] = (byMonth[k] || 0) + (Number(i.purchasePrice) || 0);
+      });
+      const trend = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+        const key = U.monthKey(U.todayStr(d));
+        trend.push({ label: key.slice(5) + '月', value: Math.round(byMonth[key] || 0) });
+      }
+      body.innerHTML = C.bar(trend);
+      return;
+    }
+    if (id === 'cStreak') {
+      // 连续打卡天数（以最近一次打卡为终点往回数）
+      const days = {};
+      db.outfits.forEach(function (o) { if (o.date) days[o.date] = true; });
+      let streak = 0;
+      const cur = new Date();
+      if (!days[U.todayStr(cur)]) cur.setDate(cur.getDate() - 1); // 今天还没打卡则从昨天起算
+      while (days[U.todayStr(cur)]) { streak++; cur.setDate(cur.getDate() - 1); }
+      const seasonOf = function (m) { return m === 12 || m <= 2 ? '冬' : m <= 5 ? '春' : m <= 8 ? '夏' : '秋'; };
+      const seasonCount = { '春': 0, '夏': 0, '秋': 0, '冬': 0 };
+      db.outfits.forEach(function (o) {
+        const d = U.parseDate(o.date);
+        if (d) seasonCount[seasonOf(d.getMonth() + 1)]++;
+      });
+      body.innerHTML = '<div class="kpi-mini-row" style="margin:0 0 8px">' +
+        '<div class="kpi-mini">连续打卡<strong>' + streak + ' 天</strong></div>' +
+        '<div class="kpi-mini">累计打卡<strong>' + Object.keys(days).length + ' 天</strong></div></div>' +
+        C.rankBars(Object.keys(seasonCount).map(function (s) {
+          return { label: s + '季', value: seasonCount[s], valueText: seasonCount[s] + ' 次' };
+        }));
+      return;
+    }
+    if (id === 'cCatPie') {
+      const byCat = {};
+      sum.items.forEach(function (i) {
+        if (i.kind !== 'clothing' || i.status === 'sold' || i.status === 'gifted') return;
+        const c = (db.categories.clothing || []).find(function (x) { return x.id === i.categoryId; });
+        const name = c ? c.name : '其他';
+        byCat[name] = (byCat[name] || 0) + M.ownInvested(db, i);
+      });
+      const keys = Object.keys(byCat);
+      body.className = 'panel-body center';
+      body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
+        return { label: k, value: Math.round(byCat[k]), color: ['#ff2d55', '#0071e3', '#af52de', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
+      }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '衣橱总投入' })
+        : '<p class="empty-hint">暂无衣物</p>';
       return;
     }
     if (id === 'outfitStats') {
@@ -429,12 +541,19 @@ window.PlanView = (function () {
         }));
       return;
     }
+    if (id === 'lPrice') {
+      const top = sum.items.filter(function (i) { return i.kind === 'life' && i.status !== 'sold' && i.status !== 'gifted'; })
+        .sort(function (a, b) { return (Number(b.purchasePrice) || 0) - (Number(a.purchasePrice) || 0); }).slice(0, 8);
+      body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
+        return { label: i.name, value: Number(i.purchasePrice) || 0, valueText: U.formatMoney(i.purchasePrice) };
+      })) : '<p class="empty-hint">暂无妆品</p>';
+      return;
+    }
     if (id === 'lCpw') {
       const lifes = sum.lifeUseList.filter(function (c) { return c.uses > 0 && c.cpw != null; }).slice(0, 8);
-      body.innerHTML = lifes.length ? lifes.map(function (c) {
-        return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(c.item.name) + '</span>' +
-          '<span class="muted">用 ' + c.uses + ' 次</span><strong>' + U.formatCost(c.cpw) + '/次</strong></div>';
-      }).join('') : '<p class="empty-hint">还没有使用记录</p>';
+      body.innerHTML = lifes.length ? C.rankBars(lifes.map(function (c) {
+        return { label: c.item.name, value: c.cpw, valueText: U.formatCost(c.cpw) + '/次（用 ' + c.uses + ' 次）' };
+      })) : '<p class="empty-hint">还没有使用记录</p>';
       return;
     }
     if (id === 'lUseRank') {
@@ -444,6 +563,57 @@ window.PlanView = (function () {
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.useCount, valueText: i.useCount + ' 次' };
       })) : '<p class="empty-hint">暂无使用记录</p>';
+      return;
+    }
+    if (id === 'lOutfitRank') {
+      const ranked = sum.items.filter(function (i) { return i.kind === 'life' && (i.autoWear || 0) > 0; })
+        .sort(function (a, b) { return (b.autoWear || 0) - (a.autoWear || 0); }).slice(0, 8);
+      body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
+        return { label: i.name, value: i.autoWear, valueText: i.autoWear + ' 次搭配' };
+      })) : '<p class="empty-hint">穿搭打卡勾选妆品后自动统计</p>';
+      return;
+    }
+    if (id === 'lFresh') {
+      // 开封新鲜度：开封最久的排前面（提醒尽快用完）
+      const opened = sum.items.filter(function (i) { return i.kind === 'life' && U.parseDate(i.openedDate); })
+        .map(function (i) { return { item: i, days: U.daysBetween(U.parseDate(i.openedDate), now) }; })
+        .sort(function (a, b) { return b.days - a.days; }).slice(0, 8);
+      body.innerHTML = opened.length ? C.rankBars(opened.map(function (x) {
+        return { label: x.item.name, value: x.days, valueText: '已开封 ' + x.days + ' 天' };
+      })) : '<p class="empty-hint">还没有填写开封日期</p>';
+      return;
+    }
+    if (id === 'lStock') {
+      const unopened = sum.items.filter(function (i) {
+        return i.kind === 'life' && !i.openedDate && ['sold', 'gifted', 'dropped'].indexOf(i.status) < 0;
+      });
+      const near = unopened.filter(function (i) {
+        const dd = U.parseDate(i.expiryDate);
+        return !!dd && U.daysBetween(now, dd) <= 90;
+      }).slice(0, 6);
+      body.innerHTML = '<div class="mini-table">' +
+        '<div class="mini-row"><span class="flex1">未开封库存</span><strong>' + unopened.length + ' 件</strong></div>' +
+        '<div class="mini-row"><span class="flex1">其中 90 天内限用</span><strong>' + near.length + ' 件</strong></div></div>' +
+        (near.length ? '<h4 class="detail-sub">限用预警</h4>' + '<div class="mini-table">' + near.map(function (i) {
+          return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(i.name) + '</span>' +
+            '<span class="muted">' + U.escapeHtml(i.expiryDate || '') + '</span></div>';
+        }).join('') + '</div>' : '');
+      return;
+    }
+    if (id === 'lCatPie') {
+      const byCat = {};
+      sum.items.forEach(function (i) {
+        if (i.kind !== 'life' || i.status === 'sold' || i.status === 'gifted') return;
+        const c = (db.categories.life || []).find(function (x) { return x.id === i.categoryId; });
+        const name = c ? c.name : '其他';
+        byCat[name] = (byCat[name] || 0) + M.ownInvested(db, i);
+      });
+      const keys = Object.keys(byCat);
+      body.className = 'panel-body center';
+      body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
+        return { label: k, value: Math.round(byCat[k]), color: ['#af52de', '#ff2d55', '#0071e3', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
+      }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '生活总投入' })
+        : '<p class="empty-hint">暂无妆品</p>';
       return;
     }
     if (id === 'lExpiry') {

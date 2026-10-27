@@ -60,6 +60,19 @@ def main():
             manifest["assets"][k] = re.sub(r"v\d+\.\d+\.\d+", "v" + new_ver, v)
         write_version(manifest)
         print("version.json: %s -> %s" % (old, new_ver))
+        # 同步 exe/前端内嵌版本号（设置页三方自检依赖，漏同步会误报"更新未完整落地"）
+        for rel, pat in (
+            ("app/serve.py", r'SERVER_BUILD = ["\']\d+\.\d+\.\d+["\']'),
+            ("app/js/app.js", r'FRONTEND_VERSION = ["\']\d+\.\d+\.\d+["\']'),
+        ):
+            p = os.path.join(ROOT, rel)
+            with open(p, encoding="utf-8") as f:
+                src = f.read()
+            src2 = re.sub(pat, pat.split(" = ")[0] + ' = "%s"' % new_ver, src, count=1)
+            if src2 != src:
+                with open(p, "w", encoding="utf-8", newline="") as f:
+                    f.write(src2)
+                print("%s -> %s" % (rel, new_ver))
 
     ver = manifest["version"]
     os.makedirs(DIST, exist_ok=True)

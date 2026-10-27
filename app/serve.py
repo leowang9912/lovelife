@@ -33,6 +33,10 @@ APP_DIR = os.path.join(ROOT, "app")
 CONFIG_FILE = os.path.join(ROOT, "app-config.json")
 SCHEMA_VERSION = 3
 PORT = 8765
+# 服务端构建版本（release.py 发版时与 version.json 同步）。
+# 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
+# 设置页据此提示"更新未完整落地"。
+SERVER_BUILD = "1.0.3"
 
 _lock = threading.Lock()
 
@@ -462,7 +466,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/backup":
             return self._send_backup(self._acc(parsed))
         if path == "/api/version":
-            return self._json(read_version_manifest())
+            manifest = read_version_manifest()
+            manifest["serverBuild"] = SERVER_BUILD
+            return self._json(manifest)
         if path == "/api/update/check":
             result = check_update()
             result["checkedAt"] = int(time.time())
@@ -513,8 +519,12 @@ class Handler(BaseHTTPRequestHandler):
             ".ico": "image/x-icon", ".onnx": "application/octet-stream",
             ".wasm": "application/wasm", ".json": "application/json",
         }.get(os.path.splitext(full)[1].lower(), "application/octet-stream")
+        extra = {}
+        if full.lower().endswith(".html"):
+            # 防止更新后浏览器沿用旧版 JS/CSS 缓存（"半更新"假象的另一个来源）
+            extra["Clear-Site-Data"] = '"cache"'
         with open(full, "rb") as f:
-            self._send(200, f.read(), ctype)
+            self._send(200, f.read(), ctype, extra)
 
     # ---------- 数据 ----------
     def _handle_save(self):

@@ -354,7 +354,7 @@ window.Views = (function () {
         return '<option value="' + i + '"' + (i === calMonth ? ' selected' : '') + '>' + (i + 1) + ' 月</option>';
       }).join('') + '</select>' +
       '<button class="btn btn-ghost" id="btn-today">今天</button>' +
-      '<button class="btn btn-primary" id="btn-add-outfit">＋ 今日打卡</button></div></div>' +
+      '<button class="btn btn-primary" id="btn-add-outfit">👗 穿搭打卡</button></div></div>' +
       '<div class="cal-grid">' +
       ['日', '一', '二', '三', '四', '五', '六'].map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('') +
       cells + '</div>';

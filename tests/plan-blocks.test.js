@@ -74,17 +74,42 @@ async function main() {
   const lifeHTML = w.document.querySelector('.plan-block[data-block=life]').innerHTML;
   const digHTML = w.document.querySelector('.plan-block[data-block=digital]').innerHTML;
   if (overallHTML.indexOf('KPI 总览') < 0) throw new Error('KPI 未在总体块');
-  if (clothHTML.indexOf('cost per wear') < 0) throw new Error('cpw 未在衣橱块');
+  if (clothHTML.indexOf('单次穿着成本排行') < 0) throw new Error('cpw 未在衣橱块');
   if (lifeHTML.indexOf('美食统计') < 0) throw new Error('美食统计未在生活块');
   if (digHTML.indexOf('游戏通关') < 0) throw new Error('游戏未在数码块');
-  if (clothHTML.indexOf('cost per wear') >= 0 && digHTML.indexOf('cost per wear') >= 0) throw new Error('cpw 跨块重复');
+  if (clothHTML.indexOf('单次穿着成本排行') >= 0 && digHTML.indexOf('单次穿着成本排行') >= 0) throw new Error('cpw 跨块重复');
+  // v1.0.3 新栏目归属抽查
+  if (clothHTML.indexOf('穿搭搭配次数排行') < 0) throw new Error('衣橱搭配排行缺失');
+  if (clothHTML.indexOf('未穿着清单') < 0) throw new Error('衣橱未穿着清单缺失');
+  if (lifeHTML.indexOf('开封新鲜度排行') < 0) throw new Error('生活新鲜度缺失');
+  if (lifeHTML.indexOf('妆品搭配次数排行') < 0) throw new Error('生活搭配排行缺失');
   console.log('OK  1 四板块渲染 + 栏目归属');
+
+  // 1b 快捷按钮：记美妆 + 穿搭打卡/饮食打卡直开弹窗（不跳转）
+  const headHTML = w.document.getElementById('main-content').innerHTML;
+  for (const t of ['记美妆', '穿搭打卡', '饮食打卡']) {
+    if (headHTML.indexOf(t) < 0) throw new Error('缺少快捷按钮: ' + t);
+  }
+  // 点穿搭打卡应直接弹出录入弹窗（而非跳转到日历页）
+  w.document.querySelector('[data-act=outfit]').click();
+  await new Promise(r => setTimeout(r, 300));
+  const modal1 = w.document.querySelector('.modal');
+  if (!modal1 || modal1.textContent.indexOf('穿搭') < 0) throw new Error('穿搭打卡未直开弹窗');
+  modal1.querySelector('.modal-close') && modal1.querySelector('.modal-close').click();
+  await new Promise(r => setTimeout(r, 250));
+  w.document.querySelector('[data-act=food]').click();
+  await new Promise(r => setTimeout(r, 300));
+  const modal2 = w.document.querySelector('.modal');
+  if (!modal2 || modal2.textContent.indexOf('记一餐') < 0) throw new Error('饮食打卡未直开弹窗');
+  modal2.querySelector('.modal-close') && modal2.querySelector('.modal-close').click();
+  await new Promise(r => setTimeout(r, 250));
+  console.log('OK  1b 快捷按钮齐全且打卡直开弹窗');
 
   // 2) 块级屏蔽（就地 👁）：正常模式下整块隐藏
   w.document.querySelector('[data-block-toggle=clothing]').click();
   await new Promise(r => setTimeout(r, 500));
   html = w.document.getElementById('main-content').innerHTML;
-  if (html.indexOf('cost per wear') >= 0) throw new Error('屏蔽后衣橱栏目仍在渲染');
+  if (html.indexOf('单次穿着成本排行') >= 0) throw new Error('屏蔽后衣橱栏目仍在渲染');
   if (w.document.querySelector('.plan-block[data-block=clothing]')) throw new Error('屏蔽后块仍显示（应整块隐藏）');
   if (!settings.planBlocks || settings.planBlocks.clothing !== false) throw new Error('屏蔽状态未持久化');
   console.log('OK  2 块级屏蔽（整块隐藏 + 持久化）');
@@ -105,7 +130,7 @@ async function main() {
   w.App.go('plan');
   await new Promise(r => setTimeout(r, 250));
   html = w.document.getElementById('main-content').innerHTML;
-  if (html.indexOf('cost per wear') < 0) throw new Error('恢复后衣橱块未显示');
+  if (html.indexOf('单次穿着成本排行') < 0) throw new Error('恢复后衣橱块未显示');
   console.log('OK  4 屏蔽恢复');
 
   console.log('========== plan-blocks 全部通过 ==========');

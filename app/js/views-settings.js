@@ -76,7 +76,8 @@ window.SettingsView = (function () {
 
       /* 5️⃣ 软件 */
       section('5️⃣ 软件',
-        '<p>当前版本：<strong id="cur-ver">…</strong></p>' +
+        '<p>当前版本：<strong id="cur-ver">…</strong> <span class="muted small" id="fe-ver"></span></p>' +
+        '<div id="ver-mismatch"></div>' +
         '<p class="muted">启动时自动检测新版；更新只替换程序文件，数据不受影响。</p>' +
         '<div class="btn-row">' +
         '<button class="btn btn-primary" id="btn-check-update">检查更新</button>' +
@@ -100,10 +101,22 @@ window.SettingsView = (function () {
 
   /* ---------- 事件绑定 ---------- */
   function bind(root, db, accounts, cur) {
-    // 版本信息
+    // 版本信息（三方校验：version.json / exe / 前端资源，不一致 = 上次更新只换了一半）
     fetch('/api/version').then(function (r) { return r.json(); }).then(function (v) {
       const el = root.querySelector('#cur-ver');
-      if (el) el.textContent = 'v' + (v.version || '1.0.1') + '（数据结构 v' + (v.minSchema || 3) + '）';
+      const fe = (window.App && window.App.FRONTEND_VERSION) || '';
+      const exe = v.serverBuild || '';
+      if (el) el.textContent = 'v' + (v.version || '') + '（数据结构 v' + (v.minSchema || 3) + '）';
+      const feEl = root.querySelector('#fe-ver');
+      if (feEl) feEl.textContent = '程序 v' + (exe || '—') + ' · 前端 v' + (fe || '—');
+      const mm = root.querySelector('#ver-mismatch');
+      const vers = [v.version, exe, fe].filter(Boolean);
+      const mismatch = vers.length >= 2 && vers.some(function (x) { return x !== vers[0]; });
+      if (mm && mismatch) {
+        mm.innerHTML = '<div class="update-warn" style="margin:8px 0">⚠️ <strong>版本组件不一致</strong>（清单 v' +
+          U.escapeHtml(v.version || '—') + ' / 程序 v' + U.escapeHtml(exe || '—') + ' / 前端 v' + U.escapeHtml(fe || '—') +
+          '）：上次更新未完整落地，界面功能可能异常（如栏目排序失效）。请下载最新 zip 解压覆盖整个安装目录（data 文件夹会保留），重启即可修复。</div>';
+      }
     }).catch(function () {});
 
     /* 账号 */

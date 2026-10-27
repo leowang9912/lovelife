@@ -60,7 +60,7 @@ window.FoodView = (function () {
         return '<option value="' + i + '"' + (i === calMonth ? ' selected' : '') + '>' + (i + 1) + ' 月</option>';
       }).join('') + '</select>' +
       '<button class="btn btn-ghost" id="food-today">今天</button>' +
-      '<button class="btn btn-primary" id="btn-add-food">＋ 记一餐</button></div></div>' +
+      '<button class="btn btn-primary" id="btn-add-food">🍱 饮食打卡</button></div></div>' +
       '<div class="cal-grid">' +
       ['日', '一', '二', '三', '四', '五', '六'].map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('') +
       cells + '</div>' +
@@ -206,5 +206,5 @@ window.FoodView = (function () {
     });
   }
 
-  return { render: render };
+  return { render: render, openFoodEditor: openEditor };
 })();
