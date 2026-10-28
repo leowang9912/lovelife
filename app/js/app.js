@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.0.6";
+  const FRONTEND_VERSION = "1.0.7";
 
   let current = 'plan';
   let booted = false;
@@ -242,9 +242,23 @@ window.App = (function () {
     }, 3000);
   }
 
+  /* 更新完成自动刷新后：提示升级成功并清掉更新标记（v1.0.7） */
+  function checkUpgradeToast() {
+    try {
+      const ver = sessionStorage.getItem('lovelife-upgraded');
+      if (!ver) return;
+      sessionStorage.removeItem('lovelife-upgraded');
+      fetch('/api/update/clear-done', { method: 'POST' }).catch(function () {});
+      setTimeout(function () {
+        window.UI.toast('🎉 升级成功 v' + (ver || FRONTEND_VERSION), 'success');
+      }, 500);
+    } catch (e) { /* 忽略 */ }
+  }
+
   async function init() {
     try {
       await boot();
+      checkUpgradeToast();
       const session = S.getSession();
       // 启动动画 → 账号选择（记住则自动进入）
       const app = document.getElementById('app');

@@ -10,11 +10,11 @@ window.Views = (function () {
   }
 
   /* =============== 物品库 =============== */
-  const itemState = { kind: null, filterCat: '', filterStatus: '', search: '' };
+  const itemState = { kind: null, filterCat: '', filterStatus: '', filterTag: '', search: '' };
 
   function items(root, kind) {
     if (itemState.kind !== kind) {
-      itemState.kind = kind; itemState.filterCat = ''; itemState.filterStatus = ''; itemState.search = '';
+      itemState.kind = kind; itemState.filterCat = ''; itemState.filterStatus = ''; itemState.filterTag = ''; itemState.search = '';
     }
     const db = S.getDB();
     if (!db) return;
@@ -24,6 +24,7 @@ window.Views = (function () {
     let list = all;
     if (itemState.filterCat) list = list.filter(function (i) { return i.categoryId === itemState.filterCat || i.subCategoryId === itemState.filterCat; });
     if (itemState.filterStatus) list = list.filter(function (i) { return (i.status || 'in_use') === itemState.filterStatus; });
+    if (itemState.filterTag) list = list.filter(function (i) { return (i.tags || []).indexOf(itemState.filterTag) >= 0; });
     if (itemState.search) {
       const q = itemState.search.toLowerCase();
       list = list.filter(function (i) {
@@ -32,6 +33,12 @@ window.Views = (function () {
       });
     }
     list = list.slice().sort(function (a, b) { return (b.purchaseDate || '').localeCompare(a.purchaseDate || ''); });
+    // 标签筛选候选：本类物品用过的全部标签（v1.0.7）
+    const tagOptions = [];
+    all.forEach(function (i) {
+      (i.tags || []).forEach(function (t) { if (t && tagOptions.indexOf(t) < 0) tagOptions.push(t); });
+    });
+    tagOptions.sort();
 
     const titles = { digital: '我的数码', clothing: '我的衣橱' };
     const icons = { digital: '🎮', clothing: '👕' };
@@ -56,6 +63,10 @@ window.Views = (function () {
       [['in_use', '在用'], ['idle', '闲置'], ['borrowed', '借出'], ['to_sell', '待出闲置'], ['broken', '损坏报废'], ['sold', '已售出'], ['gifted', '已转赠']].map(function (s) {
         return '<option value="' + s[0] + '"' + (itemState.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select>' +
+      '<select id="filter-tag"><option value="">全部标签</option>' +
+      tagOptions.map(function (t) {
+        return '<option value="' + U.escapeHtml(t) + '"' + (itemState.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
+      }).join('') + '</select>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +
       (list.length
         ? '<div class="item-grid">' + list.map(function (i) {
@@ -77,6 +88,9 @@ window.Views = (function () {
     });
     root.querySelector('#filter-status').addEventListener('change', function (e) {
       itemState.filterStatus = e.target.value; items(root, kind);
+    });
+    root.querySelector('#filter-tag').addEventListener('change', function (e) {
+      itemState.filterTag = e.target.value; items(root, kind);
     });
     root.querySelectorAll('.item-card').forEach(function (card) {
       card.addEventListener('click', function (e) {
@@ -129,6 +143,7 @@ window.Views = (function () {
       onMount: function (wrap, close) {
         const form = wrap.querySelector('#item-form');
         UI.bindFormToggles(form, db, formKind);
+        UI.bindTagAdd(form);
         const uploader = UI.imageUploader(wrap.querySelector('#form-img-uploader'), { paths: item.images || [] });
         wrap.querySelector('[data-act=cancel]').addEventListener('click', close);
         wrap.querySelector('[data-act=save]').addEventListener('click', async function () {
@@ -464,13 +479,26 @@ window.Views = (function () {
     });
     const items = clothes.map(function (i) {
       const c = (db.categories.clothing || []).find(function (x) { return x.id === i.categoryId; });
-      return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
+      return { id: i.id, name: i.name, brand: i.brand, images: i.images, categoryName: c ? c.name : '其他' };
     });
     UI.comboManager({
       title: '👗 穿搭组合', icon: '👗', items: items,
       combos: db.settings.outfitLooks,
       onChange: function () { S.saveSettings(); }
     });
+  }
+
+  /* 组合快捷卡片（打卡弹窗用）：有范例图显图、无图显图标，点选套用（v1.0.7） */
+  function lookStripHTML(list, attr, icon) {
+    return '<div class="look-strip">' + list.map(function (lk, i) {
+      return '<div class="look-card" data-' + attr + '="' + i + '">' +
+        (lk.images && lk.images[0]
+          ? '<img data-path="' + U.escapeHtml(lk.images[0]) + '" alt=""/>'
+          : '<div class="look-noimg">' + icon + '</div>') +
+        '<div class="look-name">' + U.escapeHtml(lk.name) + '</div>' +
+        (UI.comboBadges(lk) ? '<div class="look-tags">' + UI.comboBadges(lk) + '</div>' : '') +
+        '</div>';
+    }).join('') + '</div>';
   }
 
   /* 穿搭打卡编辑器：大图、分类勾选、妆容整合（rec 传入=编辑该条） */
@@ -487,7 +515,7 @@ window.Views = (function () {
       return c ? c.name : '其他';
     };
     const clothPickerItems = clothes.map(function (i) {
-      return { id: i.id, name: i.name, brand: i.brand, thumb: i.images && i.images[0] ? null : null, images: i.images, categoryName: catName(i) };
+      return { id: i.id, name: i.name, brand: i.brand, images: i.images, categoryName: catName(i) };
     });
     // 预加载缩略图 URL（异步填充）
     const existing = rec ? [] : db.outfits.filter(function (o) { return o.date === dateStr; });
@@ -518,14 +546,10 @@ window.Views = (function () {
         '<label class="f-full"><span class="f-label">备注（选填）</span><input name="note" value="' + U.escapeHtml(rv.note || '') + '"></label>' +
         '</div>' +
         '<h4 class="detail-sub">👗 勾选这天穿的衣服</h4>' +
-        (outfitLooks.length ? '<div class="chip-row" style="margin-bottom:8px">' + outfitLooks.map(function (lk, i) {
-          return '<button type="button" class="btn btn-ghost btn-sm" data-olook="' + i + '">👗 ' + U.escapeHtml(lk.name) + '</button>';
-        }).join('') + '</div>' : '') +
+        (outfitLooks.length ? lookStripHTML(outfitLooks, 'olook', '👗') : '') +
         '<div id="cloth-picker"></div>' +
         '<h4 class="detail-sub">💄 勾选这天用的妆品（自动计一次使用）</h4>' +
-        (looks.length ? '<div class="chip-row" style="margin-bottom:8px">' + looks.map(function (lk, i) {
-          return '<button type="button" class="btn btn-ghost btn-sm" data-look="' + i + '">✨ ' + U.escapeHtml(lk.name) + '</button>';
-        }).join('') + '</div>' : '') +
+        (looks.length ? lookStripHTML(looks, 'look', '✨') : '') +
         '<div id="cos-picker"></div>' +
         '<h4 class="detail-sub">📷 OOTD 照片（有图日历将显示大图）</h4>' +
         '<div id="outfit-imgs"></div>' +
@@ -534,22 +558,15 @@ window.Views = (function () {
         '<button class="btn btn-ghost" data-act="cancel">关闭</button><button class="btn btn-primary" data-act="save">保存打卡</button>',
       onMount: function (wrap, close) {
         const cosItems = cosmetics.map(function (i) {
-          return { id: i.id, name: i.name, brand: i.brand, shade: i.shade, images: i.images, thumb: null, categoryName: catName(i) };
+          return { id: i.id, name: i.name, brand: i.brand, shade: i.shade, images: i.images, categoryName: catName(i) };
         });
         let clothPick = UI.picker(wrap.querySelector('#cloth-picker'), clothPickerItems, (rv.itemIds || []).slice(), {});
         let cosPick = UI.picker(wrap.querySelector('#cos-picker'), cosItems, (rv.cosmeticIds || []).slice(), { icon: '💄' });
-        // 异步填充缩略图后重绘
-        async function fillThumbs(items, mapTo) {
-          for (const it of items) {
-            if (it.images && it.images[0]) mapTo[it.id] = await S.getImageURL(it.images[0]);
-          }
-        }
-        const clothThumbs = {}, cosThumbs = {};
-        Promise.all([fillThumbs(clothes, clothThumbs), fillThumbs(cosmetics, cosThumbs)]).then(function () {
-          clothPickerItems.forEach(function (i) { i.thumb = clothThumbs[i.id] || null; });
-          cosItems.forEach(function (i) { i.thumb = cosThumbs[i.id] || null; });
-          clothPick = UI.picker(wrap.querySelector('#cloth-picker'), clothPickerItems, clothPick.getSelected(), {});
-          cosPick = UI.picker(wrap.querySelector('#cos-picker'), cosItems, cosPick.getSelected(), { icon: '💄' });
+        // 缩略图由 UI.picker 内部统一异步解析（v1.0.7），此处无需再补丁重绘
+        // 组合卡片范例图
+        wrap.querySelectorAll('.look-card img[data-path]').forEach(async function (img) {
+          const url = await S.getImageURL(img.getAttribute('data-path'));
+          if (url) img.src = url;
         });
 
         wrap.querySelectorAll('[data-look]').forEach(function (b) {
@@ -559,6 +576,7 @@ window.Views = (function () {
             const cur = cosPick.getSelected();
             lk.itemIds.forEach(function (id) { if (cur.indexOf(id) < 0) cur.push(id); });
             cosPick.setSelected(cur);
+            b.classList.add('on');
             UI.toast('已套用妆容：' + lk.name, 'success');
           });
         });
@@ -569,6 +587,7 @@ window.Views = (function () {
             const cur = clothPick.getSelected();
             (lk.itemIds || []).forEach(function (id) { if (cur.indexOf(id) < 0) cur.push(id); });
             clothPick.setSelected(cur);
+            b.classList.add('on');
             UI.toast('已套用穿搭：' + lk.name, 'success');
           });
         });

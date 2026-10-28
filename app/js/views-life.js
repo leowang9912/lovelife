@@ -5,7 +5,7 @@ window.LifeView = (function () {
   const S = window.Storage;
   const UI = window.UI;
 
-  const state = { filterCat: '', filterSub: '', filterStatus: '', search: '' };
+  const state = { filterCat: '', filterSub: '', filterStatus: '', filterTag: '', search: '' };
 
   function render(root) {
     const db = S.getDB();
@@ -21,6 +21,7 @@ window.LifeView = (function () {
       });
     }
     if (state.filterStatus) list = list.filter(function (i) { return (i.status || 'in_use') === state.filterStatus; });
+    if (state.filterTag) list = list.filter(function (i) { return (i.tags || []).indexOf(state.filterTag) >= 0; });
     if (state.search) {
       const q = state.search.toLowerCase();
       list = list.filter(function (i) {
@@ -31,6 +32,12 @@ window.LifeView = (function () {
     list = list.slice().sort(function (a, b) {
       return (b.openedDate || b.purchaseDate || '').localeCompare(a.openedDate || a.purchaseDate || '');
     });
+    // 标签筛选候选：本页物品用过的全部标签（v1.0.7）
+    const tagOptions = [];
+    all.forEach(function (i) {
+      (i.tags || []).forEach(function (t) { if (t && tagOptions.indexOf(t) < 0) tagOptions.push(t); });
+    });
+    tagOptions.sort();
 
     const expiring = all.filter(function (i) {
       const s = M.lifeStatus(i);
@@ -55,6 +62,10 @@ window.LifeView = (function () {
       [['in_use', '在用'], ['idle', '闲置'], ['to_sell', '待出闲置'], ['broken', '损坏报废']].map(function (s) {
         return '<option value="' + s[0] + '"' + (state.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select>' +
+      '<select id="life-tag"><option value="">全部标签</option>' +
+      tagOptions.map(function (t) {
+        return '<option value="' + U.escapeHtml(t) + '"' + (state.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
+      }).join('') + '</select>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +
       (list.length
         ? '<div class="item-grid">' + list.map(function (i) {
@@ -76,6 +87,9 @@ window.LifeView = (function () {
     });
     root.querySelector('#life-status').addEventListener('change', function (e) {
       state.filterStatus = e.target.value; render(root);
+    });
+    root.querySelector('#life-tag').addEventListener('change', function (e) {
+      state.filterTag = e.target.value; render(root);
     });
     root.querySelectorAll('.item-card').forEach(function (card) {
       card.addEventListener('click', function (e) {
@@ -108,7 +122,7 @@ window.LifeView = (function () {
     const lifes = M.itemsWithComputed(db).filter(function (i) { return i.kind === 'life'; });
     const items = lifes.map(function (i) {
       const c = (db.categories.life || []).find(function (x) { return x.id === i.categoryId; });
-      return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
+      return { id: i.id, name: i.name, brand: i.brand, images: i.images, categoryName: c ? c.name : '其他' };
     });
     UI.comboManager({
       title: '💄 妆容组合', icon: '💄', items: items,

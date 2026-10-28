@@ -74,8 +74,8 @@ window.Updater = (function () {
           startUpdate(w, info, function (done) {
             if (done) {
               if (polling) clearInterval(polling);
-              // 等待服务重启后刷新
-              waitRestart(w);
+              // 等待服务重启后自动刷新
+              waitRestart(w, info);
             }
           }, function (setPoll) { polling = setPoll; });
         });
@@ -101,7 +101,17 @@ window.Updater = (function () {
       body: JSON.stringify({ url: url })
     }).then(function (r) { return r.json(); }).then(function (out) {
       if (!out.ok) throw new Error(out.error || '启动更新失败');
-      // 轮询下载进度
+      let finished = false;
+      function finish() {
+        if (finished) return;
+        finished = true;
+        if (bar) bar.style.width = '100%';
+        text.textContent = '✅ 更新完成，正在重启…';
+        btn.textContent = '更新完成';
+        onDone(true);
+      }
+      // 轮询下载进度；installing 阶段即启动重启守护（done 状态仅存在 0.8 秒，
+      // 旧逻辑经常错过导致不自动刷新——v1.0.7 改为阶段触发 + 落盘标记兜底）
       const timer = setInterval(async function () {
         try {
           const st = await (await fetch('/api/update/status')).json();
@@ -115,10 +125,7 @@ window.Updater = (function () {
             (pct ? '（' + pct + '%）' : '') + (src ? ' · 源: ' + src : '');
           if (st.state === 'done') {
             clearInterval(timer);
-            if (bar) bar.style.width = '100%';
-            text.textContent = '✅ 更新完成，正在重启…';
-            btn.textContent = '更新完成';
-            onDone(true);
+            finish();
           } else if (st.state === 'failed') {
             clearInterval(timer);
             text.innerHTML = '❌ 更新失败：' + U.escapeHtml(st.error || '未知错误') +
@@ -132,6 +139,9 @@ window.Updater = (function () {
               startUpdate(w, info, onDone, setPoll);
             });
             onDone(false);
+          } else if (st.phase === 'installing') {
+            clearInterval(timer);
+            finish();
           }
         } catch (e) {
           /* 服务重启中会短暂失败，忽略 */
@@ -151,24 +161,42 @@ window.Updater = (function () {
     });
   }
 
-  function waitRestart(w) {
+  /* 更新安装→重启守护：等新版本服务起来后自动刷新，并标记"升级成功"（v1.0.7） */
+  function waitRestart(w, info) {
+    if (w.__restartWatch) return; // 幂等：installing/done 双触发只守一次
+    w.__restartWatch = true;
     const text = w.querySelector('#update-progress');
+    const wantVer = String((info && info.remoteVersion) || '');
     let tries = 0;
     const timer = setInterval(async function () {
       tries++;
+      // 服务已回到新版（version.json 已被替换）才算成功，防止旧服务未死时误判
       try {
-        const p = await fetch('/api/ping');
-        if (p.ok && tries > 2) {
-          clearInterval(timer);
-          if (text) text.textContent = '✅ 已重启，正在刷新…';
-          window.UI.toast('更新完成', 'success');
-          setTimeout(function () { location.reload(); }, 700);
+        const p = await fetch('/api/version', { cache: 'no-store' });
+        if (p.ok) {
+          const v = await p.json();
+          if (!wantVer || String(v.version) === wantVer) {
+            clearInterval(timer);
+            if (text) text.textContent = '✅ 已升级到 v' + wantVer + '，正在刷新…';
+            try { sessionStorage.setItem('lovelife-upgraded', wantVer); } catch (e) {}
+            setTimeout(function () { location.reload(); }, 600);
+            return;
+          }
         }
-      } catch (e) {
-        if (tries > 60) {
+      } catch (e) { /* 服务重启中 */ }
+      // 更新失败的兜底观察：服务没换但状态变 failed
+      try {
+        const st = await (await fetch('/api/update/status', { cache: 'no-store' })).json();
+        if (st.state === 'failed' && tries < 10) {
           clearInterval(timer);
-          if (text) text.textContent = '⚠️ 服务未自动重启，请手动双击 lovelife.bat';
+          if (text) text.innerHTML = '❌ 更新失败：' + U.escapeHtml(st.error || '未知错误');
+          window.UI.toast('更新失败：' + (st.error || '未知错误'), 'error');
+          return;
         }
+      } catch (e) { /* 忽略 */ }
+      if (tries > 80) {
+        clearInterval(timer);
+        if (text) text.textContent = '⚠️ 服务未自动重启，请手动双击 lovelife.bat';
       }
     }, 1500);
   }

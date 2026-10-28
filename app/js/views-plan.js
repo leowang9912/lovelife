@@ -162,12 +162,13 @@ window.PlanView = (function () {
           '<h3>' + meta.name + '</h3>' +
           (editMode
             ? '<div class="sec-ctrl">' +
-            (meta.fixed ? '<span class="tag">固定</span>' :
-              '<div class="sec-size-btns">' +
-              Object.keys(SIZE_LABELS).map(function (sz) {
-                return '<button class="sec-size-btn' + ((sec.size || 'm') === sz ? ' on' : '') +
-                  '" data-size-btn="' + idx + '" data-size-val="' + sz + '">' + SIZE_LABELS[sz] + '</button>';
-              }).join('') + '</div>' +
+            (meta.fixed ? '<span class="tag">固定</span>' : '') +
+            '<div class="sec-size-btns">' +
+            Object.keys(SIZE_LABELS).map(function (sz) {
+              return '<button class="sec-size-btn' + ((sec.size || 'm') === sz ? ' on' : '') +
+                '" data-size-btn="' + idx + '" data-size-val="' + sz + '">' + SIZE_LABELS[sz] + '</button>';
+            }).join('') + '</div>' +
+            (meta.fixed ? '' :
               '<button class="btn-icon" data-move="up" data-idx="' + idx + '">↑</button>' +
               '<button class="btn-icon" data-move="down" data-idx="' + idx + '">↓</button>' +
               '<button class="btn-icon" data-toggle="' + idx + '">' + (sec.enabled ? '👁' : '🚫') + '</button>') +
@@ -327,18 +328,79 @@ window.PlanView = (function () {
     const isDigital = function (i) { return i.kind === 'device' || i.kind === 'game'; };
 
     if (id === 'kpi') {
-      body.innerHTML = '<div class="kpi-row" style="margin:0">' +
-        kpi('总投入', U.formatMoney(sum.totalInvest), '全部历史购入') +
-        kpi('在手估值', U.formatMoney(sum.bookValue), '折旧现值') +
-        kpi('回血潜力', U.formatMoney(sum.resalePotential), '按预估二手价') +
-        kpi('本月花费', U.formatMoney(sum.monthSpend + (sum.food.monthSpend || 0)), sum.monthNewCount + ' 件新物') +
-        kpi('在手物品', sum.counts.all + ' 件', '数码 ' + (sum.counts.device + sum.counts.game) + ' · 衣 ' + sum.counts.clothing + ' · 生活 ' + sum.counts.life) +
-        '</div><div class="kpi-mini-row">' +
+      /* KPI 资产驾驶舱（v1.0.7）：4 大卡 + 分域速览 + 本月 vs 上月 */
+      const monthTotal = sum.monthSpend + (sum.food.monthSpend || 0);
+      const curKey = U.monthKey(U.todayStr());
+      const prevKey = U.monthKey(U.todayStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
+      let foodPrev = 0;
+      (db.food || []).forEach(function (f) {
+        if (U.monthKey(f.date || '') === prevKey) foodPrev += Number(f.price) || 0;
+      });
+      const prevTotal = (sum.monthlySpend[prevKey] || 0) + foodPrev;
+      const delta = prevTotal ? Math.round((monthTotal - prevTotal) / prevTotal * 100) : null;
+      const budgetTotal = Number(((db.settings || {}).budget || {}).monthlyTotal) || 0;
+      const budgetLeft = budgetTotal - monthTotal;
+      const active = sum.items.filter(function (i) { return i.status !== 'sold' && i.status !== 'gifted'; });
+      const isD = function (i) { return i.kind === 'device' || i.kind === 'game'; };
+      function domainInvest(fn) {
+        return active.filter(fn).reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0);
+      }
+      function monthBuy(fn) {
+        return sum.items.filter(function (i) { return fn(i) && U.monthKey(i.purchaseDate || '') === curKey; })
+          .reduce(function (a, b) { return a + (Number(b.purchasePrice) || 0); }, 0);
+      }
+      const dCnt = sum.counts.device + sum.counts.game;
+      const cCnt = sum.counts.clothing;
+      const lCnt = sum.counts.life;
+      const worn = active.filter(function (i) { return i.kind === 'clothing' && (i.wearCount || 0) > 0; }).length;
+      const wearRate = cCnt ? Math.round(worn / cCnt * 100) : 0;
+      const lifeExpiring = sum.expiry.filter(function (x) { return x.kind === 'pao'; }).length;
+      const outfitMonth = (db.outfits || []).filter(function (o) { return U.monthKey(o.date || '') === curKey; }).length;
+
+      function hero(label, value, sub, cls) {
+        return '<div class="kpi-hero"><div class="kpi-hero-label">' + label + '</div>' +
+          '<div class="kpi-hero-value' + (cls ? ' ' + cls : '') + '">' + value + '</div>' +
+          '<div class="kpi-hero-sub">' + sub + '</div></div>';
+      }
+      const deltaBadge = delta === null ? '<span class="muted">首月无对比</span>'
+        : delta === 0 ? '<span class="muted">与上月持平</span>'
+          : '<span class="kpi-delta ' + (delta > 0 ? 'bad' : 'good') + '">' +
+            (delta > 0 ? '↑ +' : '↓ ') + delta + '%</span>';
+      const budgetSub = budgetTotal > 0
+        ? (budgetLeft >= 0 ? '预算余 ' + Math.round(budgetLeft / budgetTotal * 100) + '%' : '已超预算')
+        : '未设置月预算';
+
+      body.innerHTML =
+        '<div class="kpi-hero-row">' +
+        hero('总投入', U.formatMoney(sum.totalInvest), '全部历史购入') +
+        hero('在手估值', U.formatMoney(sum.bookValue), '折旧现值 · 投入的 ' + (sum.totalInvest ? Math.round(sum.bookValue / sum.totalInvest * 100) : 0) + '%') +
+        hero('本月花费', U.formatMoney(monthTotal), sum.monthNewCount + ' 件新物 ' + deltaBadge) +
+        hero('预算剩余', budgetTotal > 0 ? U.formatMoney(budgetLeft) : '—', budgetSub, budgetLeft < 0 ? 'bad' : '') +
+        '</div>' +
+        '<div class="kpi-domain">' +
+        '<div class="kpi-domain-title">分域速览</div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">🎮</span><span class="kpi-domain-name">数码</span>' +
+        '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(isD)) + '</span><i>·</i><span>' + dCnt + ' 件</span><i>·</i><span>本月 ' + U.formatMoney(monthBuy(isD)) + '</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">👕</span><span class="kpi-domain-name">衣橱</span>' +
+        '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(function (i) { return i.kind === 'clothing'; })) + '</span><i>·</i><span>' + cCnt + ' 件</span><i>·</i><span>使用率 ' + wearRate + '%</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">💄</span><span class="kpi-domain-name">生活</span>' +
+        '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(function (i) { return i.kind === 'life'; })) + '</span><i>·</i><span>' + lCnt + ' 件</span><i>·</i><span>临期 ' + lifeExpiring + '</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">🍽</span><span class="kpi-domain-name">美食</span>' +
+        '<span class="kpi-domain-parts"><span>本月 ' + (sum.food.monthCount || 0) + ' 顿</span><i>·</i><span>' + U.formatMoney(sum.food.monthSpend || 0) + '</span><i>·</i><span>累计 ' + U.formatMoney(sum.food.totalSpend || 0) + '</span></span></div>' +
+        '</div>' +
+        '<div class="kpi-month">' +
+        '<div class="kpi-month-title">本月 vs 上月</div>' +
+        '<div class="kpi-month-line">' +
+        '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' +
+        (prevTotal ? Math.min(100, Math.round(monthTotal / prevTotal * 50)) : 50) + '%;background:#0071e3"></div></div>' +
+        '<span class="kpi-month-val">本月 ' + U.formatMoney(monthTotal) + ' · 上月 ' + U.formatMoney(prevTotal) + ' ' + deltaBadge + '</span>' +
+        '</div>' +
+        '<div class="kpi-month-mini">' +
+        '<div class="kpi-mini">新物<strong>' + sum.monthNewCount + ' 件</strong></div>' +
         '<div class="kpi-mini">日均持有成本<strong>' + U.formatCost(sum.dailyCostTotal) + '</strong></div>' +
-        '<div class="kpi-mini">估值/投入比<strong>' + (sum.totalInvest ? Math.round(sum.bookValue / sum.totalInvest * 100) : 0) + '%</strong></div>' +
-        '<div class="kpi-mini">本月餐食<strong>' + sum.food.monthCount + ' 顿</strong></div>' +
-        '<div class="kpi-mini">穿搭打卡<strong>' + db.outfits.length + ' 次</strong></div>' +
-        '</div>';
+        '<div class="kpi-mini">穿搭打卡<strong>' + outfitMonth + ' 次</strong></div>' +
+        '<div class="kpi-mini">回血潜力<strong>' + U.formatMoney(sum.resalePotential) + '</strong></div>' +
+        '</div></div>';
       return;
     }
     if (id === 'composition') {
@@ -352,6 +414,7 @@ window.PlanView = (function () {
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#af52de' },
         { label: '美食', value: sum.food.totalSpend || 0, color: '#ff9500' }
       ];
+      kindData.forEach(function (d) { d.valueText = U.formatMoney(Math.round(d.value)); });
       body.innerHTML = C.donut(kindData, { centerText: U.formatMoney(sum.activeInvest), centerSub: '在手总投入' });
       return;
     }
@@ -451,7 +514,7 @@ window.PlanView = (function () {
       const keys = Object.keys(byCat);
       body.className = 'panel-body center';
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
-        return { label: k, value: Math.round(byCat[k]), color: ['#0071e3', '#5ac8fa', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#ffcc00', '#aeaeb2'][n % 8] };
+        return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#0071e3', '#5ac8fa', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '数码总投入' })
         : '<p class="empty-hint">暂无数码设备</p>';
       return;
@@ -578,7 +641,7 @@ window.PlanView = (function () {
       const keys = Object.keys(byCat);
       body.className = 'panel-body center';
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
-        return { label: k, value: Math.round(byCat[k]), color: ['#ff2d55', '#0071e3', '#af52de', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
+        return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#ff2d55', '#0071e3', '#af52de', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '衣橱总投入' })
         : '<p class="empty-hint">暂无衣物</p>';
       return;
@@ -676,7 +739,7 @@ window.PlanView = (function () {
       const keys = Object.keys(byCat);
       body.className = 'panel-body center';
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
-        return { label: k, value: Math.round(byCat[k]), color: ['#af52de', '#ff2d55', '#0071e3', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
+        return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#af52de', '#ff2d55', '#0071e3', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '生活总投入' })
         : '<p class="empty-hint">暂无妆品</p>';
       return;

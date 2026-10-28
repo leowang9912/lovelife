@@ -36,7 +36,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.0.6"
+SERVER_BUILD = "1.0.7"
 
 _lock = threading.Lock()
 
@@ -82,13 +82,16 @@ DEFAULT_CATEGORIES = {
         {"id": "camera", "name": "影像类", "icon": "📷", "lifeYears": 6, "residualRate": 0.15, "costModel": "daily_dep", "children": [
             {"id": "cam_body", "name": "相机"}, {"id": "cam_lens", "name": "镜头"},
             {"id": "cam_flash", "name": "闪光灯"}, {"id": "cam_stab", "name": "稳定器"},
+            {"id": "cam_other", "name": "其他"},
         ]},
         {"id": "audio", "name": "音频类", "icon": "🎧", "lifeYears": 4, "residualRate": 0.10, "costModel": "daily_dep", "children": [
             {"id": "aud_headphone", "name": "耳机"}, {"id": "aud_speaker", "name": "音箱"},
             {"id": "aud_player", "name": "播放器"}, {"id": "aud_mic", "name": "麦克风"},
+            {"id": "aud_other", "name": "其他"},
         ]},
         {"id": "display", "name": "显示外设", "icon": "🖥️", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "children": [
             {"id": "dsp_monitor", "name": "显示器"}, {"id": "dsp_projector", "name": "投影"},
+            {"id": "dsp_other", "name": "其他"},
         ]},
         {"id": "storage", "name": "存储", "icon": "💾", "lifeYears": 5, "residualRate": 0.10, "costModel": "daily_dep", "children": [
             {"id": "sto_ssd", "name": "固态"}, {"id": "sto_hdd", "name": "移动硬盘"},
@@ -98,6 +101,7 @@ DEFAULT_CATEGORIES = {
             {"id": "ac_charger", "name": "充电器"}, {"id": "ac_cable", "name": "线材"},
             {"id": "ac_hub", "name": "拓展坞"}, {"id": "ac_kbmouse", "name": "键鼠"},
             {"id": "ac_case", "name": "保护壳"}, {"id": "ac_battery", "name": "电池"},
+            {"id": "ac_other", "name": "其他"},
         ]},
         {"id": "gadget", "name": "其他数码", "icon": "⌚", "lifeYears": 4, "residualRate": 0.10, "costModel": "daily_dep", "children": [
             {"id": "gd_watch", "name": "手表"}, {"id": "gd_band", "name": "手环"},
@@ -128,12 +132,13 @@ DEFAULT_CATEGORIES = {
         ]},
         {"id": "shoes", "name": "鞋靴", "icon": "👟", "children": [
             {"id": "sh_sneaker", "name": "运动鞋"}, {"id": "sh_leather", "name": "皮鞋"},
+            {"id": "sh_heel", "name": "高跟鞋"}, {"id": "sh_sandal", "name": "凉鞋"},
             {"id": "sh_boot", "name": "靴子"}, {"id": "sh_slipper", "name": "拖鞋"},
         ]},
         {"id": "acc", "name": "配饰", "icon": "👜", "children": [
             {"id": "ac_hat", "name": "帽子"}, {"id": "ac_scarf", "name": "围巾"},
             {"id": "ac_belt", "name": "腰带"}, {"id": "ac_bag", "name": "包包"},
-            {"id": "ac_sunglass", "name": "墨镜"},
+            {"id": "ac_sunglass", "name": "墨镜"}, {"id": "ac_jewelry", "name": "首饰"},
         ]},
         {"id": "formal", "name": "正装/礼服", "icon": "👔", "children": [
             {"id": "fm_suit", "name": "正装"}, {"id": "fm_dress", "name": "礼服"},
@@ -148,14 +153,16 @@ DEFAULT_CATEGORIES = {
         {"id": "skin", "name": "护肤", "icon": "🧴", "children": [
             {"id": "sk_toner", "name": "水"}, {"id": "sk_lotion", "name": "乳"},
             {"id": "sk_serum", "name": "精华"}, {"id": "sk_cream", "name": "面霜"},
-            {"id": "sk_mask", "name": "面膜"}, {"id": "sk_sun", "name": "防晒"},
-            {"id": "sk_clean", "name": "洁面"}, {"id": "sk_other", "name": "其他"},
+            {"id": "sk_eye", "name": "眼霜"}, {"id": "sk_mask", "name": "面膜"},
+            {"id": "sk_sun", "name": "防晒"}, {"id": "sk_clean", "name": "洁面"},
+            {"id": "sk_remove", "name": "卸妆"}, {"id": "sk_other", "name": "其他"},
         ]},
         {"id": "makeup", "name": "彩妆", "icon": "💄", "children": [
             {"id": "mk_foundation", "name": "粉底"}, {"id": "mk_eyeshadow", "name": "眼影"},
+            {"id": "mk_eyeliner", "name": "眼线"}, {"id": "mk_mascara", "name": "睫毛膏"},
             {"id": "mk_lip", "name": "口红"}, {"id": "mk_blush", "name": "腮红"},
             {"id": "mk_brow", "name": "眉笔"}, {"id": "mk_powder", "name": "散粉"},
-            {"id": "mk_other", "name": "其他"},
+            {"id": "mk_contour", "name": "修容高光"}, {"id": "mk_other", "name": "其他"},
         ]},
         {"id": "tool", "name": "工具", "icon": "🖌️", "children": [
             {"id": "tl_brush", "name": "化妆刷"}, {"id": "tl_puff", "name": "粉扑"},
@@ -167,7 +174,9 @@ DEFAULT_CATEGORIES = {
             {"id": "fg_other", "name": "其他"},
         ]},
         {"id": "body", "name": "身体护理", "icon": "🛁", "children": [
-            {"id": "bd_lotion", "name": "身体乳"}, {"id": "bd_bath", "name": "沐浴"},
+            {"id": "bd_shampoo", "name": "洗发水"}, {"id": "bd_conditioner", "name": "护发素"},
+            {"id": "bd_hairmask", "name": "发膜"}, {"id": "bd_bath", "name": "沐浴露"},
+            {"id": "bd_oil", "name": "精油"}, {"id": "bd_lotion", "name": "身体乳"},
             {"id": "bd_hand", "name": "护手霜"}, {"id": "bd_other", "name": "其他"},
         ]},
     ],
@@ -181,7 +190,7 @@ DEFAULT_CATEGORIES = {
     "foodTag": ["自制", "外卖", "餐厅", "聚餐", "零食"],
     "occasion": ["日常", "通勤", "运动", "正式", "居家", "约会", "旅行", "其他"],
     "season": ["春", "夏", "秋", "冬", "四季"],
-    "tagPresets": ["送人", "待清洗", "待维修", "限量款", "贵重", "断舍离候选", "心头好", "换季收纳", "待出闲置", "备用"],
+    "tagPresets": ["贵重", "待清洗", "断舍离候选"],
     "condition": ["全新", "几乎全新", "9成新", "8成新", "有痕迹", "战损"],
     "remainLevel": ["满", "¾", "½", "¼", "空"],
     "sizeSystem": ["中国码", "美国码", "欧码", "均码", "其他"],
@@ -199,6 +208,7 @@ DEFAULT_SETTINGS = {
         "name": True, "category": True, "purchaseDate": True, "purchasePrice": True,
     },
     "budget": {"monthlyTotal": 0, "categories": {"clothing": 0, "life": 0, "food": 0, "digital": 0}},
+    "customTags": [],
     "planSections": [
         {"id": "kpi", "enabled": True, "fixed": True},
         {"id": "composition", "enabled": True, "fixed": True},
@@ -408,11 +418,13 @@ def load_db(acc_id):
     user_cats = settings.get("categories") or {}
     # 物品分类树以服务端为准（v1.0.1 新分类）；用户可改的是枚举/标签/美食分类
     user_editable = ("foodCuisine", "foodType", "meal", "foodTag", "occasion", "season",
-                     "tagPresets", "condition", "remainLevel", "sizeSystem", "skinType",
+                     "condition", "remainLevel", "sizeSystem", "skinType",
                      "usageFreq", "washMethod")
     for key in user_editable:
         if key in user_cats and user_cats[key]:
             merged_cats[key] = user_cats[key]
+    # v1.0.7：预设标签以服务端为准（精简为 3 个），老预设不再回填干扰；
+    # 物品上已打的标签仍保留在物品上，个人标签库（customTags）由用户自主增删
     # 成本模型（寿命/残值率）：用户改动存 settings.costModelOverrides，
     # 加载时合并回分类树（分类树本身以服务端为准，防漂移）
     overrides = (settings.get("settings") or {}).get("costModelOverrides") or {}
@@ -528,6 +540,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_update_check()
             if path == "/api/update/apply":
                 return self._handle_update_apply()
+            if path == "/api/update/clear-done":
+                return self._handle_update_clear_done()
             if path == "/api/desktop-shortcut":
                 return self._handle_desktop_shortcut()
         except Exception as e:
@@ -546,6 +560,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "not found"}, 404)
         ctype = {
             ".html": "text/html; charset=utf-8", ".js": "application/javascript; charset=utf-8",
+            ".mjs": "application/javascript; charset=utf-8",
             ".css": "text/css; charset=utf-8", ".png": "image/png", ".jpg": "image/jpeg",
             ".jpeg": "image/jpeg", ".webp": "image/webp", ".svg": "image/svg+xml",
             ".ico": "image/x-icon", ".onnx": "application/octet-stream",
@@ -786,7 +801,22 @@ class Handler(BaseHTTPRequestHandler):
         with _update_lock:
             snap = dict(UPDATE_STATE)
         snap["percent"] = round(snap["downloaded"] / snap["total"] * 100, 1) if snap.get("total") else 0
+        # 重启后内存状态归零，但落盘的 update-done.json 还在：让前端永远能观测到"更新完成"，
+        # 不再因错过 done 瞬间而无法自动刷新（v1.0.7）
+        if snap.get("state") in ("idle", ""):
+            flag = _read_update_done_flag()
+            if flag:
+                snap.update(state="done", phase="installed", version=flag.get("version", ""))
         return self._json(snap)
+
+    def _handle_update_clear_done(self):
+        flag_path = os.path.join(ROOT, "update-done.json")
+        try:
+            if os.path.isfile(flag_path):
+                os.remove(flag_path)
+        except OSError:
+            pass
+        return self._json({"ok": True})
 
     # ---------- 备份 ----------
     def _send_backup(self, acc_id):
@@ -973,6 +1003,24 @@ UPDATE_STATE = {
 _update_lock = threading.Lock()
 
 
+def _read_update_done_flag():
+    """读取更新完成标记（24 小时内有效）；文件随安装目录存在，跨进程重启有效"""
+    flag_path = os.path.join(ROOT, "update-done.json")
+    try:
+        if not os.path.isfile(flag_path):
+            return None
+        with open(flag_path, "r", encoding="utf-8") as f:
+            flag = json.load(f)
+        if not isinstance(flag, dict):
+            return None
+        ts = float(flag.get("time") or 0)
+        if ts and (time.time() - ts) > 24 * 3600:
+            return None
+        return flag
+    except (OSError, ValueError):
+        return None
+
+
 def start_update_job(url):
     """后台线程执行 下载 -> 校验 -> 安装；HTTP 请求立即返回"""
     UPDATE_STATE.update(state="downloading", downloaded=0, total=0, source="", error="", phase="downloading")
@@ -1100,6 +1148,19 @@ def _stage_and_install(data):
         'ping -n 3 127.0.0.1 >nul',
         'del /q "%~f0"',
     ]
+    # 更新完成标记：装完重启后 /api/update/status 仍能报告 done，前端据此自动刷新（v1.0.7）
+    new_ver = ""
+    try:
+        with open(os.path.join(staging, "version.json"), "r", encoding="utf-8") as f:
+            new_ver = str((json.load(f) or {}).get("version") or "")
+    except (OSError, ValueError):
+        pass
+    try:
+        with open(os.path.join(ROOT, "update-done.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": new_ver, "time": time.time()}, f)
+    except OSError:
+        pass
+
     updater = os.path.join(ROOT, "updater.cmd")
     with open(updater, "w", encoding="ascii", newline="") as f:
         f.write("\r\n".join(bat_lines) + "\r\n")

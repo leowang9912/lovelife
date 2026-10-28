@@ -53,18 +53,18 @@ window.SettingsView = (function () {
         '<label><span class="f-label">衣服预算</span><input type="number" id="b-clothing" value="' + ((budget.categories || {}).clothing || 0) + '"></label>' +
         '<label><span class="f-label">生活预算</span><input type="number" id="b-life" value="' + ((budget.categories || {}).life || 0) + '"></label>' +
         '<label><span class="f-label">美食预算</span><input type="number" id="b-food" value="' + ((budget.categories || {}).food || 0) + '"></label>' +
-        '</div><button class="btn btn-primary btn-sm" id="btn-save-budget" style="margin-top:12px">保存预算</button>' +
+        '</div><div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-budget">保存预算</button></div>' +
         '<h4 class="detail-sub">成本模型（寿命 / 残值率）</h4>' +
         catTable('digital', '数码（含游戏）', cats.digital) +
         catTable('clothing', '服饰（寿命参考）', cats.clothing) +
         catTable('life', '美妆（寿命参考）', cats.life) +
-        '<button class="btn btn-primary btn-sm" id="btn-save-cats">保存成本模型</button>') +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">保存成本模型</button></div>') +
 
       /* 4️⃣ 使用偏好 */
       section('4️⃣ 使用偏好',
         '<div class="form-grid"><label><span class="f-label">吃灰预警天数</span>' +
         '<input type="number" id="set-idle" value="' + (db.settings.idleWarnDays || 60) + '"></label></div>' +
-        '<button class="btn btn-primary btn-sm" id="btn-save-settings">保存偏好</button>' +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-settings">保存偏好</button></div>' +
         '<h4 class="detail-sub">我的统计板块显示</h4>' +
         '<p class="muted">屏蔽后该板块整体从「我的统计」隐藏；可随时恢复。</p>' +
         '<div class="chip-row">' +
@@ -89,7 +89,7 @@ window.SettingsView = (function () {
       /* 6️⃣ 危险操作 */
       '<div class="panel panel-danger"><div class="panel-head"><h3>6️⃣ ⚠️ 危险操作</h3></div><div class="panel-body">' +
       '<p class="muted">清空当前账号的全部物品、穿搭、美食、流水记录，不可恢复。建议先导出备份。</p>' +
-      '<button class="btn btn-danger" id="btn-reset">清空当前账号数据</button></div></div>' +
+      '<div class="btn-row"><button class="btn btn-danger" id="btn-reset">清空当前账号数据</button></div></div></div>' +
 
       '</div>';
 
@@ -108,7 +108,7 @@ window.SettingsView = (function () {
       const el = root.querySelector('#cur-ver');
       const fe = (window.App && window.App.FRONTEND_VERSION) || '';
       const exe = v.serverBuild || '';
-      if (el) el.textContent = 'v' + (v.version || '') + '（数据结构 v' + (v.minSchema || 3) + '）';
+      if (el) el.textContent = 'v' + (v.version || '');
       const feEl = root.querySelector('#fe-ver');
       if (feEl) feEl.textContent = '程序 v' + (exe || '—') + ' · 前端 v' + (fe || '—');
       const mm = root.querySelector('#ver-mismatch');

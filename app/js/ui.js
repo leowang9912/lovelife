@@ -141,7 +141,9 @@ window.UI = (function () {
                 tctx.drawImage(img, (side - img.width) / 2, (side - img.height) / 2);
                 cutoutCanvas = await window.Cutout.cutout(tmp);
                 draw();
-                wrap.querySelector('#crop-tip').textContent = '抠图完成，可继续调整';
+                wrap.querySelector('#crop-tip').textContent = window.Cutout.isModelReady()
+                  ? '抠图完成，可继续调整'
+                  : '已用基础抠图（AI 模型未加载），纯色背景效果最好';
                 btn.textContent = '✓ 已抠图';
               } catch (e) {
                 wrap.querySelector('#crop-tip').textContent = '抠图失败：' + e.message;
@@ -292,6 +294,68 @@ window.UI = (function () {
     }).join('');
   }
 
+  /* 标签 chip：非预设标签带 × 可删除（v1.0.7，用户自主管理标签库） */
+  function tagChipHTML(list, cur, presets) {
+    const arr = Array.isArray(cur) ? cur : (cur ? [cur] : []);
+    return (list || []).map(function (v) {
+      const on = arr.indexOf(v) >= 0;
+      const fixed = (presets || []).indexOf(v) >= 0;
+      return '<span class="chip-wrap">' +
+        '<label class="chip-check"><input type="checkbox" name="tags" value="' + U.escapeHtml(v) + '"' +
+        (on ? ' checked' : '') + '><span>' + U.escapeHtml(v) + '</span></label>' +
+        (fixed ? '' : '<button type="button" class="chip-del" data-del-tag="' + U.escapeHtml(v) + '" title="删除标签">×</button>') +
+        '</span>';
+    }).join('');
+  }
+
+  /* 自定义标签输入：回车/按钮把输入变成新 chip 并自动选中；× 删除标签（v1.0.7） */
+  function bindTagAdd(root) {
+    const row = root.querySelector('#tag-chips');
+    const input = root.querySelector('#tag-new');
+    const btn = root.querySelector('#tag-add-btn');
+    if (!row || !input) return;
+    const db = window.Storage.getDB();
+    const presets = (db && db.categories && db.categories.tagPresets) || [];
+    function currentVals() {
+      return Array.from(row.querySelectorAll('input[name=tags]')).map(function (x) { return x.value; });
+    }
+    function currentSel() {
+      return Array.from(row.querySelectorAll('input[name=tags]:checked')).map(function (x) { return x.value; });
+    }
+    function rerender(vals, sel) {
+      row.innerHTML = tagChipHTML(vals, sel, presets);
+    }
+    function add() {
+      const v = (input.value || '').trim();
+      if (!v) { input.focus(); return; }
+      const vals = currentVals();
+      const sel = currentSel();
+      if (vals.indexOf(v) < 0) vals.push(v);
+      if (sel.indexOf(v) < 0) sel.push(v);
+      rerender(vals, sel);
+      input.value = '';
+      input.focus();
+    }
+    // × 删除标签：候选与选择里移除，并从个人标签库删掉（预设不带 ×，不可删）
+    row.addEventListener('click', function (e) {
+      const del = e.target && e.target.closest ? e.target.closest('.chip-del') : null;
+      if (!del) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const v = del.getAttribute('data-del-tag');
+      rerender(currentVals().filter(function (x) { return x !== v; }),
+        currentSel().filter(function (x) { return x !== v; }));
+      if (db && db.settings && (db.settings.customTags || []).indexOf(v) >= 0) {
+        db.settings.customTags = db.settings.customTags.filter(function (x) { return x !== v; });
+        window.Storage.saveSettings();
+      }
+    });
+    if (btn) btn.addEventListener('click', add);
+    input.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { e.preventDefault(); add(); }
+    });
+  }
+
   function itemFormHTML(db, item, kind) {
     const req = db.settings.requiredFields || {};
     const cats = catsFor(db, kind);
@@ -328,9 +392,12 @@ window.UI = (function () {
       }).join('') + '</select></label>' +
       '<label><span class="f-label">品牌</span><input name="brand" value="' + U.escapeHtml(item.brand || '') + '"></label>' +
       '<label class="f-full"><span class="f-label">备注</span><input name="notes" value="' + U.escapeHtml(item.notes || '') + '"></label>' +
-      '<div class="f-full"><span class="f-label">标签（可多选）</span><div class="chip-row">' +
-      chips('tags', (db.categories.tagPresets || []).concat(item.tags || []).filter(function (v, i, a) { return a.indexOf(v) === i; }), item.tags) +
-      '</div></div></div></div>';
+      '<div class="f-full"><span class="f-label">标签（可多选）</span><div class="chip-row" id="tag-chips">' +
+      tagChipHTML((db.categories.tagPresets || []).concat(db.settings.customTags || []).concat(item.tags || []).filter(function (v, i, a) { return a.indexOf(v) === i; }), item.tags, db.categories.tagPresets || []) +
+      '</div>' +
+      '<div class="tag-add-row"><input id="tag-new" placeholder="自定义标签，回车添加">' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="tag-add-btn">＋ 添加</button></div>' +
+      '</div></div></div>';
 
     if (isDigital) {
       const deviceOpts = '<option value="">（无）</option>' + db.items.filter(function (i) {
@@ -449,6 +516,19 @@ window.UI = (function () {
     item.channel = (fd.get('channel') || '').trim();
     item.storageLocation = (fd.get('storageLocation') || '').trim();
     item.tags = fd.getAll('tags').filter(Boolean);
+    // 自定义标签入个人标签库（预设不入库），下次录入直接可选（v1.0.7）
+    if (item.tags.length) {
+      const presets = db.categories.tagPresets || [];
+      const lib = (db.settings.customTags || []).slice();
+      let changed = false;
+      item.tags.forEach(function (t) {
+        if (presets.indexOf(t) < 0 && lib.indexOf(t) < 0) { lib.push(t); changed = true; }
+      });
+      if (changed) {
+        db.settings.customTags = lib;
+        window.Storage.saveSettings();
+      }
+    }
     item.kind = kind === 'digital'
       ? (kindOfCategory(db, 'digital', item.categoryId, item.subCategoryId) || 'device')
       : kind;
@@ -517,6 +597,27 @@ window.UI = (function () {
     const selected = new Set(selectedIds || []);
     let activeCat = '';
     let keyword = '';
+    // 缩略图统一异步解析（v1.0.7）：组合编辑/打卡等所有调用方自动出图，
+    // 不再各自手写转换补丁
+    const thumbMap = {};
+    function thumbOf(i) {
+      return i.thumb || thumbMap[i.id] || '';
+    }
+    function resolveThumbs() {
+      const jobs = items.map(function (i) {
+        if (thumbOf(i)) return null;
+        const p = (i.images && i.images[0]) || i.thumbPath || '';
+        if (!p) return null;
+        return window.Storage.getImageURL(p).then(function (url) {
+          if (url) thumbMap[i.id] = url;
+        }).catch(function () {});
+      }).filter(Boolean);
+      if (!jobs.length) return;
+      Promise.all(jobs).then(function () {
+        if (container.isConnected === false) return; // 弹窗已关，不再重绘
+        render();
+      });
+    }
 
     function render() {
       const cats = [];
@@ -544,8 +645,8 @@ window.UI = (function () {
         (list.length ? list.map(function (i) {
           const on = selected.has(i.id);
           return '<div class="pick-card' + (on ? ' on' : '') + '" data-pid="' + i.id + '">' +
-            (i.thumb
-              ? '<img src="' + i.thumb + '"/>'
+            (thumbOf(i)
+              ? '<img src="' + U.escapeHtml(thumbOf(i)) + '"/>'
               : '<div class="pick-noimg">' + (opts.icon || '📦') + '</div>') +
             '<div class="pick-name">' + U.escapeHtml(i.name) + '</div>' +
             (on ? '<div class="pick-check">✓</div>' : '') +
@@ -577,6 +678,7 @@ window.UI = (function () {
       });
     }
     render();
+    resolveThumbs();
     return {
       getSelected: function () { return Array.from(selected); },
       setSelected: function (ids) { selected.clear(); (ids || []).forEach(function (i) { selected.add(i); }); render(); }
@@ -651,65 +753,88 @@ window.UI = (function () {
   }
 
   /* ---------- 组合管理（妆容/穿搭通用）：列表 + 新建/编辑 + 范例图 ---------- */
+  const COMBO_TEMPS = ['>28℃', '22~28℃', '15~22℃', '5~15℃', '<5℃'];
+  const COMBO_SEASONS = ['春', '夏', '秋', '冬'];
+  function comboBadges(c) {
+    return (c.seasons || []).concat(c.tempRanges || []).map(function (t) {
+      return '<span class="tag">' + U.escapeHtml(t) + '</span>';
+    }).join('');
+  }
+
   function comboManager(cfg) {
     // cfg: { title, icon, items, combos, onChange }
+    // v1.0.7 两级弹窗：列表只管看/删/进编辑，编辑在独立弹窗，界面不再混作一团
     const combos = cfg.combos;
-    let editIdx = -1;
 
-    function open() {
+    function openList() {
       modal({
-        title: cfg.title, width: 680,
+        title: cfg.title, width: 620,
         bodyHTML:
           (combos.length ? '<div class="combo-list">' + combos.map(function (c, i) {
-            return '<div class="mini-row combo-row">' +
+            return '<div class="combo-row">' +
               (c.images && c.images[0]
                 ? '<img class="combo-thumb" data-path="' + U.escapeHtml(c.images[0]) + '" alt=""/>'
                 : '<div class="combo-thumb combo-thumb-empty">' + U.escapeHtml(cfg.icon || '✨') + '</div>') +
-              '<span class="flex1"><strong>' + U.escapeHtml(c.name) + '</strong>' +
-              '<span class="muted small">（' + (c.itemIds || []).length + ' 件' +
-              ((c.images || []).length ? ' · 范例图 ' + c.images.length : '') + '）</span></span>' +
-              '<button class="btn-icon" data-edit-combo="' + i + '" title="编辑">✎</button>' +
+              '<div class="combo-info"><div class="combo-name">' + U.escapeHtml(c.name) + '</div>' +
+              '<div class="combo-meta">' + comboBadges(c) +
+              '<span class="muted small">' + (c.itemIds || []).length + ' 件物品' +
+              ((c.images || []).length ? ' · 范例图 ' + c.images.length : '') + '</span></div></div>' +
+              '<button class="btn btn-ghost btn-sm" data-edit-combo="' + i + '">编辑</button>' +
               '<button class="btn-icon" data-del-combo="' + i + '" title="删除">×</button></div>';
-          }).join('') + '</div>' : '<p class="empty-hint">还没有' + U.escapeHtml(cfg.title) + '</p>') +
-          '<h4 class="detail-sub">' + (editIdx >= 0 ? '编辑组合' : '新建组合') + '</h4>' +
-          '<div class="form-grid"><label class="f-full"><span class="f-label">组合名称</span>' +
-          '<input id="combo-name" placeholder="如：日常通勤"></label></div>' +
-          '<div id="combo-picker"></div>' +
-          '<h4 class="detail-sub">范例图（可多张，便于打卡时对照参考）</h4>' +
-          '<div id="combo-imgs"></div>',
+          }).join('') + '</div>'
+            : '<p class="empty-hint">还没有' + U.escapeHtml(cfg.title) + '，点下方「新建组合」创建第一个</p>'),
         footerHTML: '<button class="btn btn-ghost" data-x="c">关闭</button>' +
-          '<button class="btn btn-primary" data-x="s">' + (editIdx >= 0 ? '保存修改' : '保存组合') + '</button>',
+          '<button class="btn btn-primary" data-x="n">＋ 新建组合</button>',
         onMount: function (wrap, close) {
-          const editing = editIdx >= 0 ? combos[editIdx] : null;
-          if (editing) wrap.querySelector('#combo-name').value = editing.name || '';
-          let pick = picker(wrap.querySelector('#combo-picker'), cfg.items,
-            editing ? (editing.itemIds || []).slice() : [], {});
-          const uploader = imageUploader(wrap.querySelector('#combo-imgs'),
-            { paths: editing ? (editing.images || []).slice() : [] });
           wrap.querySelectorAll('img[data-path]').forEach(async function (img) {
             const url = await window.Storage.getImageURL(img.getAttribute('data-path'));
             if (url) img.src = url;
           });
           wrap.querySelectorAll('[data-edit-combo]').forEach(function (b) {
             b.addEventListener('click', function () {
-              editIdx = Number(b.getAttribute('data-edit-combo'));
-              close(); open();
+              close(); openEditor(Number(b.getAttribute('data-edit-combo')));
             });
           });
           wrap.querySelectorAll('[data-del-combo]').forEach(function (b) {
             b.addEventListener('click', async function () {
               if (!await confirmDialog('删除组合', '删除该组合？（不影响物品本身）')) return;
-              const i = Number(b.getAttribute('data-del-combo'));
-              combos.splice(i, 1);
-              // 删除使下标前移：编辑目标要跟着调整，否则保存会写错槽位
-              if (editIdx === i) editIdx = -1;
-              else if (editIdx > i) editIdx--;
+              combos.splice(Number(b.getAttribute('data-del-combo')), 1);
               cfg.onChange();
-              close(); open();
+              toast('已删除', 'success');
+              close(); openList();
             });
           });
+          wrap.querySelector('[data-x=c]').addEventListener('click', close);
+          wrap.querySelector('[data-x=n]').addEventListener('click', function () {
+            close(); openEditor(-1);
+          });
+        }
+      });
+    }
+
+    function openEditor(editIdx) {
+      const ed = editIdx >= 0 ? combos[editIdx] : null;
+      modal({
+        title: (ed ? '编辑组合 · ' : '新建组合 · ') + cfg.title, width: 720,
+        bodyHTML:
+          '<div class="form-grid">' +
+          '<label class="f-full"><span class="f-label">组合名称</span>' +
+          '<input id="combo-name" placeholder="如：日常通勤" value="' + U.escapeHtml(ed ? (ed.name || '') : '') + '"></label>' +
+          '<label class="f-full"><span class="f-label">适配温度（可多选）</span><div class="chip-row">' +
+          chips('ctemp', COMBO_TEMPS, ed ? (ed.tempRanges || []) : []) + '</div></label>' +
+          '<label class="f-full"><span class="f-label">适配季节（可多选）</span><div class="chip-row">' +
+          chips('cseason', COMBO_SEASONS, ed ? (ed.seasons || []) : []) + '</div></label></div>' +
+          '<h4 class="detail-sub">选择成员物品</h4><div id="combo-picker"></div>' +
+          '<h4 class="detail-sub">范例图（可多张，便于打卡时对照参考）</h4><div id="combo-imgs"></div>',
+        footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +
+          '<button class="btn btn-primary" data-x="s">' + (ed ? '保存修改' : '保存组合') + '</button>',
+        onMount: function (wrap, close) {
+          const pick = picker(wrap.querySelector('#combo-picker'), cfg.items,
+            ed ? (ed.itemIds || []).slice() : [], {});
+          const uploader = imageUploader(wrap.querySelector('#combo-imgs'),
+            { paths: ed ? (ed.images || []).slice() : [] });
           wrap.querySelector('[data-x=c]').addEventListener('click', function () {
-            editIdx = -1; close();
+            close(); openList();
           });
           wrap.querySelector('[data-x=s]').addEventListener('click', async function () {
             const name = wrap.querySelector('#combo-name').value.trim();
@@ -720,12 +845,15 @@ window.UI = (function () {
             btn.disabled = true;
             try {
               const images = await uploader.finalize();
-              const rec = { id: editing ? editing.id : U.uid(), name: name, itemIds: ids, images: images };
-              if (editing) combos[editIdx] = rec; else combos.push(rec);
+              const rec = {
+                id: ed ? ed.id : U.uid(), name: name, itemIds: ids, images: images,
+                tempRanges: Array.from(wrap.querySelectorAll('input[name=ctemp]:checked')).map(function (x) { return x.value; }),
+                seasons: Array.from(wrap.querySelectorAll('input[name=cseason]:checked')).map(function (x) { return x.value; })
+              };
+              if (ed) combos[editIdx] = rec; else combos.push(rec);
               cfg.onChange();
-              toast(editing ? '已保存' : '组合已保存', 'success');
-              editIdx = -1;
-              close(); open();
+              toast(ed ? '已保存' : '组合已保存', 'success');
+              close(); openList();
             } catch (e) {
               toast('保存失败：' + e.message, 'error'); btn.disabled = false;
             }
@@ -733,7 +861,8 @@ window.UI = (function () {
         }
       });
     }
-    open();
+
+    openList();
   }
 
   /* ---------- 日历多条记录选择器（先选后编辑） ---------- */
@@ -775,6 +904,7 @@ window.UI = (function () {
     cropImage: cropImage, imageUploader: imageUploader, picker: picker,
     itemFormHTML: itemFormHTML, bindFormToggles: bindFormToggles, readItemForm: readItemForm,
     itemCard: itemCard, catsFor: catsFor, kindOfCategory: kindOfCategory, pickRecord: pickRecord, comboManager: comboManager,
+    bindTagAdd: bindTagAdd, comboBadges: comboBadges,
     isGameCategory: isGameCategory, usageLogHTML: usageLogHTML, catIcon: catIcon
   };
 })();

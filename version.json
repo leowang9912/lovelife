@@ -1,11 +1,16 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.7",
   "minSchema": 3,
   "publishedAt": "2026-10-28",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "新增桌面快捷方式：设置 → 软件一键创建「人生管家」桌面图标，双击即启动",
-    "重复创建自动刷新覆盖，快捷方式带应用图标"
+    "标签大升级：预设精简为 3 个，支持自定义标签、×删除、列表标签筛选",
+    "修复一键抠图失效（AI 模型真正生效，复杂背景也能抠）",
+    "更新完成后自动刷新并提示升级成功，无需手动重开",
+    "启动更稳：防双击重复启动、失败自动重试，大幅减少杀软弹窗",
+    "组合升级：打卡时图文卡片、适配温度/季节、两级管理界面、修复组合无图",
+    "分类扩充：洗发水/护发素/发膜/沐浴露/精油等，补全多处子类",
+    "KPI 总览改版为资产驾驶舱，环图全部带图例，设置页排布统一"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -13,6 +18,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.6/lovelife-v1.0.6-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.7/lovelife-v1.0.7-win64.zip"
   }
 }

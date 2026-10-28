@@ -100,7 +100,21 @@ window.Charts = (function () {
       s += '<text x="' + cx + '" y="' + (cy + 16) + '" text-anchor="middle" font-size="10" fill="#94a3b8">' + (opts.centerSub || '') + '</text>';
     }
     s += '</svg>';
-    return s;
+    // 常驻图例（v1.0.7）：色点 + 名称 + 数值 + 占比，色块代指一目了然（opts.legend===false 可关）
+    let legend = '';
+    if (opts.legend !== false && data.length) {
+      legend = '<div class="donut-legend">' + data.map(function (d, i) {
+        const color = d.color || PALETTE[i % PALETTE.length];
+        const pct = Math.round((d.value / total) * 100);
+        return '<div class="donut-legend-row">' +
+          '<span class="donut-dot" style="background:' + color + '"></span>' +
+          '<span class="donut-legend-label">' + esc(d.label) + '</span>' +
+          '<span class="donut-legend-val">' + esc(d.valueText != null ? d.valueText : d.value) + '</span>' +
+          '<span class="donut-legend-pct">' + pct + '%</span>' +
+          '</div>';
+      }).join('') + '</div>';
+    }
+    return '<div class="donut-wrap">' + s + legend + '</div>';
   }
 
   /* 排行条 data: [{label, value, sub}] */

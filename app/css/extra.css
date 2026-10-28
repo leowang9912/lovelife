@@ -408,3 +408,115 @@
   margin-left: auto; font-size: 15px;
 }
 .plan-block .plan-grid { min-height: 8px; }
+
+/* ===== v1.0.7：自定义标签输入行 ===== */
+.tag-add-row { display: flex; gap: 8px; margin-top: 8px; }
+.tag-add-row input {
+  flex: 0 1 240px; padding: 7px 11px; border: 1px solid var(--line);
+  border-radius: 8px; font-size: 13px; font-family: inherit; background: #fff; color: var(--text);
+}
+.tag-add-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0, 113, 227, .15); }
+
+/* ===== v1.0.7：KPI 资产驾驶舱 ===== */
+.kpi-hero-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 0 0 12px; }
+.kpi-hero {
+  background: linear-gradient(160deg, #fbfbfd, #f2f2f7); border-radius: 12px;
+  padding: 12px 14px; box-shadow: inset 0 0 0 0.5px var(--line-soft);
+}
+.kpi-hero-label { font-size: 12px; color: var(--text-2); font-weight: 500; }
+.kpi-hero-value { font-size: 21px; font-weight: 700; margin: 3px 0 2px; letter-spacing: -.3px; }
+.kpi-hero-value.bad { color: var(--red); }
+.kpi-hero-sub { font-size: 11px; color: var(--text-3); line-height: 1.5; }
+.kpi-delta { font-weight: 600; font-size: 11px; }
+.kpi-delta.bad { color: var(--red); }
+.kpi-delta.good { color: #1d7a3e; }
+
+.kpi-domain { border-top: 1px solid var(--line-soft); padding: 10px 0 4px; }
+.kpi-domain-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.kpi-domain-row {
+  display: flex; align-items: center; gap: 9px; padding: 6px 2px;
+  border-bottom: 1px dashed var(--line-soft); font-size: 13px;
+}
+.kpi-domain-row:last-child { border-bottom: none; }
+.kpi-domain-icon { font-size: 15px; width: 20px; text-align: center; }
+.kpi-domain-name { font-weight: 600; width: 38px; flex-shrink: 0; }
+.kpi-domain-parts { display: flex; gap: 7px; color: var(--text-2); flex-wrap: wrap; }
+.kpi-domain-parts i { color: var(--text-3); font-style: normal; opacity: .6; }
+
+.kpi-month { border-top: 1px solid var(--line-soft); padding-top: 10px; }
+.kpi-month-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 6px; }
+.kpi-month-line { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.kpi-month-line .rank-bar-track { flex: 0 0 160px; }
+.kpi-month-val { font-size: 12px; color: var(--text-2); }
+.kpi-month-mini { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+
+/* ===== v1.0.7：环图常驻图例 ===== */
+.donut-wrap { display: flex; flex-direction: column; align-items: center; gap: 8px; width: 100%; }
+.donut-legend { width: 100%; max-width: 280px; }
+.donut-legend-row {
+  display: flex; align-items: center; gap: 8px; padding: 3.5px 2px;
+  font-size: 12px; color: var(--text-2);
+}
+.donut-dot { width: 10px; height: 10px; border-radius: 3px; flex-shrink: 0; }
+.donut-legend-label { flex: 1; }
+.donut-legend-val { font-weight: 600; color: var(--text); }
+.donut-legend-pct { width: 40px; text-align: right; color: var(--text-3); }
+
+/* ===== v1.0.7：组合管理列表（两级弹窗） ===== */
+.combo-list { display: flex; flex-direction: column; gap: 8px; }
+.combo-row {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  background: #fff; border: 1px solid var(--line-soft); border-radius: 12px;
+}
+.combo-row:hover { border-color: var(--line); box-shadow: var(--shadow); }
+.combo-thumb {
+  width: 52px; height: 52px; border-radius: 10px; object-fit: cover;
+  background: #f2f2f4; flex-shrink: 0;
+}
+.combo-thumb-empty {
+  display: flex; align-items: center; justify-content: center; font-size: 22px; opacity: .55;
+}
+.combo-info { flex: 1; min-width: 0; }
+.combo-name { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
+.combo-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+
+/* ===== v1.0.7：设置页纵向节奏统一（按钮行/文案等距） ===== */
+.settings-stack .panel-body > p { margin: 8px 0; }
+.settings-stack .panel-body > p:first-child { margin-top: 0; }
+.settings-stack .btn-row { margin-top: 14px; }
+.settings-stack .form-grid + .btn-row { margin-top: 12px; }
+.settings-stack .btn-row + p { margin-top: 10px; }
+.settings-stack .detail-sub { margin: 18px 0 8px; }
+
+/* ===== v1.0.7：标签 chip 可删除（×） ===== */
+.chip-wrap { display: inline-flex; align-items: center; gap: 2px; }
+.chip-del {
+  width: 17px; height: 17px; border-radius: 50%; border: none; cursor: pointer;
+  background: rgba(0, 0, 0, .07); color: var(--text-3);
+  font-size: 11px; line-height: 1; padding: 0; flex-shrink: 0;
+}
+.chip-del:hover { background: rgba(255, 59, 48, .15); color: var(--red); }
+
+/* ===== v1.0.7：打卡弹窗组合快捷卡片（图文，点选套用） ===== */
+.look-strip { display: flex; gap: 8px; flex-wrap: wrap; margin: 4px 0 12px; }
+.look-card {
+  width: 92px; padding: 6px 6px 7px; border-radius: 11px; cursor: pointer;
+  background: #fff; border: 1.5px solid var(--line-soft); text-align: center;
+  transition: border-color .12s, background .12s;
+}
+.look-card:hover { border-color: var(--accent); background: var(--accent-soft); }
+.look-card.on { border-color: var(--accent); background: var(--accent-soft); box-shadow: 0 0 0 2px rgba(0, 113, 227, .12); }
+.look-card img, .look-noimg {
+  width: 78px; height: 78px; border-radius: 8px; object-fit: cover;
+  background: #f2f2f4; display: block; margin: 0 auto;
+}
+.look-noimg {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 28px; opacity: .55;
+}
+.look-name {
+  font-size: 11px; font-weight: 600; margin-top: 5px; line-height: 1.3;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.look-tags { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; margin-top: 3px; }
+.look-tags .tag { font-size: 9px; padding: 1px 5px; }

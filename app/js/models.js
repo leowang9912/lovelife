@@ -33,7 +33,7 @@ window.Models = (function () {
         { id: 'wearTrend', enabled: false },
         { id: 'deviceRank', enabled: false }
       ],
-      makeupLooks: []
+      makeupLooks: [], customTags: []
     };
   }
 
