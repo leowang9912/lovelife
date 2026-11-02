@@ -76,8 +76,8 @@ window.UI = (function () {
             '<canvas id="crop-canvas" width="' + frame + '" height="' + frame + '"></canvas>' +
             '<div class="crop-grid"></div></div>' +
             '<div class="crop-controls">' +
-            '<label class="f-label">缩放</label>' +
-            '<input type="range" id="crop-zoom" min="100" max="300" value="100">' +
+            '<label class="f-label">缩放（可缩小，四周自动补白）</label>' +
+            '<input type="range" id="crop-zoom" min="33" max="300" value="100">' +
             '<div class="crop-actions">' +
             '<button class="btn btn-ghost btn-sm" id="crop-cutout">✂️ 一键抠图</button>' +
             '<span class="muted small" id="crop-tip">拖动图片调整位置</span>' +
@@ -96,10 +96,11 @@ window.UI = (function () {
             }
             function draw() {
               ctx.clearRect(0, 0, frame, frame);
-              ctx.fillStyle = '#f2f2f4';
+              ctx.fillStyle = '#ffffff'; // 白底补齐：缩小时四周就是输出的白边
               ctx.fillRect(0, 0, frame, frame);
               const w = img.width * scale, h = img.height * scale;
-              const maxX = Math.max(0, (w - frame) / 2), maxY = Math.max(0, (h - frame) / 2);
+              // 缩小时也允许在白边范围内拖动构图（v1.0.8）
+              const maxX = Math.abs(w - frame) / 2, maxY = Math.abs(h - frame) / 2;
               offsetX = Math.min(maxX, Math.max(-maxX, offsetX));
               offsetY = Math.min(maxY, Math.max(-maxY, offsetY));
               if (cutoutCanvas) {
@@ -277,6 +278,80 @@ window.UI = (function () {
     ['to_sell', '待出闲置'], ['broken', '损坏报废'],
     ['sold', '已售出（归档）'], ['gifted', '已转赠（归档）']
   ];
+
+  /* ---------- 列表排序（v1.0.8）：字段 + 方向双向可调，三类通用 + 各类专属 ---------- */
+  function cmpNumGet(get, dir) {
+    return function (a, b) {
+      const va = get(a), vb = get(b);
+      const aN = va == null || isNaN(va), bN = vb == null || isNaN(vb);
+      if (aN && bN) return 0;
+      if (aN) return 1;   // 无值永远排最后，方向都不影响
+      if (bN) return -1;
+      return dir * (va - vb);
+    };
+  }
+  const REMAIN_VAL = { '满': 1, '¾': 0.75, '½': 0.5, '¼': 0.25, '空': 0 };
+  // cmp 一律为升序自然序；dir = 1 顺着排 / -1 反着排；dirs = [升序文案, 降序文案]
+  const SORT_DEFS = [
+    { key: 'date', label: '购买时间', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+      dirs: ['旧→新', '新→旧'],
+      cmp: function (a, b) { return String(a.purchaseDate || '').localeCompare(String(b.purchaseDate || '')); } },
+    { key: 'price', label: '购入价格', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+      dirs: ['低→高', '高→低'],
+      cmp: cmpNumGet(function (i) { return Number(i.purchasePrice); }, 1) },
+    { key: 'uses', label: '使用次数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+      dirs: ['少→多', '多→少'],
+      cmp: cmpNumGet(function (i) { return (i.kind === 'clothing' ? i.wearCount : i.useCount) || 0; }, 1) },
+    { key: 'cpw', label: '单次使用成本', kinds: ['clothing', 'life'], defDir: 1,
+      dirs: ['低→高', '高→低'],
+      cmp: cmpNumGet(function (i) { return i.cost && i.cost.costPerUse; }, 1) },
+    { key: 'daily', label: '单日使用成本', kinds: ['digital'], defDir: -1,
+      dirs: ['低→高', '高→低'],
+      cmp: cmpNumGet(function (i) { return i.cost && i.cost.dailyCost; }, 1) },
+    { key: 'held', label: '已持有天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+      dirs: ['短→长', '长→短'],
+      cmp: cmpNumGet(function (i) { return i.cost && i.cost.heldDays; }, 1) },
+    { key: 'idle', label: '吃灰天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+      dirs: ['最近用过', '吃灰最久'],
+      cmp: cmpNumGet(function (i) { return window.Models.idleDaysOf(window.Storage.getDB(), i); }, 1) },
+    { key: 'name', label: '名称', kinds: ['digital', 'clothing', 'life'], defDir: 1,
+      dirs: ['A→Z', 'Z→A'],
+      cmp: function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'zh'); } },
+    { key: 'cat', label: '分类归拢', kinds: ['digital', 'clothing', 'life'], defDir: 1,
+      dirs: ['正序', '倒序'],
+      cmp: function (a, b) {
+        return String(a.categoryId || '').localeCompare(String(b.categoryId || '')) ||
+          String(a.subCategoryId || '').localeCompare(String(b.subCategoryId || ''));
+      } },
+    { key: 'remain', label: '剩余量', kinds: ['life'], defDir: 1,
+      dirs: ['少→多', '多→少'],
+      cmp: cmpNumGet(function (i) { return REMAIN_VAL[i.remainLevel]; }, 1) },
+    { key: 'fresh', label: '开封时长', kinds: ['life'], defDir: 1,
+      dirs: ['开封最久→新', '新开→久'],
+      cmp: function (a, b) {
+        return String(a.openedDate || '￿').localeCompare(String(b.openedDate || '￿'));
+      } },
+    { key: 'pao', label: 'PAO 剩余', kinds: ['life'], defDir: 1,
+      dirs: ['临期最紧→宽', '宽→最紧'],
+      cmp: cmpNumGet(function (i) { return window.Models.lifeStatus(i).paoDaysLeft; }, 1) },
+    { key: 'warranty', label: '保修剩余', kinds: ['digital'], defDir: 1,
+      dirs: ['临期最紧→宽', '宽→最紧'],
+      cmp: cmpNumGet(function (i) { const d = U.parseDate(i.warrantyEnd); return d ? d.getTime() : null; }, 1) }
+  ];
+  function sortOptionsFor(kind) {
+    return SORT_DEFS.filter(function (d) { return d.kinds.indexOf(kind) >= 0; });
+  }
+  function sortDirLabel(key, dir) {
+    const def = SORT_DEFS.find(function (d) { return d.key === key; });
+    if (!def) return '';
+    return dir === 1 ? def.dirs[0] : def.dirs[1];
+  }
+  function sortItems(list, key, dir, db) {
+    const def = SORT_DEFS.find(function (d) { return d.key === key; });
+    if (!def) return list;
+    const d = dir === 1 ? 1 : -1;
+    return list.slice().sort(function (a, b) { return d * def.cmp(a, b); });
+  }
 
   function enumSel(list, cur, blank) {
     return '<option value="">' + (blank || '（不指定）') + '</option>' +
@@ -698,6 +773,39 @@ window.UI = (function () {
     return { device: '🎮', game: '💿', clothing: '👕', life: '💄' }[item.kind] || '📦';
   }
 
+  /* 卡片信息行：跟随当前排序字段展示对应数值（v1.0.8），无对应则回退成本行 */
+  function sortValueLine(sortKey, item, db) {
+    switch (sortKey) {
+      case 'date': return item.purchaseDate ? '购于 ' + item.purchaseDate : '';
+      case 'price': return item.purchasePrice != null ? U.formatMoney(item.purchasePrice) : '';
+      case 'uses': return ((item.kind === 'clothing' ? item.wearCount : item.useCount) || 0) + ' 次';
+      case 'cpw': return item.cost && item.cost.costPerUse != null ? U.formatCost(item.cost.costPerUse) + ' / 次' : '暂无使用记录';
+      case 'daily': return item.cost && item.cost.dailyCost != null ? U.formatCost(item.cost.dailyCost) + ' / 天' : '';
+      case 'held': return item.cost && item.cost.heldDays != null ? '已持有 ' + item.cost.heldDays + ' 天' : '';
+      case 'idle': {
+        const d = window.Models.idleDaysOf(db, item);
+        return d <= 1 ? '刚用过' : '吃灰 ' + d + ' 天';
+      }
+      case 'remain': return item.remainLevel ? '剩余 ' + item.remainLevel : '';
+      case 'fresh': return item.openedDate ? '开封 ' + item.openedDate : '未开封';
+      case 'pao': {
+        const s = window.Models.lifeStatus(item);
+        return s.paoState === 'expired' ? 'PAO 已过期'
+          : s.paoState === 'near' ? 'PAO 余 ' + s.paoDaysLeft + ' 天'
+            : (item.paoMonths ? 'PAO ' + item.paoMonths + ' 个月' : '');
+      }
+      case 'warranty': return item.warrantyEnd ? '保修至 ' + item.warrantyEnd : '';
+      case 'cat': {
+        const key = (item.kind === 'device' || item.kind === 'game') ? 'digital' : item.kind;
+        const list = catsFor(db, key);
+        const l1 = list.find(function (c) { return c.id === item.categoryId; });
+        const sub = l1 && l1.children ? l1.children.find(function (c) { return c.id === item.subCategoryId; }) : null;
+        return sub ? sub.name : (l1 ? l1.name : '');
+      }
+      default: return ''; // 名称等：值已在卡片标题，回退成本行
+    }
+  }
+
   function itemCard(item, opts) {
     opts = opts || {};
     const cost = item.cost || {};
@@ -732,7 +840,7 @@ window.UI = (function () {
       '<div class="item-info">' +
       '<div class="item-name" title="' + U.escapeHtml(item.name) + '">' + U.escapeHtml(item.name) + '</div>' +
       '<div class="item-meta">' + U.escapeHtml(item.brand || '') + (item.shade ? ' · ' + U.escapeHtml(item.shade) : '') + '</div>' +
-      '<div class="item-cost">' + costLine + '</div></div></div>';
+      '<div class="item-cost">' + ((opts.sortKey ? sortValueLine(opts.sortKey, item, db) : '') || costLine) + '</div></div></div>';
   }
 
   /* ---------- 使用流水面板 ---------- */
@@ -753,8 +861,13 @@ window.UI = (function () {
   }
 
   /* ---------- 组合管理（妆容/穿搭通用）：列表 + 新建/编辑 + 范例图 ---------- */
-  const COMBO_TEMPS = ['>28℃', '22~28℃', '15~22℃', '5~15℃', '<5℃'];
+  const COMBO_TEMPS = ['>30℃', '25~30℃', '20~25℃', '15~20℃', '10~15℃', '5~10℃', '0~5℃', '-5~0℃', '<-5℃'];
   const COMBO_SEASONS = ['春', '夏', '秋', '冬'];
+  /* 温度候选 = 细化档位 + 该组合已有的自定义区间（老的 5 档标签也兼容显示） */
+  function tempCandidates(ed) {
+    const extra = ((ed && ed.tempRanges) || []).filter(function (t) { return COMBO_TEMPS.indexOf(t) < 0; });
+    return COMBO_TEMPS.concat(extra);
+  }
   function comboBadges(c) {
     return (c.seasons || []).concat(c.tempRanges || []).map(function (t) {
       return '<span class="tag">' + U.escapeHtml(t) + '</span>';
@@ -820,8 +933,12 @@ window.UI = (function () {
           '<div class="form-grid">' +
           '<label class="f-full"><span class="f-label">组合名称</span>' +
           '<input id="combo-name" placeholder="如：日常通勤" value="' + U.escapeHtml(ed ? (ed.name || '') : '') + '"></label>' +
-          '<label class="f-full"><span class="f-label">适配温度（可多选）</span><div class="chip-row">' +
-          chips('ctemp', COMBO_TEMPS, ed ? (ed.tempRanges || []) : []) + '</div></label>' +
+          '<label class="f-full"><span class="f-label">适配温度（可多选）</span><div class="chip-row" id="ctemp-chips">' +
+          chips('ctemp', tempCandidates(ed), ed ? (ed.tempRanges || []) : []) + '</div>' +
+          '<div class="tag-add-row"><input type="number" id="ctemp-min" placeholder="最低 ℃" style="width:92px">' +
+          '<span class="muted">~</span>' +
+          '<input type="number" id="ctemp-max" placeholder="最高 ℃" style="width:92px">' +
+          '<button type="button" class="btn btn-ghost btn-sm" id="ctemp-add">＋ 添加区间</button></div></label>' +
           '<label class="f-full"><span class="f-label">适配季节（可多选）</span><div class="chip-row">' +
           chips('cseason', COMBO_SEASONS, ed ? (ed.seasons || []) : []) + '</div></label></div>' +
           '<h4 class="detail-sub">选择成员物品</h4><div id="combo-picker"></div>' +
@@ -833,6 +950,26 @@ window.UI = (function () {
             ed ? (ed.itemIds || []).slice() : [], {});
           const uploader = imageUploader(wrap.querySelector('#combo-imgs'),
             { paths: ed ? (ed.images || []).slice() : [] });
+          // 自定义温度区间 → 生成选中 chip（v1.0.8）
+          const trow = wrap.querySelector('#ctemp-chips');
+          function addTempRange() {
+            const a = Number(wrap.querySelector('#ctemp-min').value);
+            const b = Number(wrap.querySelector('#ctemp-max').value);
+            const minEl = wrap.querySelector('#ctemp-min');
+            const maxEl = wrap.querySelector('#ctemp-max');
+            if (minEl.value.trim() === '' || maxEl.value.trim() === '') { toast('请填写最低和最高温度', 'error'); return; }
+            if (isNaN(a) || isNaN(b)) { toast('温度必须是数字', 'error'); return; }
+            if (a > b) { toast('最低温度不能高于最高温度', 'error'); return; }
+            const label = a + '~' + b + '℃';
+            const vals = Array.from(trow.querySelectorAll('input[name=ctemp]')).map(function (x) { return x.value; });
+            const sel = Array.from(trow.querySelectorAll('input[name=ctemp]:checked')).map(function (x) { return x.value; });
+            if (vals.indexOf(label) < 0) vals.push(label);
+            if (sel.indexOf(label) < 0) sel.push(label);
+            trow.innerHTML = chips('ctemp', vals, sel);
+            minEl.value = ''; maxEl.value = '';
+          }
+          const tbtn = wrap.querySelector('#ctemp-add');
+          if (tbtn) tbtn.addEventListener('click', addTempRange);
           wrap.querySelector('[data-x=c]').addEventListener('click', function () {
             close(); openList();
           });
@@ -905,6 +1042,7 @@ window.UI = (function () {
     itemFormHTML: itemFormHTML, bindFormToggles: bindFormToggles, readItemForm: readItemForm,
     itemCard: itemCard, catsFor: catsFor, kindOfCategory: kindOfCategory, pickRecord: pickRecord, comboManager: comboManager,
     bindTagAdd: bindTagAdd, comboBadges: comboBadges,
+    sortOptionsFor: sortOptionsFor, sortItems: sortItems, sortDirLabel: sortDirLabel,
     isGameCategory: isGameCategory, usageLogHTML: usageLogHTML, catIcon: catIcon
   };
 })();

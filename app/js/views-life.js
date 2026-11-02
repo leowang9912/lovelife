@@ -5,7 +5,7 @@ window.LifeView = (function () {
   const S = window.Storage;
   const UI = window.UI;
 
-  const state = { filterCat: '', filterSub: '', filterStatus: '', filterTag: '', search: '' };
+  const state = { filterCat: '', filterSub: '', filterStatus: '', filterTag: '', search: '', sort: { key: 'date', dir: -1 } };
 
   function render(root) {
     const db = S.getDB();
@@ -29,9 +29,8 @@ window.LifeView = (function () {
           (i.shade || '').toLowerCase().indexOf(q) >= 0;
       });
     }
-    list = list.slice().sort(function (a, b) {
-      return (b.openedDate || b.purchaseDate || '').localeCompare(a.openedDate || a.purchaseDate || '');
-    });
+    // 排序（v1.0.8）：字段 + 方向双向可调
+    list = UI.sortItems(list, state.sort.key, state.sort.dir, db);
     // 标签筛选候选：本页物品用过的全部标签（v1.0.7）
     const tagOptions = [];
     all.forEach(function (i) {
@@ -66,10 +65,16 @@ window.LifeView = (function () {
       tagOptions.map(function (t) {
         return '<option value="' + U.escapeHtml(t) + '"' + (state.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
       }).join('') + '</select>' +
+      '<select id="life-sort" title="排序字段">' +
+      UI.sortOptionsFor('life').map(function (d) {
+        return '<option value="' + d.key + '"' + (state.sort.key === d.key ? ' selected' : '') + '>' + d.label + '</option>';
+      }).join('') + '</select>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="life-sort-dir" title="点击切换排序方向">' +
+      UI.sortDirLabel(state.sort.key, state.sort.dir) + ' ⇅</button>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +
       (list.length
         ? '<div class="item-grid">' + list.map(function (i) {
-          return UI.itemCard(i, { icon: '💄', quickAdd: true });
+          return UI.itemCard(i, { icon: '💄', quickAdd: true, sortKey: state.sort.key });
         }).join('') + '</div>'
         : '<div class="empty-state"><div class="empty-icon">💄</div><p>还没有记录</p></div>');
 
@@ -90,6 +95,15 @@ window.LifeView = (function () {
     });
     root.querySelector('#life-tag').addEventListener('change', function (e) {
       state.filterTag = e.target.value; render(root);
+    });
+    root.querySelector('#life-sort').addEventListener('change', function (e) {
+      const def = UI.sortOptionsFor('life').find(function (d) { return d.key === e.target.value; });
+      state.sort = { key: e.target.value, dir: (def && def.defDir) || 1 };
+      render(root);
+    });
+    root.querySelector('#life-sort-dir').addEventListener('click', function () {
+      state.sort.dir = state.sort.dir === 1 ? -1 : 1;
+      render(root);
     });
     root.querySelectorAll('.item-card').forEach(function (card) {
       card.addEventListener('click', function (e) {

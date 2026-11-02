@@ -95,10 +95,50 @@ window.Utils = (function () {
     return diff + ' 天前';
   }
 
+  /* ---------- 温度区间 / 季季（v1.0.8 组合温季与穿搭推荐） ---------- */
+  // 解析温度标签 → [min, max]：支持 '>28℃' '<5℃' '22~28℃' '-5~0℃' 及自定义 '18~26℃'
+  function parseTempRange(label) {
+    const s = String(label || '').replace(/\s/g, '').replace(/[Ｃ]/g, 'C').replace(/℃/g, '');
+    let m = s.match(/^([<>])((-?\d+(?:\.\d+)?))$/);
+    if (m) return m[1] === '>' ? [Number(m[2]), 999] : [-999, Number(m[2])];
+    m = s.match(/^(-?\d+(?:\.\d+)?)~(-?\d+(?:\.\d+)?)$/);
+    if (m) {
+      const a = Number(m[1]), b = Number(m[2]);
+      return [Math.min(a, b), Math.max(a, b)];
+    }
+    return null;
+  }
+  // 温度 T 是否落在任一区间内
+  function tempMatch(labels, t) {
+    if (t == null || isNaN(t)) return false;
+    return (labels || []).some(function (lb) {
+      const r = parseTempRange(lb);
+      return r && t >= r[0] && t <= r[1];
+    });
+  }
+  // 温度标签集合 与 目标区间 {min,max} 是否重叠（v1.0.8 区间匹配）
+  function tempOverlap(labels, range) {
+    if (!range || range.min == null || range.max == null) return false;
+    return (labels || []).some(function (lb) {
+      const r = parseTempRange(lb);
+      return r && r[0] <= range.max && r[1] >= range.min;
+    });
+  }
+  // 月份 → 季节（3~5 春 / 6~8 夏 / 9~11 秋 / 12~2 冬）
+  function monthSeason(dateStr) {
+    const d = parseDate(dateStr) || new Date();
+    const m = d.getMonth() + 1;
+    if (m >= 3 && m <= 5) return '春';
+    if (m >= 6 && m <= 8) return '夏';
+    if (m >= 9 && m <= 11) return '秋';
+    return '冬';
+  }
+
   return {
     uid: uid, todayStr: todayStr, parseDate: parseDate, daysBetween: daysBetween,
     formatMoney: formatMoney, formatDays: formatDays, formatCost: formatCost,
     escapeHtml: escapeHtml, debounce: debounce, download: download,
-    monthKey: monthKey, daysAgo: daysAgo, cnDate: cnDate, relativeDay: relativeDay
+    monthKey: monthKey, daysAgo: daysAgo, cnDate: cnDate, relativeDay: relativeDay,
+    parseTempRange: parseTempRange, tempMatch: tempMatch, tempOverlap: tempOverlap, monthSeason: monthSeason
   };
 })();

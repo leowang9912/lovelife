@@ -1,16 +1,15 @@
 {
-  "version": "1.0.7",
+  "version": "1.0.8",
   "minSchema": 3,
-  "publishedAt": "2026-10-28",
+  "publishedAt": "2026-11-03",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "标签大升级：预设精简为 3 个，支持自定义标签、×删除、列表标签筛选",
-    "修复一键抠图失效（AI 模型真正生效，复杂背景也能抠）",
-    "更新完成后自动刷新并提示升级成功，无需手动重开",
-    "启动更稳：防双击重复启动、失败自动重试，大幅减少杀软弹窗",
-    "组合升级：打卡时图文卡片、适配温度/季节、两级管理界面、修复组合无图",
-    "分类扩充：洗发水/护发素/发膜/沐浴露/精油等，补全多处子类",
-    "KPI 总览改版为资产驾驶舱，环图全部带图例，设置页排布统一"
+    "列表排序：字段+方向双向可调（时间/价格/次数/成本/剩余量等十余种），卡片信息随排序切换",
+    "穿搭日历新增天气·穿搭推荐：温度区间、当日锁定、已打卡推次日、一键预填打卡",
+    "穿搭打卡温度改为区间输入，推荐按温度区间匹配历史穿搭与组合",
+    "组合适配温度细化为 9 档 + 自定义区间",
+    "图片裁切可缩小（33%~300%），整图入框四周补白",
+    "侧栏宽度按住接缝拖动可调，双击恢复默认"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -18,6 +17,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.7/lovelife-v1.0.7-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.8/lovelife-v1.0.8-win64.zip"
   }
 }

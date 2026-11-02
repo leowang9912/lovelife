@@ -520,3 +520,45 @@
 }
 .look-tags { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; margin-top: 3px; }
 .look-tags .tag { font-size: 9px; padding: 1px 5px; }
+
+/* ===== v1.0.8：侧栏拖拽调宽 ===== */
+/* 注意：不改 .sidebar 的 position（sticky 本身就是定位元素，可锚定绝对定位的拉手） */
+.sidebar-resizer {
+  position: absolute; top: 0; right: -4px; bottom: 0; width: 8px;
+  cursor: col-resize; z-index: 30;
+}
+.sidebar-resizer:hover { background: rgba(0, 113, 227, .18); }
+@media (max-width: 720px) { .sidebar-resizer { display: none; } }
+
+/* ===== v1.0.8：今日天气 · 穿搭推荐卡 ===== */
+.weather-card { margin-bottom: 16px; }
+.weather-body { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.weather-now {
+  display: flex; gap: 12px; align-items: center; flex-shrink: 0;
+  min-width: 210px; padding: 4px 0;
+}
+.weather-icon { font-size: 34px; line-height: 1; }
+.weather-temp { font-size: 24px; font-weight: 700; letter-spacing: -.3px; }
+.weather-recs { flex: 1; min-width: 260px; }
+.weather-rec-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
+.rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
+.rec-card {
+  width: 118px; flex-shrink: 0; padding: 8px; border-radius: 11px; text-align: center;
+  background: #fff; border: 1px solid var(--line-soft);
+}
+.rec-card img, .rec-noimg {
+  width: 100px; height: 100px; border-radius: 8px; object-fit: cover;
+  background: #f2f2f4; display: block; margin: 0 auto;
+}
+.rec-noimg {
+  display: flex; align-items: center; justify-content: center; font-size: 32px; opacity: .55;
+}
+.rec-name {
+  font-size: 11.5px; font-weight: 600; margin-top: 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rec-tags { display: flex; gap: 3px; justify-content: center; flex-wrap: wrap; margin-top: 3px; }
+.rec-tags .tag { font-size: 9px; padding: 1px 5px; }
+.rec-btns { display: flex; gap: 5px; justify-content: center; margin-top: 6px; }
+.rec-btns .btn { height: 26px; padding: 0 8px; font-size: 11px; }
+.weather-for { font-size: 11.5px; font-weight: 650; color: var(--text-2); margin-bottom: 2px; }

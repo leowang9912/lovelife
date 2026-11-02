@@ -267,6 +267,21 @@ window.Models = (function () {
     };
   }
 
+  /* 吃灰天数（距上次使用的天数；衣物看穿着流水，其余看 lastUsedDate/购入） */
+  function idleDaysOf(db, i, now) {
+    now = now || new Date();
+    const d0 = function (s) {
+      const d = U.daysBetween(U.parseDate(s), now);
+      return d == null ? 0 : d;
+    };
+    if (i.lastUsedDate) return d0(i.lastUsedDate);
+    if (i.kind === 'clothing') {
+      const last = lastWearDate(db, i.id);
+      return last ? d0(last) : d0(i.purchaseDate);
+    }
+    return d0(i.purchaseDate);
+  }
+
   /* ---------- 汇总 ---------- */
   function summary(db, now) {
     now = now || new Date();
@@ -288,18 +303,7 @@ window.Models = (function () {
     const monthNew = list.filter(function (i) { return U.monthKey(i.purchaseDate) === mk; });
     const monthSpend = sum(monthNew, function (i) { return Number(i.purchasePrice) || 0; });
 
-    const idleDays = function (i) {
-      const d0 = function (s) {
-        const d = U.daysBetween(U.parseDate(s), now);
-        return d == null ? 0 : d;
-      };
-      if (i.lastUsedDate) return d0(i.lastUsedDate);
-      if (i.kind === 'clothing') {
-        const last = lastWearDate(db, i.id);
-        return last ? d0(last) : d0(i.purchaseDate);
-      }
-      return d0(i.purchaseDate);
-    };
+    const idleDays = function (i) { return idleDaysOf(db, i, now); };
     const idleList = active.map(function (i) { return { item: i, idle: idleDays(i) }; })
       .sort(function (a, b) { return b.idle - a.idle; });
 
@@ -383,7 +387,7 @@ window.Models = (function () {
     ownInvested: ownInvested, totalInvested: totalInvested, calcItemCost: calcItemCost,
     autoWearMap: autoWearMap, totalWearCount: totalWearCount, itemsWithComputed: itemsWithComputed,
     logSum: logSum, appendUsageLog: appendUsageLog, removeUsageLogEntry: removeUsageLogEntry,
-    lifeStatus: lifeStatus, expiryList: expiryList, emptyList: emptyList, foodStats: foodStats,
+    lifeStatus: lifeStatus, expiryList: expiryList, emptyList: emptyList, foodStats: foodStats, idleDaysOf: idleDaysOf,
     summary: summary, lastWearDate: lastWearDate,
     validateItem: validateItem, validateFood: validateFood
   };

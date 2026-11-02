@@ -10,7 +10,7 @@ window.Views = (function () {
   }
 
   /* =============== 物品库 =============== */
-  const itemState = { kind: null, filterCat: '', filterStatus: '', filterTag: '', search: '' };
+  const itemState = { kind: null, filterCat: '', filterStatus: '', filterTag: '', search: '', sorts: {} };
 
   function items(root, kind) {
     if (itemState.kind !== kind) {
@@ -32,7 +32,10 @@ window.Views = (function () {
           (i.notes || '').toLowerCase().indexOf(q) >= 0 || (i.shade || '').toLowerCase().indexOf(q) >= 0;
       });
     }
-    list = list.slice().sort(function (a, b) { return (b.purchaseDate || '').localeCompare(a.purchaseDate || ''); });
+    // 排序（v1.0.8）：字段 + 方向双向可调，各页记忆各自的选择
+    const sortKinds = kind === 'digital' ? 'digital' : kind;
+    const sortState = itemState.sorts[kind] || (itemState.sorts[kind] = { key: 'date', dir: -1 });
+    list = UI.sortItems(list, sortState.key, sortState.dir, db);
     // 标签筛选候选：本类物品用过的全部标签（v1.0.7）
     const tagOptions = [];
     all.forEach(function (i) {
@@ -67,10 +70,16 @@ window.Views = (function () {
       tagOptions.map(function (t) {
         return '<option value="' + U.escapeHtml(t) + '"' + (itemState.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
       }).join('') + '</select>' +
+      '<select id="filter-sort" title="排序字段">' +
+      UI.sortOptionsFor(sortKinds).map(function (d) {
+        return '<option value="' + d.key + '"' + (sortState.key === d.key ? ' selected' : '') + '>' + d.label + '</option>';
+      }).join('') + '</select>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="sort-dir" title="点击切换排序方向">' +
+      UI.sortDirLabel(sortState.key, sortState.dir) + ' ⇅</button>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +
       (list.length
         ? '<div class="item-grid">' + list.map(function (i) {
-          return UI.itemCard(i, { icon: icons[kind], quickAdd: kind === 'clothing' });
+          return UI.itemCard(i, { icon: icons[kind], quickAdd: kind === 'clothing', sortKey: sortState.key });
         }).join('') + '</div>'
         : '<div class="empty-state"><div class="empty-icon">' + icons[kind] + '</div><p>还没有记录</p></div>');
 
@@ -91,6 +100,15 @@ window.Views = (function () {
     });
     root.querySelector('#filter-tag').addEventListener('change', function (e) {
       itemState.filterTag = e.target.value; items(root, kind);
+    });
+    root.querySelector('#filter-sort').addEventListener('change', function (e) {
+      const def = UI.sortOptionsFor(sortKinds).find(function (d) { return d.key === e.target.value; });
+      itemState.sorts[kind] = { key: e.target.value, dir: (def && def.defDir) || 1 };
+      items(root, kind);
+    });
+    root.querySelector('#sort-dir').addEventListener('click', function () {
+      sortState.dir = sortState.dir === 1 ? -1 : 1;
+      items(root, kind);
     });
     root.querySelectorAll('.item-card').forEach(function (card) {
       card.addEventListener('click', function (e) {
@@ -324,6 +342,156 @@ window.Views = (function () {
   /* =============== 穿搭日历 =============== */
   let calYear, calMonth;
 
+  /* 温度显示：区间优先（tempMin~tempMax），兼容旧单值 temperature */
+  function tempText(o) {
+    const hasMin = o.tempMin != null, hasMax = o.tempMax != null;
+    if (!hasMin && !hasMax) {
+      return o.temperature != null ? o.temperature + '℃' : '';
+    }
+    const a = hasMin ? Number(o.tempMin) : Number(o.tempMax);
+    const b = hasMax ? Number(o.tempMax) : Number(o.tempMin);
+    return a === b ? a + '℃' : a + '~' + b + '℃';
+  }
+
+  /* 天气 · 穿搭推荐面板（v1.0.8）：温度区间 / 当日锁定 / 已打卡推次日 / 自动定位 */
+  async function renderOutfitRec(card) {
+    if (!card || !window.Weather) return;
+    const db = S.getDB();
+    const target = window.Weather.targetDate(db);
+    const range = await window.Weather.dayRange(target.date, false);
+    const rec = window.Weather.recommend(db, range, target.date);
+    const dayLabel = target.doneToday ? '明日' : '今日';
+    const applyLabel = target.doneToday ? '＋明日' : '＋今日';
+
+    function outfitCard(o) {
+      const img = (o.images && o.images[0]) || '';
+      return '<div class="rec-card">' +
+        (img ? '<img data-path="' + U.escapeHtml(img) + '" alt=""/>'
+          : '<div class="rec-noimg">👗</div>') +
+        '<div class="rec-name">' + U.escapeHtml(o.occasion || U.cnDate(o.date)) + '</div>' +
+        '<div class="muted small">' + U.escapeHtml(o.date || '') +
+        (tempText(o) ? ' · ' + tempText(o) : '') + '</div>' +
+        '<div class="rec-btns">' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-open-outfit="' + U.escapeHtml(o.id) + '">查看</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-use-outfit="' + U.escapeHtml(o.id) + '">' + applyLabel + '</button>' +
+        '</div></div>';
+    }
+    function comboCard(c) {
+      const img = (c.images && c.images[0]) || '';
+      return '<div class="rec-card">' +
+        (img ? '<img data-path="' + U.escapeHtml(img) + '" alt=""/>'
+          : '<div class="rec-noimg">👗</div>') +
+        '<div class="rec-name">' + U.escapeHtml(c.name) + '</div>' +
+        '<div class="rec-tags">' + UI.comboBadges(c) + '</div>' +
+        '<div class="rec-btns">' +
+        '<button type="button" class="btn btn-ghost btn-sm" data-use-combo="' + U.escapeHtml(c.id) + '">套用打卡</button>' +
+        '</div></div>';
+    }
+
+    const rangeText = range && range.min != null
+      ? range.min + '~' + range.max + '℃'
+      : '—';
+    const forLabel = (target.doneToday ? '明日天气' : '今日天气') + ' · ' + target.date;
+    const wLeft = '<div class="weather-now"><div class="weather-icon">' +
+      (range ? (range.icon || '🌡') : '🌡') + '</div>' +
+      '<div><div class="weather-for">' + forLabel + '</div>' +
+      '<div class="weather-temp">' + rangeText + '</div>' +
+      '<div class="muted small">' + U.escapeHtml(range ? (range.desc || '') : '未获取到天气') + '</div>' +
+      '<div class="muted small">' +
+      (range && range.fetchedAt ? '数据刷新：' + U.escapeHtml(range.fetchedAt) : '尚未获取数据') +
+      '</div>' +
+      '<div class="muted small">' +
+      (range ? (range.source === 'manual' ? '手动设定（仅当天有效）' : '自动获取 · 当日首次获取后锁定') : '可手动填入温度区间') +
+      '</div>' +
+      '<div class="rec-btns" style="justify-content:flex-start;margin-top:6px">' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="w-refresh" title="重新获取">↻ 刷新</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="w-manual">手动填入</button>' +
+      '</div></div></div>';
+
+    const recHTML = (rec.outfits.length || rec.combos.length)
+      ? rec.outfits.map(outfitCard).join('') + rec.combos.map(comboCard).join('')
+      : '<p class="muted small">暂无匹配的推荐——多打卡积累穿搭，或给组合设好适配温度/季节</p>';
+
+    card.innerHTML = '<div class="panel-body weather-body">' + wLeft +
+      '<div class="weather-recs">' +
+      '<div class="weather-rec-title">' + dayLabel + '穿搭推荐（' + rec.season + ' · ' + rangeText + '）</div>' +
+      '<div class="rec-strip">' + recHTML + '</div>' +
+      '</div></div>';
+
+    card.querySelectorAll('img[data-path]').forEach(async function (img) {
+      const url = await S.getImageURL(img.getAttribute('data-path'));
+      if (url) img.src = url;
+    });
+
+    // 刷新：只有数据真正取到新值才算成功（fetchedAt 变化为准），失败保留上次数据
+    const refreshBtn = card.querySelector('#w-refresh');
+    if (refreshBtn) refreshBtn.addEventListener('click', async function () {
+      refreshBtn.disabled = true; refreshBtn.textContent = '刷新中…';
+      const before = range && range.fetchedAt ? range.fetchedAt : '';
+      const rec = await window.Weather.dayRange(target.date, true);
+      renderOutfitRec(card);
+      const ok = !!(rec && rec.fetchedAt && rec.fetchedAt !== before);
+      UI.toast(ok ? '已刷新' : '刷新失败，仍为上次数据', ok ? 'success' : 'error');
+    });
+
+    const manBtn = card.querySelector('#w-manual');
+    if (manBtn) manBtn.addEventListener('click', function () {
+      UI.modal({
+        title: '手动填入' + dayLabel + '温度区间', width: 420,
+        bodyHTML: '<div class="form-grid">' +
+          '<label><span class="f-label">最低 ℃</span><input type="number" id="w-min" value="' +
+          (range && range.min != null ? range.min : '') + '"></label>' +
+          '<label><span class="f-label">最高 ℃</span><input type="number" id="w-max" value="' +
+          (range && range.max != null ? range.max : '') + '"></label></div>' +
+          '<p class="muted small">仅 ' + target.date + ' 当天有效，覆盖自动天气；用于穿搭推荐。</p>',
+        footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button><button class="btn btn-primary" data-x="s">保存</button>',
+        onMount: function (w2, close) {
+          w2.querySelector('[data-x=c]').addEventListener('click', close);
+          w2.querySelector('[data-x=s]').addEventListener('click', function () {
+            const a = Number(w2.querySelector('#w-min').value);
+            const b = Number(w2.querySelector('#w-max').value);
+            const minEl = w2.querySelector('#w-min');
+            const maxEl = w2.querySelector('#w-max');
+            if (minEl.value.trim() === '' || maxEl.value.trim() === '') {
+              UI.toast('请填写最低和最高温度', 'error'); return;
+            }
+            if (isNaN(a) || isNaN(b)) { UI.toast('温度必须是数字', 'error'); return; }
+            if (a > b) { UI.toast('最低温度不能高于最高温度', 'error'); return; }
+            window.Weather.setManual(target.date, a, b);
+            close();
+            UI.toast('已设定 ' + target.date + ' 温度区间 ' + a + '~' + b + '℃', 'success');
+            renderOutfitRec(card);
+          });
+        }
+      });
+    });
+
+    card.querySelectorAll('[data-open-outfit]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const o = db.outfits.find(function (x) { return x.id === b.getAttribute('data-open-outfit'); });
+        if (o) openOutfitEditor(o.date, o);
+      });
+    });
+    card.querySelectorAll('[data-use-outfit]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const o = db.outfits.find(function (x) { return x.id === b.getAttribute('data-use-outfit'); });
+        if (!o) return;
+        openOutfitEditor(target.date, null, {
+          itemIds: (o.itemIds || []).slice(), cosmeticIds: (o.cosmeticIds || []).slice(), occasion: o.occasion || ''
+        });
+      });
+    });
+    card.querySelectorAll('[data-use-combo]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const c = (db.settings.outfitLooks || []).find(function (x) { return x.id === b.getAttribute('data-use-combo'); });
+        if (!c) return;
+        openOutfitEditor(target.date, null, {
+          itemIds: (c.itemIds || []).slice(), cosmeticIds: [], occasion: ''
+        });
+      });
+    });
+  }
+
   function outfits(root) {
     const db = S.getDB();
     if (!db) return;
@@ -381,9 +549,13 @@ window.Views = (function () {
       }).join('') + '</select>' +
       '<button class="btn btn-ghost" id="btn-today">今天</button>' +
       '<button class="btn btn-primary" id="btn-add-outfit">👗 穿搭打卡</button></div></div>' +
+      '<div class="panel weather-card" id="weather-card"><div class="panel-body">' +
+      '<p class="muted small">天气 · 穿搭推荐加载中…</p></div></div>' +
       '<div class="cal-grid">' +
       ['日', '一', '二', '三', '四', '五', '六'].map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('') +
       cells + '</div>';
+
+    renderOutfitRec(root.querySelector('#weather-card'));
 
     root.querySelector('#jump-year').addEventListener('change', function (e) {
       calYear = Number(e.target.value); outfits(root);
@@ -501,8 +673,8 @@ window.Views = (function () {
     }).join('') + '</div>';
   }
 
-  /* 穿搭打卡编辑器：大图、分类勾选、妆容整合（rec 传入=编辑该条） */
-  function openOutfitEditor(dateStr, rec) {
+  /* 穿搭打卡编辑器：rec 传入=编辑该条；prefill 传入=按预填新建（推荐套用，v1.0.8） */
+  function openOutfitEditor(dateStr, rec, prefill) {
     const db = S.getDB();
     const clothes = M.itemsWithComputed(db).filter(function (i) {
       return i.kind === 'clothing' && i.status !== 'sold' && i.status !== 'gifted';
@@ -522,7 +694,7 @@ window.Views = (function () {
     const looks = db.settings.makeupLooks || [];
     const outfitLooks = db.settings.outfitLooks || [];
     const occasions = db.categories.occasion || [];
-    const rv = rec || {};
+    const rv = prefill || rec || {};
 
     UI.modal({
       title: (rec ? '编辑穿搭 · ' : '穿搭打卡 · ') + U.cnDate(dateStr), width: 760,
@@ -542,7 +714,12 @@ window.Views = (function () {
         ['晴', '多云', '阴', '小雨', '大雨', '雪', '风'].map(function (w) {
           return '<option value="' + w + '"' + (rv.weather === w ? ' selected' : '') + '>' + w + '</option>';
         }).join('') + '</select></label>' +
-        '<label><span class="f-label">温度 ℃</span><input type="number" name="temperature" value="' + (rv.temperature == null ? '' : rv.temperature) + '"></label>' +
+        '<label><span class="f-label">温度区间 ℃（选填）</span><div class="tag-add-row">' +
+        '<input type="number" name="tempMin" placeholder="最低" style="width:88px" value="' +
+        (rv.tempMin != null ? rv.tempMin : (rv.temperature != null ? rv.temperature : '')) + '">' +
+        '<span class="muted">~</span>' +
+        '<input type="number" name="tempMax" placeholder="最高" style="width:88px" value="' +
+        (rv.tempMax != null ? rv.tempMax : (rv.temperature != null ? rv.temperature : '')) + '"></div></label>' +
         '<label class="f-full"><span class="f-label">备注（选填）</span><input name="note" value="' + U.escapeHtml(rv.note || '') + '"></label>' +
         '</div>' +
         '<h4 class="detail-sub">👗 勾选这天穿的衣服</h4>' +
@@ -620,7 +797,8 @@ window.Views = (function () {
             await S.saveOutfit({
               id: rec ? rec.id : U.uid(), date: dateStr,
               occasion: fd.get('occasion') || '', weather: fd.get('weather') || '',
-              temperature: fd.get('temperature') === '' ? null : Number(fd.get('temperature')),
+              tempMin: fd.get('tempMin') === '' ? null : Number(fd.get('tempMin')),
+              tempMax: fd.get('tempMax') === '' ? null : Number(fd.get('tempMax')),
               note: (fd.get('note') || '').trim(),
               itemIds: itemIds, cosmeticIds: cosmeticIds, images: images
             });
