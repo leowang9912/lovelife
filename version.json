@@ -1,15 +1,15 @@
 {
-  "version": "1.0.9",
+  "version": "1.1.0",
   "minSchema": 3,
-  "publishedAt": "2026-11-04",
+  "publishedAt": "2026-11-05",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "全站图标统一 Lucide 风格，规范固化（docs/UI-ICON-GUIDE.md）；设置页改六分标签",
-    "修复分类被静默改写（新建物品分类丢失）、裁切弹窗丢图等 20+ 问题（详见更新日志）",
-    "穿搭打卡：妆品使用次数可调（一天多次准确记账），预填带全温度/天气/次数",
-    "标签体系：chip × 只管本物品，设置页新增标签管理（增删个人标签库）",
-    "天气推荐支持今日/明日切换；美妆/数码吃灰天数口径修正",
-    "更新后自动重启更稳（重试×3），DLL 弹窗问题根治（释放目录离开临时目录）"
+    "新增「我的钱袋」记账：内置精选收支分类与彩色图标，记一笔用分类图标网格+人民币大写",
+    "词条自动同步：手机数码/服饰/美妆账单自动生成物品词条；正餐账单自动进美食日历",
+    "我的统计新增收支统计/走势/分类统计/日均/收支热力/资产走势（周月年切换）",
+    "账单导入导出（支付宝/微信 CSV/模板/App 备份 + 导出 CSV）收进设置页；分类一览可查",
+    "物品非在用可补停用时间：日均成本/吃灰等使用类指标冻结为固定值（共使用 X 天）",
+    "账户页新增余额记录快照；月度预算全站统一在设置中维护"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -17,6 +17,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.9/lovelife-v1.0.9-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.0/lovelife-v1.1.0-win64.zip"
   }
 }
