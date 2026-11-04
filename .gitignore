@@ -8,6 +8,7 @@ app-config.json
 build-tmp/
 build/
 build-exe/
+runtime/
 dist/
 *.spec
 *.tgz

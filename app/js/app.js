@@ -5,19 +5,19 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.0.5";
+  const FRONTEND_VERSION = "1.0.9";
 
   let current = 'plan';
   let booted = false;
 
   const NAV = [
-    { id: 'plan', label: '我的统计', icon: '📊' },
-    { id: 'digital', label: '我的数码', icon: '🎮' },
-    { id: 'clothing', label: '我的衣橱', icon: '👕' },
-    { id: 'life', label: '我的生活', icon: '💄' },
-    { id: 'outfits', label: '穿搭日历', icon: '📅' },
-    { id: 'food', label: '美食日历', icon: '🍽️' },
-    { id: 'settings', label: '设置', icon: '⚙️' }
+    { id: 'plan', label: '我的统计', icon: 'chart-column' },
+    { id: 'digital', label: '我的数码', icon: 'gamepad-2' },
+    { id: 'clothing', label: '我的衣橱', icon: 'shirt' },
+    { id: 'life', label: '我的生活', icon: 'heart' },
+    { id: 'outfits', label: '穿搭日历', icon: 'calendar-days' },
+    { id: 'food', label: '美食日历', icon: 'utensils' },
+    { id: 'settings', label: '设置', icon: 'settings' }
   ];
 
   const AVATARS = ['😊', '😎', '🐱', '🐶', '🦊', '🐼', '🦁', '🌟', '🌙', '🍀',
@@ -129,6 +129,10 @@ window.App = (function () {
       return;
     }
     const db = S.getDB();
+    // 侧栏宽度（v1.0.8）：恢复上次拖拽保存的宽度
+    if (db.settings.sidebarWidth) {
+      document.documentElement.style.setProperty('--sidebar-w', Number(db.settings.sidebarWidth) + 'px');
+    }
     app.innerHTML =
       '<aside class="sidebar">' +
       '<div class="brand"><span class="brand-icon">∞</span>' +
@@ -137,9 +141,10 @@ window.App = (function () {
       '</div></div></div>' +
       '<nav class="nav">' + NAV.map(function (n) {
         return '<a class="nav-item' + (current === n.id ? ' active' : '') + '" data-nav="' + n.id + '">' +
-          '<span class="nav-icon">' + n.icon + '</span><span>' + n.label + '</span></a>';
+          '<span class="nav-icon">' + window.UI.icon(n.icon, 20) + '</span><span>' + n.label + '</span></a>';
       }).join('') + '</nav>' +
       '<div class="sidebar-foot"><div class="muted small">Ctrl+K 全局搜索 · 可整包迁移</div></div>' +
+      '<div class="sidebar-resizer" id="sidebar-resizer" title="拖动调节侧栏宽度；双击恢复默认"></div>' +
       '</aside>' +
       '<main class="main">' +
       '<div class="top-search"><input id="global-search" placeholder="全局搜索物品 / 穿搭 / 美食…（Ctrl+K）">' +
@@ -160,6 +165,42 @@ window.App = (function () {
     else if (current === 'settings') window.SettingsView.render(main);
 
     bindSearch();
+    bindSidebarResize(db);
+  }
+
+  /* ---------- 侧栏宽度拖拽（v1.0.8）：接缝按住拖动，双击恢复默认 ---------- */
+  function bindSidebarResize(db) {
+    const handle = document.getElementById('sidebar-resizer');
+    if (!handle) return;
+    const MIN = 200, MAX = 360, DEF = 232;
+    let dragging = false;
+    let lastW = Number(db.settings.sidebarWidth) || DEF;
+    handle.addEventListener('pointerdown', function (e) {
+      dragging = true;
+      try { handle.setPointerCapture(e.pointerId); } catch (err) {}
+      e.preventDefault();
+    });
+    handle.addEventListener('pointermove', function (e) {
+      if (!dragging) return;
+      lastW = Math.min(MAX, Math.max(MIN, e.clientX));
+      document.documentElement.style.setProperty('--sidebar-w', lastW + 'px');
+    });
+    function stop(e) {
+      if (!dragging) return;
+      dragging = false;
+      try { handle.releasePointerCapture(e.pointerId); } catch (err) {}
+      db.settings.sidebarWidth = lastW;
+      S.saveSettings();
+    }
+    handle.addEventListener('pointerup', stop);
+    handle.addEventListener('pointercancel', stop);
+    handle.addEventListener('dblclick', function () {
+      document.documentElement.style.setProperty('--sidebar-w', DEF + 'px');
+      lastW = DEF;
+      db.settings.sidebarWidth = DEF;
+      S.saveSettings();
+      window.UI.toast('侧栏宽度已恢复默认', 'success');
+    });
   }
 
   /* ---------- 全局搜索 ---------- */
@@ -177,7 +218,7 @@ window.App = (function () {
       const results = [];
       db.items.forEach(function (i) {
         if (((i.name || '') + (i.brand || '') + (i.notes || '') + (i.shade || '')).toLowerCase().indexOf(q) >= 0) {
-          results.push({ type: i.kind === 'life' ? '生活' : i.kind === 'clothing' ? '衣服' : '数码', name: i.name, go: i.kind === 'life' ? 'life' : i.kind === 'clothing' ? 'clothing' : 'digital', id: i.id });
+          results.push({ type: i.kind === 'life' ? '生活' : i.kind === 'clothing' ? '衣橱' : '数码', name: i.name, go: i.kind === 'life' ? 'life' : i.kind === 'clothing' ? 'clothing' : 'digital', id: i.id });
         }
       });
       db.outfits.forEach(function (o) {
@@ -242,9 +283,23 @@ window.App = (function () {
     }, 3000);
   }
 
+  /* 更新完成自动刷新后：提示升级成功并清掉更新标记（v1.0.7） */
+  function checkUpgradeToast() {
+    try {
+      const ver = sessionStorage.getItem('lovelife-upgraded');
+      if (!ver) return;
+      sessionStorage.removeItem('lovelife-upgraded');
+      fetch('/api/update/clear-done', { method: 'POST' }).catch(function () {});
+      setTimeout(function () {
+        window.UI.toast('升级成功 v' + (ver || FRONTEND_VERSION), 'success');
+      }, 500);
+    } catch (e) { /* 忽略 */ }
+  }
+
   async function init() {
     try {
       await boot();
+      checkUpgradeToast();
       const session = S.getSession();
       // 启动动画 → 账号选择（记住则自动进入）
       const app = document.getElementById('app');

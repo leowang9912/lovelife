@@ -68,7 +68,7 @@ async function main() {
   if (!(await waitMain(w))) throw new Error('no main');
   const doc = w.document;
 
-  // 1 衣橱页有穿搭组合入口；打开管理弹窗（含新建表单 + 范例图上传区）
+  // 1 衣橱页有穿搭组合入口；两级弹窗：列表页 → 新建进编辑器（范例图+选择器）
   w.App.go('clothing');
   await new Promise(r => setTimeout(r, 300));
   const btn = doc.getElementById('btn-outfit-looks');
@@ -78,11 +78,16 @@ async function main() {
   let modal = doc.querySelector('.modal');
   if (!modal) throw new Error('穿搭组合弹窗未出现');
   if (modal.textContent.indexOf('穿搭组合') < 0) throw new Error('弹窗标题错');
-  if (modal.textContent.indexOf('范例图') < 0) throw new Error('缺范例图上传区');
+  const newBtn = modal.querySelector('[data-x=n]');
+  if (!newBtn) throw new Error('列表弹窗缺新建按钮');
+  newBtn.click();
+  await new Promise(r => setTimeout(r, 300));
+  modal = doc.querySelector('.modal');
+  if (!modal || modal.textContent.indexOf('范例图') < 0) throw new Error('编辑弹窗缺范例图上传区');
   if (!modal.querySelector('#combo-name') || !modal.querySelector('#combo-picker')) throw new Error('缺名称/选择器');
-  console.log('OK  1 穿搭组合入口 + 管理弹窗（范例图+选择器）');
+  console.log('OK  1 穿搭组合两级弹窗：列表 → 新建编辑器（范例图+选择器）');
 
-  // 2 新建组合：名称 + 勾选两件衣服 + 保存 → settings.outfitLooks 持久化
+  // 2 新建组合：名称 + 勾选两件衣服 + 保存 → 回列表并持久化
   modal.querySelector('#combo-name').value = '夏日通勤';
   modal.querySelectorAll('.pick-card').forEach(c => c.click());
   modal.querySelector('[data-x=s]').click();
@@ -91,12 +96,11 @@ async function main() {
   const combo = settings.outfitLooks[0];
   if (combo.name !== '夏日通勤' || combo.itemIds.length !== 2) throw new Error('组合内容错: ' + JSON.stringify(combo));
   if (!('images' in combo)) throw new Error('组合缺 images 字段');
+  modal = doc.querySelector('.modal');
+  if (!modal || modal.textContent.indexOf('夏日通勤') < 0) throw new Error('保存后未回列表显示新组合');
   console.log('OK  2 新建穿搭组合持久化（含 images 字段）');
 
-  // 3 编辑组合：点 ✎ 进入编辑态，改名保存
-  modal = doc.querySelector('.modal');
-  if (!modal) throw new Error('保存后弹窗未重开');
-  if (modal.textContent.indexOf('夏日通勤') < 0) throw new Error('列表未显示新组合');
+  // 3 编辑组合：列表点「编辑」进编辑器，改名保存
   modal.querySelector('[data-edit-combo]').click();
   await new Promise(r => setTimeout(r, 300));
   modal = doc.querySelector('.modal');
@@ -121,27 +125,38 @@ async function main() {
   await new Promise(r => setTimeout(r, 300));
   modal = doc.querySelector('.modal');
   if (!modal || modal.textContent.indexOf('通勤妆') < 0) throw new Error('旧妆容组合数据未显示');
-  if (modal.textContent.indexOf('范例图') < 0) throw new Error('妆容组合缺范例图区');
+  modal.querySelector('[data-edit-combo]').click();
+  await new Promise(r => setTimeout(r, 300));
+  modal = doc.querySelector('.modal');
+  if (!modal || modal.textContent.indexOf('范例图') < 0) throw new Error('妆容组合缺范例图区');
   modal.querySelector('.modal-close').click();
+  await new Promise(r => setTimeout(r, 250));
+  // v1.0.9 交互：编辑器 × 会回到组合列表，需再关一次列表
+  const listModal = doc.querySelector('.modal');
+  if (listModal && listModal.querySelector('[data-x=c]')) listModal.querySelector('[data-x=c]').click();
   await new Promise(r => setTimeout(r, 250));
   console.log('OK  4 妆容组合兼容旧数据 + 范例图区');
 
-  // 5 穿搭打卡弹窗：穿搭组合一键套用
+  // 5 穿搭打卡弹窗：组合图文卡片（有图显图）+ 一键套用
+  w.Storage.getDB().settings.outfitLooks[0].images = ['combo.jpg'];
   w.App.go('outfits');
   await new Promise(r => setTimeout(r, 300));
   doc.getElementById('btn-add-outfit').click();
   await new Promise(r => setTimeout(r, 350));
   modal = doc.querySelector('.modal');
   if (!modal) throw new Error('穿搭打卡弹窗未出现');
-  const olookBtn = modal.querySelector('[data-olook]');
-  if (!olookBtn) throw new Error('打卡弹窗缺穿搭组合按钮');
+  const olookBtn = modal.querySelector('.look-card[data-olook]');
+  if (!olookBtn) throw new Error('打卡弹窗缺组合图文卡片');
+  const lookImg = olookBtn.querySelector('img[data-path="combo.jpg"]');
+  if (!lookImg) throw new Error('组合卡片未显示范例图');
   olookBtn.click();
   await new Promise(r => setTimeout(r, 150));
   const checked = modal.querySelectorAll('.pick-card.on').length;
   if (checked !== 2) throw new Error('套用组合未勾选衣服, on=' + checked);
+  if (!olookBtn.classList.contains('on')) throw new Error('套用后组合卡片无选中反馈');
   modal.querySelector('.modal-close').click();
   await new Promise(r => setTimeout(r, 250));
-  console.log('OK  5 穿搭打卡一键套用组合（勾选 2 件）');
+  console.log('OK  5 穿搭打卡：组合图文卡片 + 一键套用');
 
   // 6 详情页统一：字重一致 + 按钮统一排布
   w.App.go('clothing');

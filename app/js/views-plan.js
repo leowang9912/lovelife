@@ -115,13 +115,13 @@ window.PlanView = (function () {
 
     root.innerHTML =
       '<div class="page-head"><h2>我的统计</h2><div class="page-actions">' +
-      '<button class="btn btn-ghost" id="btn-edit-sections">' + (editMode ? '完成' : '⚙️ 栏目设置') + '</button>' +
-      '<button class="btn btn-primary" data-act="add-device">＋ 记数码</button>' +
-      '<button class="btn btn-primary" data-act="add-clothing">＋ 记衣服</button>' +
-      '<button class="btn btn-primary" data-act="add-life">＋ 记美妆</button>' +
-      '<button class="btn btn-ghost" data-act="outfit">👗 穿搭打卡</button>' +
-      '<button class="btn btn-ghost" data-act="food">🍱 饮食打卡</button></div></div>' +
-      (editMode ? '<p class="muted pad-8">拖动面板可块内换序；按钮调宽度/隐藏/上下移；👁 可整块屏蔽。</p>' : '') +
+      '<button class="btn btn-ghost" id="btn-edit-sections">' + (editMode ? '完成' : UI.icon('sliders-horizontal', 14) + ' 栏目设置') + '</button>' +
+      '<button class="btn btn-primary" data-act="add-device">' + UI.icon('plus', 14) + ' 记数码</button>' +
+      '<button class="btn btn-primary" data-act="add-clothing">' + UI.icon('plus', 14) + ' 记衣服</button>' +
+      '<button class="btn btn-primary" data-act="add-life">' + UI.icon('plus', 14) + ' 记美妆</button>' +
+      '<button class="btn btn-ghost" data-act="outfit">' + UI.icon('calendar-check', 14) + ' 穿搭打卡</button>' +
+      '<button class="btn btn-ghost" data-act="food">' + UI.icon('utensils', 14) + ' 美食打卡</button></div></div>' +
+      (editMode ? '<p class="muted pad-8">拖动面板可块内换序；按钮调宽度/隐藏/上下移；可整块屏蔽（屏蔽后可在栏目设置或设置页恢复）。</p>' : '') +
       '<div class="plan-wrap" id="plan-wrap"></div>';
 
     const wrap = root.querySelector('#plan-wrap');
@@ -138,7 +138,7 @@ window.PlanView = (function () {
         '<div class="plan-block-head">' +
         '<h3 class="plan-block-title">' + block.name + '</h3>' +
         '<button class="btn-icon block-eye" data-block-toggle="' + block.id + '" title="' +
-        (visible ? '屏蔽此板块' : '恢复此板块') + '">' + (visible ? '👁' : '🚫') + '</button>' +
+        (visible ? '屏蔽此板块' : '恢复此板块') + '">' + (visible ? UI.icon('eye', 16) : UI.icon('eye-off', 16)) + '</button>' +
         '</div>' +
         '<div class="plan-grid" data-grid="' + block.id + '"></div>';
       wrap.appendChild(bEl);
@@ -158,19 +158,20 @@ window.PlanView = (function () {
         if (editMode && !meta.fixed) el.setAttribute('draggable', 'true');
         el.innerHTML =
           '<div class="panel-head">' +
-          (editMode && !meta.fixed ? '<span class="sec-drag-handle" title="拖动排序">⠿</span>' : '') +
+          (editMode && !meta.fixed ? '<span class="sec-drag-handle" title="拖动排序">' + UI.icon('grip-vertical', 14) + '</span>' : '') +
           '<h3>' + meta.name + '</h3>' +
           (editMode
             ? '<div class="sec-ctrl">' +
-            (meta.fixed ? '<span class="tag">固定</span>' :
-              '<div class="sec-size-btns">' +
-              Object.keys(SIZE_LABELS).map(function (sz) {
-                return '<button class="sec-size-btn' + ((sec.size || 'm') === sz ? ' on' : '') +
-                  '" data-size-btn="' + idx + '" data-size-val="' + sz + '">' + SIZE_LABELS[sz] + '</button>';
-              }).join('') + '</div>' +
-              '<button class="btn-icon" data-move="up" data-idx="' + idx + '">↑</button>' +
-              '<button class="btn-icon" data-move="down" data-idx="' + idx + '">↓</button>' +
-              '<button class="btn-icon" data-toggle="' + idx + '">' + (sec.enabled ? '👁' : '🚫') + '</button>') +
+            (meta.fixed ? '<span class="tag">固定</span>' : '') +
+            '<div class="sec-size-btns">' +
+            Object.keys(SIZE_LABELS).map(function (sz) {
+              return '<button class="sec-size-btn' + ((sec.size || 'm') === sz ? ' on' : '') +
+                '" data-size-btn="' + idx + '" data-size-val="' + sz + '">' + SIZE_LABELS[sz] + '</button>';
+            }).join('') + '</div>' +
+            (meta.fixed ? '' :
+              '<button class="btn-icon" title="上移" data-move="up" data-idx="' + idx + '">' + UI.icon('chevron-up', 14) + '</button>' +
+              '<button class="btn-icon" title="下移" data-move="down" data-idx="' + idx + '">' + UI.icon('chevron-down', 14) + '</button>' +
+              '<button class="btn-icon" title="' + (sec.enabled ? '隐藏此栏目' : '显示此栏目') + '" data-toggle="' + idx + '">' + (sec.enabled ? UI.icon('eye', 16) : UI.icon('eye-off', 16)) + '</button>') +
             '</div>' : '') +
           '</div><div class="panel-body" data-body="' + sec.id + '"></div>';
         grid.appendChild(el);
@@ -200,7 +201,7 @@ window.PlanView = (function () {
         db.settings.planBlocks[id] = !st[id];
         S.saveSettings().then(function () {
           render(root);
-          UI.toast(db.settings.planBlocks[id] ? '板块已恢复' : '板块已屏蔽（设置页可恢复）', 'success');
+          UI.toast(db.settings.planBlocks[id] ? '板块已恢复' : '板块已屏蔽（栏目设置或设置页可恢复）', 'success');
         });
       });
     });
@@ -327,18 +328,86 @@ window.PlanView = (function () {
     const isDigital = function (i) { return i.kind === 'device' || i.kind === 'game'; };
 
     if (id === 'kpi') {
-      body.innerHTML = '<div class="kpi-row" style="margin:0">' +
-        kpi('总投入', U.formatMoney(sum.totalInvest), '全部历史购入') +
-        kpi('在手估值', U.formatMoney(sum.bookValue), '折旧现值') +
-        kpi('回血潜力', U.formatMoney(sum.resalePotential), '按预估二手价') +
-        kpi('本月花费', U.formatMoney(sum.monthSpend + (sum.food.monthSpend || 0)), sum.monthNewCount + ' 件新物') +
-        kpi('在手物品', sum.counts.all + ' 件', '数码 ' + (sum.counts.device + sum.counts.game) + ' · 衣 ' + sum.counts.clothing + ' · 生活 ' + sum.counts.life) +
-        '</div><div class="kpi-mini-row">' +
+      /* KPI 资产驾驶舱（v1.0.7）：4 大卡 + 分域速览 + 本月 vs 上月 */
+      const monthTotal = sum.monthSpend + (sum.food.monthSpend || 0);
+      const curKey = U.monthKey(U.todayStr());
+      const prevKey = U.monthKey(U.todayStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
+      let foodPrev = 0;
+      (db.food || []).forEach(function (f) {
+        if (U.monthKey(f.date || '') === prevKey) foodPrev += Number(f.price) || 0;
+      });
+      const prevTotal = (sum.monthlySpend[prevKey] || 0) + foodPrev;
+      const delta = prevTotal ? Math.round((monthTotal - prevTotal) / prevTotal * 100) : null;
+      const budgetTotal = Number(((db.settings || {}).budget || {}).monthlyTotal) || 0;
+      const budgetLeft = budgetTotal - monthTotal;
+      const active = sum.items.filter(function (i) { return i.status !== 'sold' && i.status !== 'gifted'; });
+      const isD = function (i) { return i.kind === 'device' || i.kind === 'game'; };
+      function domainInvest(fn) {
+        return active.filter(fn).reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0);
+      }
+      function monthBuy(fn) {
+        return sum.items.filter(function (i) { return fn(i) && U.monthKey(i.purchaseDate || '') === curKey; })
+          .reduce(function (a, b) { return a + (Number(b.purchasePrice) || 0); }, 0);
+      }
+      const dCnt = sum.counts.device + sum.counts.game;
+      const cCnt = sum.counts.clothing;
+      const lCnt = sum.counts.life;
+      const worn = active.filter(function (i) { return i.kind === 'clothing' && (i.wearCount || 0) > 0; }).length;
+      const wearRate = cCnt ? Math.round(worn / cCnt * 100) : 0;
+      const lifeExpiring = sum.expiry.filter(function (x) { return x.kind === 'pao'; }).length;
+      const outfitMonth = (db.outfits || []).filter(function (o) { return U.monthKey(o.date || '') === curKey; }).length;
+      const cmpMax = Math.max(monthTotal, prevTotal) || 1;
+
+      function hero(label, value, sub, cls) {
+        return '<div class="kpi-hero"><div class="kpi-hero-label">' + label + '</div>' +
+          '<div class="kpi-hero-value' + (cls ? ' ' + cls : '') + '">' + value + '</div>' +
+          '<div class="kpi-hero-sub">' + sub + '</div></div>';
+      }
+      const deltaBadge = delta === null ? '<span class="muted">首月无对比</span>'
+        : delta === 0 ? '<span class="muted">与上月持平</span>'
+          : '<span class="kpi-delta ' + (delta > 0 ? 'bad' : 'good') + '">' +
+            (delta > 0 ? '↑ +' : '↓ ') + delta + '%</span>';
+      const budgetSub = budgetTotal > 0
+        ? (budgetLeft >= 0 ? '预算余 ' + Math.round(budgetLeft / budgetTotal * 100) + '%' : '已超预算')
+        : '未设置月预算';
+
+      body.innerHTML =
+        '<div class="kpi-hero-row">' +
+        hero('总投入', U.formatMoney(sum.totalInvest), '全部历史购入') +
+        hero('在手估值', U.formatMoney(sum.bookValue), '折旧现值 · 投入的 ' + (sum.totalInvest ? Math.round(sum.bookValue / sum.totalInvest * 100) : 0) + '%') +
+        hero('本月花费', U.formatMoney(monthTotal), sum.monthNewCount + ' 件新物 ' + deltaBadge) +
+        hero('预算剩余', budgetTotal > 0 ? U.formatMoney(budgetLeft) : '—', budgetSub, budgetLeft < 0 ? 'bad' : '') +
+        '</div>' +
+        '<div class="kpi-domain">' +
+        '<div class="kpi-domain-title">分域速览</div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">' + UI.icon('gamepad-2', 16) + '</span><span class="kpi-domain-name">数码</span>' +
+        '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(isD)) + '</span><i>·</i><span>' + dCnt + ' 件</span><i>·</i><span>本月 ' + U.formatMoney(monthBuy(isD)) + '</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">' + UI.icon('shirt', 16) + '</span><span class="kpi-domain-name">衣橱</span>' +
+        '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(function (i) { return i.kind === 'clothing'; })) + '</span><i>·</i><span>' + cCnt + ' 件</span><i>·</i><span>使用率 ' + wearRate + '%</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">' + UI.icon('heart', 16) + '</span><span class="kpi-domain-name">生活</span>' +
+        '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(function (i) { return i.kind === 'life'; })) + '</span><i>·</i><span>' + lCnt + ' 件</span><i>·</i><span>临期 ' + lifeExpiring + '</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">' + UI.icon('utensils', 16) + '</span><span class="kpi-domain-name">美食</span>' +
+        '<span class="kpi-domain-parts"><span>本月 ' + (sum.food.monthCount || 0) + ' 顿</span><i>·</i><span>' + U.formatMoney(sum.food.monthSpend || 0) + '</span><i>·</i><span>累计 ' + U.formatMoney(sum.food.totalSpend || 0) + '</span></span></div>' +
+        '</div>' +
+        '<div class="kpi-month">' +
+        '<div class="kpi-month-title">本月 vs 上月</div>' +
+        '<div class="kpi-cmp">' +
+        '<div class="kpi-cmp-row"><span class="kpi-cmp-label">本月</span>' +
+        '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' +
+        (cmpMax ? Math.round(monthTotal / cmpMax * 100) : 0) + '%;background:#0071e3"></div></div>' +
+        '<span class="kpi-cmp-val">' + U.formatMoney(monthTotal) + '</span></div>' +
+        '<div class="kpi-cmp-row"><span class="kpi-cmp-label">上月</span>' +
+        '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' +
+        (cmpMax ? Math.round(prevTotal / cmpMax * 100) : 0) + '%;background:#8e8e93"></div></div>' +
+        '<span class="kpi-cmp-val">' + U.formatMoney(prevTotal) + '</span></div>' +
+        '<div class="kpi-month-val">对比 ' + deltaBadge + '</div>' +
+        '</div>' +
+        '<div class="kpi-month-mini">' +
+        '<div class="kpi-mini">新物<strong>' + sum.monthNewCount + ' 件</strong></div>' +
         '<div class="kpi-mini">日均持有成本<strong>' + U.formatCost(sum.dailyCostTotal) + '</strong></div>' +
-        '<div class="kpi-mini">估值/投入比<strong>' + (sum.totalInvest ? Math.round(sum.bookValue / sum.totalInvest * 100) : 0) + '%</strong></div>' +
-        '<div class="kpi-mini">本月餐食<strong>' + sum.food.monthCount + ' 顿</strong></div>' +
-        '<div class="kpi-mini">穿搭打卡<strong>' + db.outfits.length + ' 次</strong></div>' +
-        '</div>';
+        '<div class="kpi-mini">穿搭打卡<strong>' + outfitMonth + ' 次</strong></div>' +
+        '<div class="kpi-mini">回血潜力<strong>' + U.formatMoney(sum.resalePotential) + '</strong></div>' +
+        '</div></div>';
       return;
     }
     if (id === 'composition') {
@@ -346,12 +415,13 @@ window.PlanView = (function () {
       const kindData = [
         { label: '数码', value: sum.items.filter(function (i) { return isDigital(i) && i.status !== 'sold' && i.status !== 'gifted'; })
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#0071e3' },
-        { label: '衣服', value: sum.items.filter(function (i) { return i.kind === 'clothing' && i.status !== 'sold'; })
+        { label: '衣橱', value: sum.items.filter(function (i) { return i.kind === 'clothing' && i.status !== 'sold'; })
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#ff2d55' },
         { label: '生活', value: sum.items.filter(function (i) { return i.kind === 'life'; })
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#af52de' },
         { label: '美食', value: sum.food.totalSpend || 0, color: '#ff9500' }
       ];
+      kindData.forEach(function (d) { d.valueText = U.formatMoney(Math.round(d.value)); });
       body.innerHTML = C.donut(kindData, { centerText: U.formatMoney(sum.activeInvest), centerSub: '在手总投入' });
       return;
     }
@@ -360,7 +430,7 @@ window.PlanView = (function () {
       const spent = sum.catSpend || {};
       body.innerHTML = C.rankBars([
         { label: '数码', value: spent.digital || 0, valueText: U.formatMoney(spent.digital || 0), color: '#0071e3' },
-        { label: '衣服', value: spent.clothing || 0, valueText: U.formatMoney(spent.clothing || 0), color: '#ff2d55' },
+        { label: '衣橱', value: spent.clothing || 0, valueText: U.formatMoney(spent.clothing || 0), color: '#ff2d55' },
         { label: '生活', value: spent.life || 0, valueText: U.formatMoney(spent.life || 0), color: '#af52de' },
         { label: '美食', value: spent.food || 0, valueText: U.formatMoney(spent.food || 0), color: '#ff9500' }
       ].sort(function (a, b) { return b.value - a.value; }));
@@ -372,16 +442,22 @@ window.PlanView = (function () {
       const rows = [
         { label: '本月总花费', v: sum.monthSpend + (sum.food.monthSpend || 0), max: Number(b.monthlyTotal) || 0 },
         { label: '数码', v: spent.digital || 0, max: Number((b.categories || {}).digital) || 0 },
-        { label: '衣服', v: spent.clothing || 0, max: Number((b.categories || {}).clothing) || 0 },
+        { label: '衣橱', v: spent.clothing || 0, max: Number((b.categories || {}).clothing) || 0 },
         { label: '生活', v: spent.life || 0, max: Number((b.categories || {}).life) || 0 },
         { label: '美食', v: spent.food || 0, max: Number((b.categories || {}).food) || 0 }
       ];
       body.innerHTML = rows.map(function (r) {
-        const pct = r.max > 0 ? Math.min(100, Math.round(r.v / r.max * 100)) : 3;
-        const over = r.max > 0 && r.v > r.max;
+        if (r.max > 0) {
+          const pct = Math.min(100, Math.round(r.v / r.max * 100));
+          const over = r.v > r.max;
+          return '<div class="rank-row"><div class="rank-label">' + r.label + '</div>' +
+            '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' + pct + '%;background:' + (over ? '#ff3b30' : '#34c759') + '"></div></div>' +
+            '<div class="rank-value">' + U.formatMoney(r.v) + ' / ' + U.formatMoney(r.max) + '</div></div>';
+        }
+        // 未设置预算：灰虚线占位，不误导成"健康"
         return '<div class="rank-row"><div class="rank-label">' + r.label + '</div>' +
-          '<div class="rank-bar-track"><div class="rank-bar-fill" style="width:' + pct + '%;background:' + (over ? '#ff3b30' : '#34c759') + '"></div></div>' +
-          '<div class="rank-value">' + U.formatMoney(r.v) + (r.max > 0 ? ' / ' + U.formatMoney(r.max) : '') + '</div></div>';
+          '<div class="rank-bar-track no-budget"></div>' +
+          '<div class="rank-value">' + U.formatMoney(r.v) + ' <span class="muted small">未设置预算</span></div></div>';
       }).join('');
       return;
     }
@@ -451,7 +527,7 @@ window.PlanView = (function () {
       const keys = Object.keys(byCat);
       body.className = 'panel-body center';
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
-        return { label: k, value: Math.round(byCat[k]), color: ['#0071e3', '#5ac8fa', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#ffcc00', '#aeaeb2'][n % 8] };
+        return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#0071e3', '#5ac8fa', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '数码总投入' })
         : '<p class="empty-hint">暂无数码设备</p>';
       return;
@@ -578,7 +654,7 @@ window.PlanView = (function () {
       const keys = Object.keys(byCat);
       body.className = 'panel-body center';
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
-        return { label: k, value: Math.round(byCat[k]), color: ['#ff2d55', '#0071e3', '#af52de', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
+        return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#ff2d55', '#0071e3', '#af52de', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '衣橱总投入' })
         : '<p class="empty-hint">暂无衣物</p>';
       return;
@@ -676,7 +752,7 @@ window.PlanView = (function () {
       const keys = Object.keys(byCat);
       body.className = 'panel-body center';
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
-        return { label: k, value: Math.round(byCat[k]), color: ['#af52de', '#ff2d55', '#0071e3', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
+        return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#af52de', '#ff2d55', '#0071e3', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '生活总投入' })
         : '<p class="empty-hint">暂无妆品</p>';
       return;
@@ -702,7 +778,7 @@ window.PlanView = (function () {
         '<div class="mini-row"><span class="flex1">本月餐食</span><span>' + f.monthCount + ' 顿</span></div>' +
         '<div class="mini-row"><span class="flex1">本月花费</span><span>' + U.formatMoney(f.monthSpend) + '</span></div>' +
         '<div class="mini-row"><span class="flex1">本月热量</span><span>' + Math.round(f.monthCalories) + ' kcal</span></div>' +
-        '<div class="mini-row"><span class="flex1">平均评分</span><span>' + (f.avgRating ? f.avgRating.toFixed(1) + ' ★' : '—') + '</span></div>' +
+        '<div class="mini-row"><span class="flex1">平均评分</span><span>' + (f.avgRating ? f.avgRating.toFixed(1) + ' ' + UI.icon('star', 14) : '—') + '</span></div>' +
         '</div>' +
         (byMeal.length ? '<h4 class="detail-sub">餐别分布</h4>' + C.rankBars(byMeal.map(function (m) {
           return { label: m, value: f.byMeal[m], valueText: f.byMeal[m] + ' 顿' };

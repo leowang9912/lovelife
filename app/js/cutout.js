@@ -3,6 +3,7 @@ window.Cutout = (function () {
   let session = null;
   let tried = false;
   let available = false;
+  let lastError = '';
 
   async function init() {
     if (tried) return available;
@@ -19,6 +20,8 @@ window.Cutout = (function () {
         });
       }
       ort.env.wasm.wasmPaths = 'vendor/';
+      // 单线程跑 wasm：不依赖 SharedArrayBuffer/跨源隔离，任何浏览器环境都能加载
+      ort.env.wasm.numThreads = 1;
       const resp = await fetch('models/u2netp.onnx');
       if (!resp.ok) throw new Error('model missing');
       const buf = await resp.arrayBuffer();
@@ -26,6 +29,7 @@ window.Cutout = (function () {
       available = true;
     } catch (e) {
       console.warn('抠图模型不可用，使用颜色泛洪回退方案', e);
+      lastError = (e && e.message) || String(e);
       available = false;
     }
     return available;
@@ -128,5 +132,9 @@ window.Cutout = (function () {
     return floodFillCutout(out);
   }
 
-  return { init: init, cutout: cutout, isModelReady: function () { return available; } };
+  return {
+    init: init, cutout: cutout,
+    isModelReady: function () { return available; },
+    getLastError: function () { return lastError; }
+  };
 })();

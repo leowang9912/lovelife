@@ -5,7 +5,7 @@ window.LifeView = (function () {
   const S = window.Storage;
   const UI = window.UI;
 
-  const state = { filterCat: '', filterSub: '', filterStatus: '', search: '' };
+  const state = { filterCat: '', filterSub: '', filterStatus: '', filterTag: '', search: '', sort: { key: 'date', dir: -1 } };
 
   function render(root) {
     const db = S.getDB();
@@ -21,16 +21,27 @@ window.LifeView = (function () {
       });
     }
     if (state.filterStatus) list = list.filter(function (i) { return (i.status || 'in_use') === state.filterStatus; });
+    if (state.filterTag) list = list.filter(function (i) { return (i.tags || []).indexOf(state.filterTag) >= 0; });
     if (state.search) {
       const q = state.search.toLowerCase();
       list = list.filter(function (i) {
         return (i.name || '').toLowerCase().indexOf(q) >= 0 || (i.brand || '').toLowerCase().indexOf(q) >= 0 ||
-          (i.shade || '').toLowerCase().indexOf(q) >= 0;
+          (i.shade || '').toLowerCase().indexOf(q) >= 0 || (i.notes || '').toLowerCase().indexOf(q) >= 0;
       });
     }
-    list = list.slice().sort(function (a, b) {
-      return (b.openedDate || b.purchaseDate || '').localeCompare(a.openedDate || a.purchaseDate || '');
+    // 排序（v1.0.8）：字段 + 方向双向可调；选择落盘记忆（v1.0.9）
+    if (!state.sortLoaded) {
+      const sv = (db.settings.listSort || {}).life;
+      if (sv && sv.key) state.sort = { key: sv.key, dir: sv.dir === 1 ? 1 : -1 };
+      state.sortLoaded = true;
+    }
+    list = UI.sortItems(list, state.sort.key, state.sort.dir, db);
+    // 标签筛选候选：本页物品用过的全部标签（v1.0.7）
+    const tagOptions = [];
+    all.forEach(function (i) {
+      (i.tags || []).forEach(function (t) { if (t && tagOptions.indexOf(t) < 0) tagOptions.push(t); });
     });
+    tagOptions.sort();
 
     const expiring = all.filter(function (i) {
       const s = M.lifeStatus(i);
@@ -40,8 +51,8 @@ window.LifeView = (function () {
     root.innerHTML =
       '<div class="page-head"><h2>我的生活</h2><div class="page-actions">' +
       (expiring ? '<span class="tag tag-warn">' + expiring + ' 件临期</span>' : '') +
-      '<button class="btn btn-ghost" id="btn-looks">💄 妆容组合</button>' +
-      '<button class="btn btn-primary" id="btn-add-life">＋ 记美妆</button></div></div>' +
+      '<button class="btn btn-ghost" id="btn-looks">' + UI.icon('palette', 14) + ' 妆容组合</button>' +
+      '<button class="btn btn-primary" id="btn-add-life">' + UI.icon('plus', 14) + ' 记美妆</button></div></div>' +
       '<div class="filter-bar">' +
       '<input class="search-input" id="life-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(state.search) + '">' +
       '<select id="life-cat"><option value="">全部分类</option>' +
@@ -52,30 +63,76 @@ window.LifeView = (function () {
           }).join('');
       }).join('') + '</select>' +
       '<select id="life-status"><option value="">全部状态</option>' +
-      [['in_use', '在用'], ['idle', '闲置'], ['to_sell', '待出闲置'], ['broken', '损坏报废']].map(function (s) {
+      [['in_use', '在用'], ['idle', '闲置'], ['borrowed', '借出'], ['to_sell', '待出闲置'], ['broken', '损坏报废'], ['sold', '已售出'], ['gifted', '已转赠']].map(function (s) {
         return '<option value="' + s[0] + '"' + (state.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select>' +
+      '<select id="life-tag"><option value="">全部标签</option>' +
+      tagOptions.map(function (t) {
+        return '<option value="' + U.escapeHtml(t) + '"' + (state.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
+      }).join('') + '</select>' +
+      '<select id="life-sort" title="排序字段">' +
+      UI.sortOptionsFor('life').map(function (d) {
+        return '<option value="' + d.key + '"' + (state.sort.key === d.key ? ' selected' : '') + '>' + d.label + '</option>';
+      }).join('') + '</select>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="life-sort-dir" title="点击切换排序方向">' +
+      UI.sortDirLabel(state.sort.key, state.sort.dir) + ' ' + UI.icon('arrow-up-down', 14) + '</button>' +
       '<span class="count-label">共 ' + list.length + ' 件</span></div>' +
       (list.length
         ? '<div class="item-grid">' + list.map(function (i) {
-          return UI.itemCard(i, { icon: '💄', quickAdd: true });
+          return UI.itemCard(i, { icon: 'heart', quickAdd: true, sortKey: state.sort.key });
         }).join('') + '</div>'
-        : '<div class="empty-state"><div class="empty-icon">💄</div><p>还没有记录</p></div>');
+        : (all.length
+          ? '<div class="empty-state"><div class="empty-icon">' + UI.icon('heart', 48) + '</div>' +
+            '<p>没有符合筛选的结果</p><button class="btn btn-ghost" id="btn-clear-filter">清除筛选</button></div>'
+          : '<div class="empty-state"><div class="empty-icon">' + UI.icon('heart', 48) + '</div><p>还没有记录</p></div>'));
 
     root.querySelector('#btn-add-life').addEventListener('click', function () {
       window.Views.openItemEditor(null, 'life');
     });
     root.querySelector('#btn-looks').addEventListener('click', function () { openLooks(root); });
-    root.querySelector('#life-search').addEventListener('input', U.debounce(function (e) {
-      state.search = e.target.value; render(root);
+    // 中文输入法组词期间不重绘（v1.0.9）
+    const searchEl = root.querySelector('#life-search');
+    let composing = false;
+    const refreshSearch = function (val) {
+      state.search = val; render(root);
       const inp = root.querySelector('#life-search');
       if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+    };
+    searchEl.addEventListener('compositionstart', function () { composing = true; });
+    searchEl.addEventListener('compositionend', function (e) { composing = false; refreshSearch(e.target.value); });
+    searchEl.addEventListener('input', U.debounce(function (e) {
+      if (composing) return;
+      refreshSearch(e.target.value);
     }, 280));
     root.querySelector('#life-cat').addEventListener('change', function (e) {
       state.filterCat = e.target.value; render(root);
     });
     root.querySelector('#life-status').addEventListener('change', function (e) {
       state.filterStatus = e.target.value; render(root);
+    });
+    root.querySelector('#life-tag').addEventListener('change', function (e) {
+      state.filterTag = e.target.value; render(root);
+    });
+    const clearBtn = root.querySelector('#btn-clear-filter');
+    if (clearBtn) clearBtn.addEventListener('click', function () {
+      state.filterCat = ''; state.filterStatus = ''; state.filterTag = ''; state.search = '';
+      render(root);
+    });
+    function persistSort() {
+      db.settings.listSort = db.settings.listSort || {};
+      db.settings.listSort.life = { key: state.sort.key, dir: state.sort.dir };
+      S.saveSettings().catch(function () { UI.toast('排序记忆保存失败', 'error'); });
+    }
+    root.querySelector('#life-sort').addEventListener('change', function (e) {
+      const def = UI.sortOptionsFor('life').find(function (d) { return d.key === e.target.value; });
+      state.sort = { key: e.target.value, dir: (def && def.defDir) || 1 };
+      persistSort();
+      render(root);
+    });
+    root.querySelector('#life-sort-dir').addEventListener('click', function () {
+      state.sort.dir = state.sort.dir === 1 ? -1 : 1;
+      persistSort();
+      render(root);
     });
     root.querySelectorAll('.item-card').forEach(function (card) {
       card.addEventListener('click', function (e) {
@@ -90,7 +147,13 @@ window.LifeView = (function () {
         const it = S.getDB().items.find(function (x) { return x.id === id; });
         if (!it) return;
         M.appendUsageLog(it, 1, 'manual', '手动记录');
-        await S.saveItem(it);
+        try {
+          await S.saveItem(it);
+        } catch (err) {
+          M.removeUsageLogEntry(it, (it.usageLog[it.usageLog.length - 1] || {}).id);
+          UI.toast('保存失败，已还原', 'error');
+          return;
+        }
         UI.toast('使用 +1', 'success');
         render(root);
       });
@@ -108,10 +171,10 @@ window.LifeView = (function () {
     const lifes = M.itemsWithComputed(db).filter(function (i) { return i.kind === 'life'; });
     const items = lifes.map(function (i) {
       const c = (db.categories.life || []).find(function (x) { return x.id === i.categoryId; });
-      return { id: i.id, name: i.name, brand: i.brand, categoryName: c ? c.name : '其他' };
+      return { id: i.id, name: i.name, brand: i.brand, images: i.images, categoryName: c ? c.name : '其他' };
     });
     UI.comboManager({
-      title: '💄 妆容组合', icon: '💄', items: items,
+      title: '妆容组合', icon: 'palette', items: items,
       combos: db.settings.makeupLooks,
       onChange: function () { S.saveSettings(); }
     });

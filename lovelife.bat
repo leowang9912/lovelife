@@ -11,19 +11,33 @@ if not exist "%~dp0lovelife-server.exe" goto NO_EXE
 rem ===== 2. port check (already running?) =====
 netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1
 if %errorlevel%==0 goto ALREADY_RUNNING
+rem process check: exe already starting (double click) -> just wait, do not launch again
+tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1
+if %errorlevel%==0 goto WAIT_LOOP
 
-rem ===== 3. start local server =====
+rem ===== 3. start local server (auto retry up to 3x) =====
+set /a attempt=1
+:LAUNCH
 start "" "%~dp0lovelife-server.exe"
 
-rem ===== 4. wait until port ready (max 20s) =====
+rem ===== 4. wait until port ready; retry if process died =====
 set /a tries=0
 :WAIT_LOOP
 netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1
 if %errorlevel%==0 goto OPEN_BROWSER
 set /a tries+=1
-if %tries% GEQ 20 goto ERR_START_FAIL
+if %tries% GEQ 24 goto ERR_START_FAIL
+if %tries% GEQ 3 goto CHECK_ALIVE
 ping -n 2 127.0.0.1 >nul
 goto WAIT_LOOP
+:CHECK_ALIVE
+tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1
+if %errorlevel%==0 goto WAIT_LOOP
+set /a attempt+=1
+if %attempt% GTR 3 goto ERR_START_FAIL
+echo [INFO] Service exited unexpectedly, retrying to start ...
+ping -n 3 127.0.0.1 >nul
+goto LAUNCH
 
 rem ===== 5. open browser =====
 :OPEN_BROWSER
@@ -85,6 +99,9 @@ echo      请查看杀毒软件的拦截记录，恢复程序并添加信任后重试。
 echo   2. 端口 8765 被其他程序占用：
 echo      请关闭占用该端口的程序，或重启电脑后重试。
 echo   3. 程序文件损坏：重新解压一次压缩包覆盖即可，数据不会丢失。
+echo   4. 弹出过 Failed to load Python DLL 提示：点确定后，
+echo      重新双击 lovelife.bat 即可，一般第二次就正常。
+echo      长期解决：把本软件文件夹加入杀毒软件信任区。
 echo.
 echo 详细图文步骤见压缩包里的 首次使用说明.txt。
 pause

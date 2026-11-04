@@ -91,7 +91,7 @@ async function main() {
 
   // 1b 快捷按钮：记美妆 + 穿搭打卡/饮食打卡直开弹窗（不跳转）
   const headHTML = w.document.getElementById('main-content').innerHTML;
-  for (const t of ['记美妆', '穿搭打卡', '饮食打卡']) {
+  for (const t of ['记美妆', '穿搭打卡', '美食打卡']) {
     if (headHTML.indexOf(t) < 0) throw new Error('缺少快捷按钮: ' + t);
   }
   // 点穿搭打卡应直接弹出录入弹窗（而非跳转到日历页）
@@ -104,7 +104,7 @@ async function main() {
   w.document.querySelector('[data-act=food]').click();
   await new Promise(r => setTimeout(r, 300));
   const modal2 = w.document.querySelector('.modal');
-  if (!modal2 || modal2.textContent.indexOf('饮食打卡') < 0) throw new Error('饮食打卡未直开弹窗');
+  if (!modal2 || modal2.textContent.indexOf('美食打卡') < 0) throw new Error('美食打卡未直开弹窗');
   modal2.querySelector('.modal-close') && modal2.querySelector('.modal-close').click();
   await new Promise(r => setTimeout(r, 250));
   console.log('OK  1b 快捷按钮齐全且打卡直开弹窗');

@@ -1,11 +1,15 @@
 {
-  "version": "1.0.6",
+  "version": "1.0.9",
   "minSchema": 3,
-  "publishedAt": "2026-10-28",
+  "publishedAt": "2026-11-04",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "新增桌面快捷方式：设置 → 软件一键创建「人生管家」桌面图标，双击即启动",
-    "重复创建自动刷新覆盖，快捷方式带应用图标"
+    "全站图标统一 Lucide 风格，规范固化（docs/UI-ICON-GUIDE.md）；设置页改六分标签",
+    "修复分类被静默改写（新建物品分类丢失）、裁切弹窗丢图等 20+ 问题（详见更新日志）",
+    "穿搭打卡：妆品使用次数可调（一天多次准确记账），预填带全温度/天气/次数",
+    "标签体系：chip × 只管本物品，设置页新增标签管理（增删个人标签库）",
+    "天气推荐支持今日/明日切换；美妆/数码吃灰天数口径修正",
+    "更新后自动重启更稳（重试×3），DLL 弹窗问题根治（释放目录离开临时目录）"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -13,6 +17,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.6/lovelife-v1.0.6-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.9/lovelife-v1.0.9-win64.zip"
   }
 }

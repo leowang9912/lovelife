@@ -17,6 +17,9 @@ cmd = [
     "--onefile", "--noconsole",
     "--name", "lovelife-server",
     "--version-file", os.path.join(ROOT, "exe-version-info.txt"),
+    # DLL 释放到安装目录下 runtime\（而非 %TEMP%\_MEI）：
+    # 避开杀软临时目录扫描/清理工具的干扰，消除 python313.dll 偶发加载失败弹窗（v1.0.9）
+    "--runtime-tmpdir", "runtime",
     "--distpath", DIST,
     "-y",
     os.path.join(ROOT, "app", "serve.py"),

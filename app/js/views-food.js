@@ -34,13 +34,12 @@ window.FoodView = (function () {
       recs.forEach(function (r) { (r.images || []).forEach(function (p) { imgs.push({ p: p, rid: r.id }); }); });
       cells += '<div class="cal-cell' + (isToday ? ' cal-today' : '') + (recs.length ? ' cal-has' : '') + '" data-date="' + dateStr + '">' +
         '<div class="cal-day">' + d + '</div>' +
-        (recs.length ? '<button class="cal-add-mini" title="再记一条">＋</button>' : '') +
+        (recs.length ? UI.calAddMini() : '') +
         (imgs.length
           ? '<div class="cal-cover" data-carousel=\'' + JSON.stringify(imgs).replace(/'/g, '&#39;') + '\'>' +
           '<img data-path="' + U.escapeHtml(imgs[0].p) + '"/>' +
           (imgs.length > 1
-            ? '<button class="cal-nav prev" data-nav-dir="-1">‹</button>' +
-            '<button class="cal-nav next" data-nav-dir="1">›</button>' +
+            ? UI.calNav() +
             '<span class="cal-more">1/' + imgs.length + '</span>'
             : '') + '</div>'
           : recs.length
@@ -48,7 +47,7 @@ window.FoodView = (function () {
               return '<div class="cal-outfit-chip" data-open-rec="' + r.id + '"><span>' + U.escapeHtml(r.meal || '') + ' · ' +
                 U.escapeHtml(r.name || r.foodCuisine || '') + '</span></div>';
             }).join('') + '</div>'
-            : '<div class="cal-hint">＋</div>') +
+            : UI.calHint()) +
         '</div>';
     }
 
@@ -61,7 +60,7 @@ window.FoodView = (function () {
         return '<option value="' + i + '"' + (i === calMonth ? ' selected' : '') + '>' + (i + 1) + ' 月</option>';
       }).join('') + '</select>' +
       '<button class="btn btn-ghost" id="food-today">今天</button>' +
-      '<button class="btn btn-primary" id="btn-add-food">🍱 饮食打卡</button></div></div>' +
+      '<button class="btn btn-primary" id="btn-add-food">' + UI.icon('utensils', 14) + ' 美食打卡</button></div></div>' +
       '<div class="cal-grid">' +
       ['日', '一', '二', '三', '四', '五', '六'].map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('') +
       cells + '</div>' +
@@ -101,7 +100,7 @@ window.FoodView = (function () {
         if (recs.length > 1) {
           UI.pickRecord('选择要查看的记录 · ' + U.cnDate(dateStr), recs.map(function (r) {
             return {
-              id: r.id, thumbPath: (r.images && r.images[0]) || '', icon: '🍱',
+              id: r.id, thumbPath: (r.images && r.images[0]) || '', icon: 'utensils',
               text: (r.meal || '') + ' · ' + (r.foodCuisine || '') +
                 (r.foodType ? ' / ' + r.foodType : '') + ' · ' + (r.name || ''),
               sub: U.formatMoney(r.price) + (r.location ? ' · ' + r.location : '')
@@ -162,14 +161,14 @@ window.FoodView = (function () {
     };
 
     UI.modal({
-      title: (isEdit ? '编辑饮食 · ' : '饮食打卡 · ') + U.cnDate(dateStr), width: 700,
+      title: (isEdit ? '编辑美食 · ' : '美食打卡 · ') + U.cnDate(dateStr), width: 700,
       bodyHTML:
         (existing.length ? '<div class="existing-outfits">' + existing.map(function (f) {
           return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(f.meal || '') + ' · ' +
             U.escapeHtml(f.foodCuisine || '') + (f.foodType ? ' / ' + U.escapeHtml(f.foodType) : '') +
             ' · ' + U.escapeHtml(f.name || '') + ' · ' + U.formatMoney(f.price) + '</span>' +
-            '<button class="btn-icon" data-edit-food="' + f.id + '" title="编辑">✎</button>' +
-            '<button class="btn-icon" data-del-food="' + f.id + '">×</button></div>';
+            '<button class="btn-icon" data-edit-food="' + f.id + '" title="编辑">' + UI.icon('pencil', 14) + '</button>' +
+            '<button class="btn-icon" data-del-food="' + f.id + '">' + UI.icon('trash-2', 14) + '</button></div>';
         }).join('') + '</div>' : '') +
         '<form id="food-form"><div class="form-grid">' +
         '<label><span class="f-label">菜系 <span class="req-star"> *</span></span>' +
@@ -212,6 +211,7 @@ window.FoodView = (function () {
         }
         wrap.querySelectorAll('[data-del-food]').forEach(function (b) {
           b.addEventListener('click', async function () {
+            if (!await UI.confirmDialog('删除饮食记录', '删除这条美食记录？')) return;
             await S.removeFood(b.getAttribute('data-del-food'));
             close(); openEditor(dateStr, null);
           });

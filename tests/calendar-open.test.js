@@ -118,7 +118,7 @@ async function main() {
   await new Promise(r => setTimeout(r, 300));
   modal = doc.querySelector('.modal');
   if (!modal) throw new Error('单条美食未直开');
-  if (modal.textContent.indexOf('编辑饮食') < 0) throw new Error('美食未进编辑态: ' + modal.textContent.slice(0, 60));
+  if (modal.textContent.indexOf('编辑美食') < 0) throw new Error('美食未进编辑态: ' + modal.textContent.slice(0, 60));
   const nameInput = modal.querySelector('#food-form [name=name]');
   if (nameInput.value !== '麻婆豆腐') throw new Error('美食编辑态未预填');
   if (modal.textContent.indexOf('删除') < 0) throw new Error('美食编辑态缺少删除');
