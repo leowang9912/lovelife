@@ -20,6 +20,12 @@ window.PlanView = (function () {
     monthly: { name: '月度消费曲线', block: 'overall', size: 'l' },
     catRank: { name: '分类消费排行', block: 'overall', size: 'm' },
     budget: { name: '预算进度', block: 'overall', size: 'l' },
+    wBalance: { name: '收支统计', block: 'overall', size: 'l' },
+    wTrend: { name: '收支走势', block: 'overall', size: 'l' },
+    wCatPie: { name: '分类统计', block: 'overall', size: 'm' },
+    wDaily: { name: '日均', block: 'overall', size: 'm' },
+    wHeat: { name: '收支热力', block: 'overall', size: 'm' },
+    wAssets: { name: '资产走势', block: 'overall', size: 'l' },
     game: { name: '游戏通关状态', block: 'digital', size: 's' },
     dPrice: { name: '数码价格排行', block: 'digital', size: 'm' },
     dUseRank: { name: '数码使用排行', block: 'digital', size: 'm' },
@@ -54,6 +60,239 @@ window.PlanView = (function () {
 
   const SIZE_LABELS = { s: '小', m: '中', l: '大' };
 
+  // 钱袋分类 id → 显示名（子类带父名，如「购物消费·手机数码」）
+  function findWalletCat(db, id) {
+    const cats = ((db.wallet || {}).cats) || {};
+    const kinds = ['expense', 'income'];
+    for (let ki = 0; ki < kinds.length; ki++) {
+      const list = cats[kinds[ki]] || [];
+      for (let i = 0; i < list.length; i++) {
+        const c = list[i];
+        if (c.id === id) return c.name;
+        const ch = c.children || [];
+        for (let j = 0; j < ch.length; j++) {
+          if (ch[j].id === id) return c.name + '·' + ch[j].name;
+        }
+      }
+    }
+    return '';
+  }
+
+  /* ===== 统一风格的收支统计（周期切换 周/月/年，全栏目共享） ===== */
+  let statRange = 'month';
+
+  function statRangeTag() {
+    return '<div class="flex1"></div><div class="seg-toggle">' +
+      [['week', '周'], ['month', '月'], ['year', '年']].map(function (r) {
+        return '<button type="button" class="seg-btn' + (statRange === r[0] ? ' on' : '') + '" data-sr="' + r[0] + '">' + r[1] + '</button>';
+      }).join('') + '</div>';
+  }
+
+  function bindStatRange(body) {
+    body.querySelectorAll('[data-sr]').forEach(function (el) {
+      el.addEventListener('click', function () {
+        statRange = el.getAttribute('data-sr');
+        window.App.refresh();
+      });
+    });
+  }
+
+  function statPeriod() {
+    const now = new Date();
+    let start, end;
+    if (statRange === 'week') {
+      const dow = (now.getDay() + 6) % 7; // 周一为一周开始
+      start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
+      end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+    } else if (statRange === 'year') {
+      start = new Date(now.getFullYear(), 0, 1);
+      end = new Date(now.getFullYear() + 1, 0, 1);
+    } else {
+      start = new Date(now.getFullYear(), now.getMonth(), 1);
+      end = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+    }
+    return { start: start, end: end };
+  }
+
+  function walletStatSection(id, db, tagHTML) {
+    const bills = ((db.wallet || {}).bills) || [];
+    const p = statPeriod();
+    const rs = bills.filter(function (b) {
+      if (!b.date || b.type === 'transfer') return false;
+      const t = new Date(b.date);
+      return t >= p.start && t < p.end;
+    });
+    let exp = 0, inc = 0;
+    rs.forEach(function (b) {
+      const a = Math.abs(Number(b.amount) || 0);
+      if (b.type === 'income') inc += a; else exp += a;
+    });
+
+    if (id === 'wBalance') {
+      /* 主流记账「收支统计」：收入 / 支出 / 结余 三大数字 */
+      return '<div class="yw-balance">' +
+        '<div class="yw-bal-cell"><div class="yw-bal-label">收入</div><div class="yw-bal-val in">' + U.formatMoney(inc) + '</div></div>' +
+        '<div class="yw-bal-cell"><div class="yw-bal-label">支出</div><div class="yw-bal-val out">' + U.formatMoney(exp) + '</div></div>' +
+        '<div class="yw-bal-cell"><div class="yw-bal-label">结余</div><div class="yw-bal-val' + (inc - exp < 0 ? ' out' : '') + '">' + U.formatMoney(inc - exp) + '</div></div>' +
+        '</div>' + tagHTML;
+    }
+
+    if (id === 'wTrend') {
+      /* 主流记账「收支走势」：柱状图（周/月按日、年按月） */
+      let data = [];
+      if (statRange === 'year') {
+        for (let m = 0; m < 12; m++) {
+          let v = 0;
+          rs.forEach(function (b) {
+            if (b.type === 'expense' && new Date(b.date).getMonth() === m) v += Math.abs(Number(b.amount) || 0);
+          });
+          data.push({ label: (m + 1) + '月', value: Math.round(v), color: '#ff3b30' });
+        }
+      } else {
+        const days = statRange === 'week' ? 7 : (new Date(p.end - 86400000).getDate());
+        const base = new Date(p.start);
+        for (let d = 0; d < days; d++) {
+          const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
+          const key = U.todayStr(day);
+          let v = 0;
+          rs.forEach(function (b) {
+            if (b.type === 'expense' && b.date === key) v += Math.abs(Number(b.amount) || 0);
+          });
+          data.push({ label: key.slice(5).replace('-', '/'), value: Math.round(v), color: '#ff3b30' });
+        }
+      }
+      return C.bar(data) + '<div class="muted small" style="margin-top:6px">红柱=支出　本期收入 ' + U.formatMoney(inc) + '</div>' + tagHTML;
+    }
+
+    if (id === 'wCatPie') {
+      /* 主流记账「分类统计」：金额、笔数、占比 */
+      const byCat = {};
+      rs.forEach(function (b) {
+        if (b.type !== 'expense') return;
+        const key = b.subCatId || b.catId || 'other';
+        if (!byCat[key]) byCat[key] = { v: 0, n: 0 };
+        byCat[key].v += Math.abs(Number(b.amount) || 0);
+        byCat[key].n += 1;
+      });
+      const data = Object.keys(byCat).map(function (k) {
+        return {
+          label: findWalletCat(db, k) || k,
+          value: Math.round(byCat[k].v * 100) / 100,
+          valueText: U.formatMoney(byCat[k].v) + ' · ' + byCat[k].n + '笔'
+        };
+      }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+      return (data.length ? C.donut(data) : '<p class="empty-hint">本期还没有支出</p>') + tagHTML;
+    }
+
+    if (id === 'wDaily') {
+      /* 主流记账「日均」：日均支出 / 日均收入 / 日均结余 / 日均预算 */
+      const dayCount = Math.max(1, Math.round((p.end - p.start) / 86400000));
+      const budget = ((db.settings || {}).budget || {}).monthlyTotal || 0;
+      return '<div class="yw-daily">' +
+        '<div class="yw-daily-cell"><div class="yw-bal-label">日均支出</div><div class="yw-bal-val">' + U.formatMoney(exp / dayCount) + '</div></div>' +
+        '<div class="yw-daily-cell"><div class="yw-bal-label">日均收入</div><div class="yw-bal-val">' + U.formatMoney(inc / dayCount) + '</div></div>' +
+        '<div class="yw-daily-cell"><div class="yw-bal-label">日均结余</div><div class="yw-bal-val">' + U.formatMoney((inc - exp) / dayCount) + '</div></div>' +
+        '<div class="yw-daily-cell"><div class="yw-bal-label">日均预算</div><div class="yw-bal-val">' +
+        (budget > 0 ? U.formatMoney(budget / dayCount) : '未设置') + '</div></div>' +
+        '</div>' + tagHTML;
+    }
+
+    if (id === 'wHeat') {
+      /* 主流记账「收支热力」：日历热力格（深浅=当日支出） */
+      const y = p.start.getFullYear(), m = p.start.getMonth();
+      const first = new Date(y, m, 1);
+      const days = new Date(y, m + 1, 0).getDate();
+      const pad = (first.getDay() + 6) % 7;
+      const byDay = {};
+      rs.forEach(function (b) {
+        if (b.type !== 'expense') return;
+        byDay[b.date] = (byDay[b.date] || 0) + Math.abs(Number(b.amount) || 0);
+      });
+      const maxV = Math.max.apply(null, Object.keys(byDay).map(function (k) { return byDay[k]; }).concat([1]));
+      let cells = '';
+      for (let i = 0; i < pad; i++) cells += '<div class="yw-heat-cell empty"></div>';
+      for (let d = 1; d <= days; d++) {
+        const key = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const v = byDay[key] || 0;
+        const alpha = v ? Math.max(0.12, v / maxV * 0.85) : 0;
+        cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" title="' + key + ' 支出 ' + v + '"' +
+          ' style="background:' + (v ? 'rgba(255,59,48,' + alpha.toFixed(2) + ')' : '#f6f6f9') + '">' +
+          '<span>' + d + '</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
+      }
+      return '<div class="yw-heat-title muted small">' + y + ' 年 ' + (m + 1) + ' 月 · 深浅=当日支出</div>' +
+        '<div class="yw-heat">' + cells + '</div>' + tagHTML;
+    }
+
+    if (id === 'wAssets') {
+      /* 资产走势（「资产走势」）：总资产随时间（账单倒推）+ 各账户构成 + 本月变动 */
+      const wallet = db.wallet || {};
+      const accs = wallet.accounts || [];
+      const allBills = wallet.bills || [];
+      const snaps = wallet.balances || [];
+      const curTotal = accs.reduce(function (s, a) { return s + (Number(a.balance) || 0); }, 0);
+
+      // 近 90 天总资产曲线：从当前余额按账单净影响逐日倒推
+      const N = 90;
+      const netByDay = {};
+      allBills.forEach(function (b) {
+        const a = Math.abs(Number(b.amount) || 0);
+        const n = b.type === 'income' ? a : b.type === 'expense' ? -a : 0; // 转账不影响总资产
+        if (b.date) netByDay[b.date] = (netByDay[b.date] || 0) + n;
+      });
+      const dayKeys = [];
+      const now = new Date();
+      for (let i = N - 1; i >= 0; i--) {
+        dayKeys.push(U.todayStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)));
+      }
+      let rangeNet = 0;
+      dayKeys.forEach(function (k) { rangeNet += (netByDay[k] || 0); });
+      let bal = curTotal - rangeNet;
+      const series = dayKeys.map(function (k) {
+        const v = Math.round(bal * 100) / 100;
+        bal += (netByDay[k] || 0);
+        return v;
+      });
+      const snapByDay = {};
+      snaps.forEach(function (s) {
+        snapByDay[s.date] = (snapByDay[s.date] || 0) + (Number(s.balance) || 0);
+      });
+      const snapMarks = Object.keys(snapByDay).map(function (d) {
+        return d + ' ' + U.formatMoney(snapByDay[d]);
+      });
+
+      // 本月净变动 = 收入 − 支出
+      const mk2 = U.monthKey(U.todayStr());
+      let mInc = 0, mExp = 0;
+      allBills.forEach(function (b) {
+        if (U.monthKey(b.date || '') !== mk2) return;
+        const a = Math.abs(Number(b.amount) || 0);
+        if (b.type === 'income') mInc += a;
+        else if (b.type === 'expense') mExp += a;
+      });
+
+      return '<div class="yw-balance" style="margin-bottom:10px">' +
+        '<div class="yw-bal-cell"><div class="yw-bal-label">当前总资产</div><div class="yw-bal-val">' + U.formatMoney(curTotal) + '</div></div>' +
+        '<div class="yw-bal-cell"><div class="yw-bal-label">本月净变动</div><div class="yw-bal-val' + (mInc - mExp < 0 ? ' out' : ' in') + '">' +
+        (mInc - mExp >= 0 ? '+' : '') + U.formatMoney(mInc - mExp) + '</div></div>' +
+        '<div class="yw-bal-cell"><div class="yw-bal-label">余额记录</div><div class="yw-bal-val">' + snaps.length + ' 条</div></div>' +
+        '</div>' +
+        C.line(dayKeys.map(function (k, i) {
+          return { label: k.slice(5).replace('-', '/'), value: series[i] };
+        })) +
+        '<div class="muted small" style="margin:6px 0">总资产走势（近 90 天，账单流水倒推' +
+        (snapMarks.length ? ' · 快照：' + U.escapeHtml(snapMarks.join('，')) : '') + '）</div>' +
+        C.rankBars(accs.map(function (a) {
+          return {
+            label: a.name, value: Number(a.balance) || 0,
+            valueText: U.formatMoney(a.balance),
+            color: a.balance < 0 ? '#ff3b30' : undefined
+          };
+        }).sort(function (x, y) { return y.value - x.value; })) +
+        tagHTML;
+    }
+    return '';
+  }
+
   let editMode = false;
 
   /* 旧栏目 → 新栏目迁移映射 */
@@ -66,7 +305,8 @@ window.PlanView = (function () {
   const DEFAULT_ON = ['monthly', 'budget', 'cpw', 'game', 'foodStats',
     'dPrice', 'dCostRank', 'dHoldRank', 'dBuyTrend', 'dCatPie',
     'cPrice', 'cWearRank', 'cOutfitRank', 'cNoWear', 'cBuyTrend', 'cStreak', 'cCatPie',
-    'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie'];
+    'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie',
+    'wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat', 'wAssets'];
 
   /* 补齐/迁移栏目，保留用户已有顺序（块内相对顺序不变） */
   function normalizeSections(db) {
@@ -319,24 +559,40 @@ window.PlanView = (function () {
   /* ================= 各栏目内容 ================= */
   function renderSection(body, id, db, sum) {
     const now = new Date();
+    const wstat = sum.wallet || { monthlyExpense: {}, monthlyIncome: {}, monthlyLinkedExpense: {}, byCat: {} };
+    // 合并口径（每月一致）：账单支出 + 物品购入 + 美食 − 已关联物品的账单
+    function foodMonth(key) {
+      if (key === U.monthKey(U.todayStr())) return sum.food.monthSpend || 0;
+      let s = 0;
+      (db.food || []).forEach(function (f) {
+        if (U.monthKey(f.date || '') === key) s += Number(f.price) || 0;
+      });
+      return s;
+    }
     const months = [];
     for (let i = 11; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const key = U.monthKey(U.todayStr(d));
-      months.push({ label: key.slice(5) + '月', value: Math.round(sum.monthlySpend[key] || 0) });
+      const itemV = sum.monthlySpend[key] || 0;
+      const billV = wstat.monthlyExpense[key] || 0;
+      const linkedV = wstat.monthlyLinkedExpense[key] || 0;
+      months.push({
+        label: key.slice(5) + '月', key: key,
+        value: Math.round(billV + itemV + foodMonth(key) - linkedV),
+        itemValue: Math.round(itemV), billValue: Math.round(billV),
+        billIncome: Math.round(wstat.monthlyIncome[key] || 0)
+      });
     }
     const isDigital = function (i) { return i.kind === 'device' || i.kind === 'game'; };
 
     if (id === 'kpi') {
       /* KPI 资产驾驶舱（v1.0.7）：4 大卡 + 分域速览 + 本月 vs 上月 */
-      const monthTotal = sum.monthSpend + (sum.food.monthSpend || 0);
+      /* v1.1.0 统计合并：花费口径 = 记账支出 + 物品购入 + 美食 − 已关联物品的账单（不重复计） */
+      const monthTotal = sum.combinedMonthSpend != null ? sum.combinedMonthSpend : (sum.monthSpend + (sum.food.monthSpend || 0));
       const curKey = U.monthKey(U.todayStr());
       const prevKey = U.monthKey(U.todayStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)));
-      let foodPrev = 0;
-      (db.food || []).forEach(function (f) {
-        if (U.monthKey(f.date || '') === prevKey) foodPrev += Number(f.price) || 0;
-      });
-      const prevTotal = (sum.monthlySpend[prevKey] || 0) + foodPrev;
+      const prevM = months.find(function (m) { return m.key === prevKey; });
+      const prevTotal = prevM ? prevM.value : 0;
       const delta = prevTotal ? Math.round((monthTotal - prevTotal) / prevTotal * 100) : null;
       const budgetTotal = Number(((db.settings || {}).budget || {}).monthlyTotal) || 0;
       const budgetLeft = budgetTotal - monthTotal;
@@ -388,6 +644,8 @@ window.PlanView = (function () {
         '<span class="kpi-domain-parts"><span>投入 ' + U.formatMoney(domainInvest(function (i) { return i.kind === 'life'; })) + '</span><i>·</i><span>' + lCnt + ' 件</span><i>·</i><span>临期 ' + lifeExpiring + '</span></span></div>' +
         '<div class="kpi-domain-row"><span class="kpi-domain-icon">' + UI.icon('utensils', 16) + '</span><span class="kpi-domain-name">美食</span>' +
         '<span class="kpi-domain-parts"><span>本月 ' + (sum.food.monthCount || 0) + ' 顿</span><i>·</i><span>' + U.formatMoney(sum.food.monthSpend || 0) + '</span><i>·</i><span>累计 ' + U.formatMoney(sum.food.totalSpend || 0) + '</span></span></div>' +
+        '<div class="kpi-domain-row"><span class="kpi-domain-icon">' + UI.icon('wallet', 16) + '</span><span class="kpi-domain-name">钱袋</span>' +
+        '<span class="kpi-domain-parts"><span>本月支出 ' + U.formatMoney(wstat.monthExpense || 0) + '</span><i>·</i><span>收入 ' + U.formatMoney(wstat.monthIncome || 0) + '</span><i>·</i><span>记账 ' + (wstat.billCount || 0) + ' 笔</span></span></div>' +
         '</div>' +
         '<div class="kpi-month">' +
         '<div class="kpi-month-title">本月 vs 上月</div>' +
@@ -425,7 +683,17 @@ window.PlanView = (function () {
       body.innerHTML = C.donut(kindData, { centerText: U.formatMoney(sum.activeInvest), centerSub: '在手总投入' });
       return;
     }
-    if (id === 'monthly') { body.innerHTML = C.line(months); return; }
+    if (id === 'monthly') {
+      body.innerHTML = C.line(months.map(function (m) { return { label: m.label, value: m.value }; })) +
+        '<div class="muted small" style="margin-top:6px">口径：记账支出 + 物品购入 + 美食 − 已关联物品的账单（不重复计）</div>';
+      return;
+    }
+    /* ===== 统一风格的收支统计（复刻主流记账统计模块） ===== */
+    if (id === 'wBalance' || id === 'wTrend' || id === 'wCatPie' || id === 'wDaily' || id === 'wHeat' || id === 'wAssets') {
+      body.innerHTML = walletStatSection(id, db, statRangeTag());
+      bindStatRange(body);
+      return;
+    }
     if (id === 'catRank') {
       const spent = sum.catSpend || {};
       body.innerHTML = C.rankBars([
@@ -440,7 +708,8 @@ window.PlanView = (function () {
       const b = db.settings.budget || { monthlyTotal: 0, categories: {} };
       const spent = sum.catSpend || {};
       const rows = [
-        { label: '本月总花费', v: sum.monthSpend + (sum.food.monthSpend || 0), max: Number(b.monthlyTotal) || 0 },
+        // 总花费走合并口径（记账+物品+美食−关联重复），分域预算仍是物品口径
+        { label: '本月总花费', v: sum.combinedMonthSpend != null ? sum.combinedMonthSpend : (sum.monthSpend + (sum.food.monthSpend || 0)), max: Number(b.monthlyTotal) || 0 },
         { label: '数码', v: spent.digital || 0, max: Number((b.categories || {}).digital) || 0 },
         { label: '衣橱', v: spent.clothing || 0, max: Number((b.categories || {}).clothing) || 0 },
         { label: '生活', v: spent.life || 0, max: Number((b.categories || {}).life) || 0 },

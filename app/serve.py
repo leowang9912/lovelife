@@ -31,12 +31,24 @@ else:
 
 APP_DIR = os.path.join(ROOT, "app")
 CONFIG_FILE = os.path.join(ROOT, "app-config.json")
+# bill_import 与本文件同目录（app/）：源码模式补搜索路径，打包后 PyInstaller 静态收集
+if APP_DIR not in sys.path:
+    sys.path.insert(0, APP_DIR)
+try:
+    import bill_import
+except ImportError:  # 模块缺失时导入功能降级，不影响其余服务
+    bill_import = None
+# bill_export 与 bill_import 同目录：导出模块缺失时仅导出接口降级报错，不影响其余服务
+try:
+    import bill_export
+except ImportError:
+    bill_export = None
 SCHEMA_VERSION = 3
 PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.0.9"
+SERVER_BUILD = "1.1.0"
 
 _lock = threading.Lock()
 
@@ -199,6 +211,202 @@ DEFAULT_CATEGORIES = {
     "washMethod": ["干洗", "手洗", "机洗", "不可水洗", "其他"],
 }
 
+# ---------------- 钱袋（记账，v1.1.0） ----------------
+# 记账分类树：精选主流记账分类体系。
+# icon = 内置彩色分类图标文件名（app/vendor/cat-icons/）。
+# id 一律 w_ 前缀，与物品分类（digital/clothing/life）命名空间隔离。
+# 用户可增删自定义分类（存 wallet.cats），内置分类删除后仅隐藏不破坏历史账单。
+DEFAULT_WALLET_CATS = {
+    "expense": [
+        {"id": "w_food", "name": "食品餐饮", "icon": "color_ic_parent_restaurant", "children": [
+            {"id": "w_food_breakfast", "name": "早餐", "icon": "color_ic_restaurant_breakfast"},
+            {"id": "w_food_lunch", "name": "午餐", "icon": "color_ic_restaurant_lunch"},
+            {"id": "w_food_dinner", "name": "晚餐", "icon": "color_ic_restaurant_dinner"},
+            {"id": "w_food_snack", "name": "休闲零食", "icon": "color_ic_restaurant_snacks"},
+            {"id": "w_food_fresh", "name": "生鲜食品", "icon": "color_ic_restaurant_fresh"},
+            {"id": "w_food_foodstuff", "name": "粮油调味", "icon": "color_ic_restaurant_foodstuff"},
+            {"id": "w_food_treat", "name": "请客吃饭", "icon": "color_ic_restaurant_treat"},
+            {"id": "w_food_wine", "name": "饮料酒水", "icon": "color_ic_restaurant_wine"},
+            {"id": "w_food_other", "name": "其他", "icon": "color_ic_parent_restaurant"},
+        ]},
+        {"id": "w_shop", "name": "购物消费", "icon": "color_ic_parent_shopping", "children": [
+            {"id": "w_shop_digital", "name": "手机数码", "icon": "color_ic_shopping_phone"},
+            {"id": "w_shop_clothing", "name": "服饰运动", "icon": "color_ic_shopping_motion"},
+            {"id": "w_shop_beauty", "name": "个护美妆", "icon": "color_ic_shopping_makeup"},
+            {"id": "w_shop_watch", "name": "配饰腕表", "icon": "color_ic_shopping_watch"},
+            {"id": "w_shop_appliance", "name": "生活电器", "icon": "color_ic_shopping_electric"},
+            {"id": "w_shop_home", "name": "日常家居", "icon": "color_ic_shopping_home"},
+            {"id": "w_shop_baby", "name": "母婴玩具", "icon": "color_ic_shopping_baby"},
+            {"id": "w_shop_office", "name": "办公用品", "icon": "color_ic_shopping_office"},
+            {"id": "w_shop_pets", "name": "宠物用品", "icon": "color_ic_shopping_pets"},
+            {"id": "w_shop_virtual", "name": "虚拟充值", "icon": "color_ic_shopping_recharge"},
+            {"id": "w_shop_renovation", "name": "装修装饰", "icon": "color_ic_shopping_renovation"},
+            {"id": "w_shop_other", "name": "其他", "icon": "color_ic_parent_shopping"},
+        ]},
+        {"id": "w_traffic", "name": "出行交通", "icon": "color_ic_parent_traffic", "children": [
+            {"id": "w_tf_taxi", "name": "打车", "icon": "color_ic_traffic_taxi"},
+            {"id": "w_tf_public", "name": "公共交通", "icon": "color_ic_traffic_bus"},
+            {"id": "w_tf_fuel", "name": "加油", "icon": "color_ic_traffic_oil"},
+            {"id": "w_tf_park", "name": "停车费", "icon": "color_ic_traffic_parking"},
+            {"id": "w_tf_maintain", "name": "保养修车", "icon": "color_ic_traffic_maintain"},
+            {"id": "w_tf_train", "name": "火车", "icon": "color_ic_traffic_train"},
+            {"id": "w_tf_flight", "name": "飞机", "icon": "color_ic_traffic_aircraft"},
+            {"id": "w_tf_other", "name": "其他", "icon": "color_ic_parent_traffic"},
+        ]},
+        {"id": "w_home", "name": "居家生活", "icon": "color_ic_parent_home", "children": [
+            {"id": "w_hm_rent", "name": "房租还贷", "icon": "color_ic_home_loan"},
+            {"id": "w_hm_water", "name": "水费", "icon": "color_ic_home_water"},
+            {"id": "w_hm_power", "name": "电费", "icon": "color_ic_home_electricity_fees"},
+            {"id": "w_hm_gas", "name": "燃气费", "icon": "color_ic_home_gas"},
+            {"id": "w_hm_property", "name": "物业费", "icon": "color_ic_home_property"},
+            {"id": "w_hm_net", "name": "话费宽带", "icon": "color_ic_home_telephone_bill"},
+            {"id": "w_hm_parking", "name": "车位费", "icon": "color_ic_home_parking_lot"},
+            {"id": "w_hm_clean", "name": "家政清洁", "icon": "color_ic_home_husekeeping"},
+            {"id": "w_hm_other", "name": "其他", "icon": "color_ic_parent_home"},
+        ]},
+        {"id": "w_fun", "name": "休闲娱乐", "icon": "color_ic_parent_game", "children": [
+            {"id": "w_fn_travel", "name": "旅游度假", "icon": "color_ic_game_travel"},
+            {"id": "w_fn_movie", "name": "电影唱歌", "icon": "color_ic_game_film"},
+            {"id": "w_fn_sport", "name": "运动健身", "icon": "color_ic_game_keep_fit"},
+            {"id": "w_fn_chess", "name": "棋牌桌游", "icon": "color_ic_game_chess"},
+            {"id": "w_fn_show", "name": "演出", "icon": "color_ic_game_show"},
+            {"id": "w_fn_bar", "name": "酒吧", "icon": "color_ic_game_bar"},
+            {"id": "w_fn_bath", "name": "足浴按摩", "icon": "color_ic_game_foot_bath"},
+            {"id": "w_fn_other", "name": "其他", "icon": "color_ic_parent_game"},
+        ]},
+        {"id": "w_edu", "name": "文化教育", "icon": "color_ic_parent_education", "children": [
+            {"id": "w_ed_book", "name": "书报杂志", "icon": "color_ic_education_book"},
+            {"id": "w_ed_train", "name": "培训考试", "icon": "color_ic_education_train"},
+            {"id": "w_ed_tuition", "name": "学费", "icon": "color_ic_education_tuition"},
+            {"id": "w_ed_other", "name": "其他", "icon": "color_ic_parent_education"},
+        ]},
+        {"id": "w_medical", "name": "健康医疗", "icon": "color_ic_parent_medical", "children": [
+            {"id": "w_md_drug", "name": "买药", "icon": "color_ic_medical_medicine"},
+            {"id": "w_md_hospital", "name": "医院", "icon": "color_ic_medical_hospital"},
+            {"id": "w_md_care", "name": "滋补保健", "icon": "color_ic_medical_healthcare"},
+            {"id": "w_md_other", "name": "其他", "icon": "color_ic_parent_medical"},
+        ]},
+        {"id": "w_gift", "name": "送礼人情", "icon": "color_ic_parent_gift", "children": [
+            {"id": "w_gf_present", "name": "礼物", "icon": "color_ic_gift_gift"},
+            {"id": "w_gf_redpacket", "name": "红包", "icon": "color_ic_gift_red_paper"},
+            {"id": "w_gf_elder", "name": "孝敬长辈", "icon": "color_ic_gift_filial_piety"},
+            {"id": "w_gf_reward", "name": "打赏", "icon": "color_ic_gift_reward"},
+            {"id": "w_gf_lend", "name": "借出", "icon": "color_ic_gift_lend"},
+            {"id": "w_gf_other", "name": "其他", "icon": "color_ic_parent_gift"},
+        ]},
+        {"id": "w_pet", "name": "宠物", "icon": "color_ic_shopping_pets", "children": [
+            {"id": "w_pt_food", "name": "宠物食品", "icon": "color_ic_shopping_pets"},
+            {"id": "w_pt_medical", "name": "宠物医疗", "icon": "color_ic_medical_medicine"},
+            {"id": "w_pt_groom", "name": "宠物美容", "icon": "color_ic_shopping_pets"},
+            {"id": "w_pt_other", "name": "其他", "icon": "color_ic_shopping_pets"},
+        ]},
+        {"id": "w_other_exp", "name": "其他支出", "icon": "color_ic_parent_other", "children": [
+            {"id": "w_oe_charity", "name": "慈善捐助", "icon": "color_ic_other_charitable"},
+            {"id": "w_oe_loss", "name": "罚款赔偿", "icon": "color_ic_other_fine"},
+            {"id": "w_oe_invest", "name": "理财支出", "icon": "color_ic_stock_out"},
+            {"id": "w_oe_other", "name": "其他", "icon": "color_ic_parent_other"},
+        ]},
+    ],
+    # 收入：主流记账为单一「收入」大类下的二级（icon 用 income_* 系列）
+    "income": [
+        {"id": "w_in_wages", "name": "工资", "icon": "color_ic_income_wages", "children": []},
+        {"id": "w_in_bonus", "name": "奖金", "icon": "color_ic_income_bonus", "children": []},
+        {"id": "w_in_subsidy", "name": "补贴", "icon": "color_ic_income_subsidy", "children": []},
+        {"id": "w_in_parttime", "name": "兼职外快", "icon": "color_ic_income_part_time_job", "children": []},
+        {"id": "w_in_reimb", "name": "报销", "icon": "color_ic_income_reimbursement", "children": []},
+        {"id": "w_in_gift", "name": "礼金人情", "icon": "color_ic_income_cash_gift", "children": []},
+        {"id": "w_in_borrow", "name": "借入", "icon": "color_ic_income_borrow", "children": []},
+        {"id": "w_in_resale", "name": "二手闲置", "icon": "color_ic_income_second_hand", "children": []},
+        {"id": "w_in_finance", "name": "理财盈利", "icon": "color_ic_income_manager_money", "children": []},
+        {"id": "w_in_winning", "name": "中奖", "icon": "color_ic_income_winning", "children": []},
+        {"id": "w_in_other", "name": "其他", "icon": "color_ic_income_other", "children": []},
+    ],
+}
+
+# 转账/退款等特殊类型图标（记账头部与流水行用）
+WALLET_SPECIAL_ICONS = {
+    "transfer": "color_ic_transfer_accounts",
+    "transfer_in": "color_ic_transfer_in",
+    "transfer_out": "color_ic_transfer_out",
+    "refund": "color_ic_refund",
+    "reimburse": "color_ic_data_baoxiao",
+    "lend": "color_ic_data_jiechu",
+    "borrow": "color_ic_data_jieru",
+    "repay": "color_ic_data_repayment",
+}
+
+# 词条同步：记账分类 ↔ 物品域（数码/衣橱/生活）。账单命中这些分类时，
+# 表单允许关联已有物品或顺手建档；名称/购买日期/购入金额三字段互通。
+WALLET_SYNC_MAP = {
+    "w_shop_digital": "digital",
+    "w_shop_clothing": "clothing",
+    "w_shop_watch": "clothing",
+    "w_shop_beauty": "life",
+    "w_shop_appliance": "life",
+    "w_shop_home": "life",
+}
+
+DEFAULT_WALLET_ACCOUNTS = [
+    {"id": "ac_cash", "name": "现金", "icon": "banknote", "type": "cash", "balance": 0, "note": ""},
+    {"id": "ac_wechat", "name": "微信", "icon": "message-circle", "type": "wallet", "balance": 0, "note": ""},
+    {"id": "ac_alipay", "name": "支付宝", "icon": "smartphone", "type": "wallet", "balance": 0, "note": ""},
+    {"id": "ac_bank", "name": "银行卡", "icon": "credit-card", "type": "bank", "balance": 0, "note": ""},
+    {"id": "ac_other", "name": "其他", "icon": "wallet", "type": "other", "balance": 0, "note": ""},
+]
+
+
+def default_wallet():
+    """新账号/旧账号的钱袋初始数据（用户改过的 cats/accounts 不会被它覆盖）。"""
+    return {
+        "bills": [],
+        "accounts": json.loads(json.dumps(DEFAULT_WALLET_ACCOUNTS)),
+        "cats": json.loads(json.dumps(DEFAULT_WALLET_CATS)),
+        "tags": [],
+        "imports": [],
+        "balances": [],
+    }
+
+
+# v1.1.0 主流记账分类树迁移：首版临时分类 id → 主流记账复刻版 id（账单 catId/subCatId 改写）
+WALLET_CAT_MIGRATION = {
+    # 食品餐饮
+    "w_food_takeout": "w_food_other", "w_food_party": "w_food_treat", "w_food_drink": "w_food_wine",
+    "w_food_snack": "w_food_snack", "w_food_fresh": "w_food_fresh",
+    # 购物消费（id 未变，仅补新子类）
+    # 出行交通
+    "w_tf_public": "w_tf_public", "w_tf_fuel": "w_tf_fuel", "w_tf_park": "w_tf_park",
+    # 居家生活
+    # 休闲娱乐
+    # 文化教育 / 健康医疗 / 宠物：id 未变
+    # 送礼人情
+    "w_gf_present": "w_gf_present",
+    # 其他支出
+    "w_oe_fee": "w_oe_other", "w_oe_loss": "w_oe_loss",
+    # 收入重组（旧「工资」大类+子类 → 主流记账平铺）
+    "w_in_salary": "w_in_wages", "w_in_base": "w_in_wages", "w_in_allowance": "w_in_subsidy",
+    "w_in_interest": "w_in_finance", "w_in_dividend": "w_in_finance", "w_in_sell": "w_in_finance",
+    "w_in_redpacket": "w_in_gift", "w_in_ceremony": "w_in_gift",
+    "w_in_lottery": "w_in_winning", "w_in_misc": "w_in_other",
+    "w_in_other": "w_in_other",
+}
+
+
+def migrate_wallet(wallet_raw):
+    """旧分类 id → 主流记账分类树 id（幂等；catsVersion=2 后不再迁移）。"""
+    if wallet_raw.get("catsVersion", 0) >= 2:
+        wallet_raw["catsVersion"] = 2
+        return wallet_raw
+    for b in wallet_raw.get("bills") or []:
+        if b.get("catId") in WALLET_CAT_MIGRATION:
+            b["catId"] = WALLET_CAT_MIGRATION[b["catId"]]
+        if b.get("subCatId") in WALLET_CAT_MIGRATION:
+            b["subCatId"] = WALLET_CAT_MIGRATION[b["subCatId"]]
+    # 用户自定义分类保留（不动），仅默认树换新
+    wallet_raw["cats"] = json.loads(json.dumps(DEFAULT_WALLET_CATS))
+    wallet_raw["catsVersion"] = 2
+    return wallet_raw
+
+
 DEFAULT_SETTINGS = {
     "idleWarnDays": 60,
     "currency": "¥",
@@ -214,6 +422,8 @@ DEFAULT_SETTINGS = {
         {"id": "composition", "enabled": True, "fixed": True},
         {"id": "monthly", "enabled": True},
         {"id": "budget", "enabled": True},
+        {"id": "wTrend", "enabled": True},
+        {"id": "wCatPie", "enabled": True},
         {"id": "expiry", "enabled": True},
         {"id": "idle", "enabled": True},
         {"id": "cpw", "enabled": True},
@@ -420,6 +630,7 @@ def load_db(acc_id):
     food = _read_json(os.path.join(d, "food.json"), {"schemaVersion": SCHEMA_VERSION, "records": []})
     events = _read_json(os.path.join(d, "events.json"), {"schemaVersion": SCHEMA_VERSION, "events": []})
     settings = _read_json(os.path.join(d, "settings.json"), {})
+    wallet_raw = _read_json(os.path.join(d, "wallet.json"), {})
     items["items"] = migrate_taxonomy(items.get("items", []))
 
     merged_settings = json.loads(json.dumps(DEFAULT_SETTINGS))
@@ -457,6 +668,20 @@ def load_db(acc_id):
     for k in ("digital", "clothing", "life"):
         _apply_cost_overrides(merged_cats.get(k) or [], k)
 
+    # 钱袋：bills/imports/tags 全量归用户；cats/accounts 用户可改，但缺字段时用默认补全
+    wallet_raw = migrate_wallet(wallet_raw)
+    wallet = default_wallet()
+    wallet["bills"] = wallet_raw.get("bills") or []
+    wallet["tags"] = wallet_raw.get("tags") or []
+    wallet["imports"] = wallet_raw.get("imports") or []
+    wallet["balances"] = wallet_raw.get("balances") or []
+    if wallet_raw.get("accounts"):
+        wallet["accounts"] = wallet_raw["accounts"]
+    if wallet_raw.get("cats"):
+        wallet["cats"] = wallet_raw["cats"]
+    # 词条同步映射单一下发，前端不再复制一份（防两处漂移）
+    wallet["syncMap"] = dict(WALLET_SYNC_MAP)
+
     return {
         "schemaVersion": SCHEMA_VERSION,
         "account": acc,
@@ -467,6 +692,7 @@ def load_db(acc_id):
         "events": events.get("events", []),
         "settings": merged_settings,
         "categories": merged_cats,
+        "wallet": wallet,
         "dataRoot": root,
     }
 
@@ -531,6 +757,25 @@ class Handler(BaseHTTPRequestHandler):
             return self._json(result)
         if path == "/api/update/status":
             return self._handle_update_status()
+        # 账单导出 CSV：文件体带 BOM、响应带附件头，浏览器直接下载且 Excel 打开不乱码
+        if path == "/api/export/bills":
+            if bill_export is None:
+                return self._json({"error": "export module unavailable"}, 500)
+            acc_id = self._acc(parsed)
+            with _lock:
+                db = load_db(acc_id)
+            body = bill_export.build_bills_csv(
+                (db.get("wallet") or {}).get("bills") or [],
+                (db.get("wallet") or {}).get("cats") or {}
+            ).encode("utf-8")
+            return self._send(200, body, "text/csv; charset=utf-8",
+                              {"Content-Disposition": 'attachment; filename="lovelife-bills.csv"'})
+        if path == "/api/import/template":
+            if bill_import is None:
+                return self._json({"error": "import module unavailable"}, 500)
+            body = bill_import.build_template_csv().encode("utf-8")
+            return self._send(200, body, "text/csv; charset=utf-8",
+                              {"Content-Disposition": 'attachment; filename="lovelife-bill-template.csv"'})
         if path.startswith("/api/images/"):
             rest = path[len("/api/images/"):]
             return self._send_image(rest)
@@ -558,6 +803,16 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_update_clear_done()
             if path == "/api/desktop-shortcut":
                 return self._handle_desktop_shortcut()
+            if path == "/api/import/parse":
+                if bill_import is None:
+                    return self._json({"error": "import module unavailable"}, 500)
+                payload = json.loads(self._read_body().decode("utf-8"))
+                text = payload.get("text") or ""
+                fname = payload.get("filename") or ""
+                fmt = bill_import.detect_format(fname, text)
+                out = bill_import.parse_bills(fmt, text)
+                out["ok"] = True
+                return self._json(out)
         except Exception as e:
             return self._json({"error": str(e)}, 500)
         return self._json({"error": "not found"}, 404)
@@ -609,6 +864,8 @@ class Handler(BaseHTTPRequestHandler):
                 _write_json(os.path.join(d, "events.json"), {"schemaVersion": SCHEMA_VERSION, "events": data})
             elif target == "settings":
                 _write_json(os.path.join(d, "settings.json"), {"schemaVersion": SCHEMA_VERSION, **data})
+            elif target == "wallet":
+                _write_json(os.path.join(d, "wallet.json"), {"schemaVersion": SCHEMA_VERSION, **data})
             else:
                 return self._json({"error": "bad target"}, 400)
         return self._json({"ok": True})

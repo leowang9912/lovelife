@@ -43,7 +43,9 @@ window.SettingsView = (function () {
         '<button class="btn btn-primary btn-sm" id="btn-move-root">' + UI.icon('folder-sync', 14) + ' 迁移并切换</button>' +
         '<button class="btn btn-ghost btn-sm" id="btn-export">' + UI.icon('download', 14) + ' 导出全量备份包</button>' +
         '<button class="btn btn-ghost btn-sm" id="btn-import">' + UI.icon('upload', 14) + ' 从备份恢复</button>' +
-        '<input type="file" id="import-file" accept=".gz,.tar,.tgz" hidden></div>') +
+        '<input type="file" id="import-file" accept=".gz,.tar,.tgz" hidden></div>' +
+        '<h4 class="detail-sub">账单导入 / 导出（我的钱袋）</h4>' +
+        '<div id="s-bill-io"></div>') +
 
       /* 3️⃣ 消费与统计口径 */
       section('cost', '消费与统计口径',
@@ -59,7 +61,9 @@ window.SettingsView = (function () {
         catTable('digital', '数码（含游戏）', cats.digital) +
         catTable('clothing', '服饰（寿命参考）', cats.clothing) +
         catTable('life', '美妆（寿命参考）', cats.life) +
-        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">' + UI.icon('save', 14) + ' 保存成本模型</button></div>') +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">' + UI.icon('save', 14) + ' 保存成本模型</button></div>' +
+        '<h4 class="detail-sub">记账分类一览</h4>' +
+        (window.WalletView ? window.WalletView.catTreeCompactHTML() : '<p class="muted small">钱袋模块未加载</p>')) +
 
       /* 4️⃣ 使用偏好 */
       section('pref', '使用偏好',
@@ -273,6 +277,9 @@ window.SettingsView = (function () {
         UI.toast('已恢复', 'success'); window.App.refresh();
       } catch (err) { UI.toast(err.message, 'error'); }
     });
+    // 账单导入/导出（钱袋入口统一收在设置）
+    const billIO = root.querySelector('#s-bill-io');
+    if (billIO && window.WalletView) window.WalletView.mountImportUI(billIO);
 
     /* 消费与统计口径 */
     root.querySelector('#btn-save-budget').addEventListener('click', async function () {

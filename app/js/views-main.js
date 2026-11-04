@@ -190,7 +190,11 @@ window.Views = (function () {
     UI.modal({
       title: (id ? '编辑' : '记') + (formKind === 'digital' ? '数码' : formKind === 'life' ? '美妆' : kindLabel(item.kind || formKind)),
       width: 720,
-      bodyHTML: '<form id="item-form">' + UI.itemFormHTML(db, item, formKind) + '</form>',
+      bodyHTML: '<form id="item-form">' + UI.itemFormHTML(db, item, formKind) + '</form>' +
+        // 词条同步：新建物品可顺手记一笔购入账单（账单与物品双向关联）
+        (id ? '' : '<div class="form-section"><div class="form-section-title">' + UI.icon('receipt', 16) +
+          ' 词条同步</div><label class="chip-check"><input type="checkbox" id="item-sync-bill" checked>' +
+          '<span>同时在钱袋记一笔购入账单（金额/日期取本表单，可稍后修改）</span></label></div>'),
       footerHTML: '<button class="btn btn-ghost" data-act="cancel">取消</button><button class="btn btn-primary" data-act="save">保存</button>',
       onMount: function (wrap, close) {
         const form = wrap.querySelector('#item-form');
@@ -218,6 +222,21 @@ window.Views = (function () {
               M.appendUsageLog(data, d2, 'edit', '编辑修正', '');
             }
             await S.saveItem(data);
+            // 词条同步：勾选则生成购入账单并双向关联（金额/日期/名称互通）
+            const syncBox = wrap.querySelector('#item-sync-bill');
+            if (syncBox && syncBox.checked) {
+              const accs = (S.getDB().wallet || {}).accounts || [];
+              const kindMap = { device: 'w_shop_digital', game: 'w_shop_digital', clothing: 'w_shop_clothing', life: 'w_shop_beauty' };
+              await S.saveBill({
+                id: U.uid(), type: 'expense',
+                amount: Math.abs(Number(data.purchasePrice) || 0),
+                date: data.purchaseDate || U.todayStr(), time: '',
+                catId: 'w_shop', subCatId: kindMap[data.kind] || 'w_shop_other',
+                accountId: (accs[0] || {}).id || '', note: data.name || '',
+                tagIds: [], itemId: data.id, source: 'manual',
+                createdAt: new Date().toISOString()
+              });
+            }
             close(); UI.toast('已保存', 'success'); window.App.refresh();
           } catch (e) {
             UI.toast('保存失败：' + e.message, 'error');
@@ -229,6 +248,22 @@ window.Views = (function () {
   }
 
   /* ---------- 详情 ---------- */
+  /* 词条同步（自动）：物品来源账单只读展示（记账自动生成/合并词条，无需手动关联） */
+  function linkedBillsHTML(raw) {
+    const bills = (S.billsOfItem && S.billsOfItem(raw.id)) || [];
+    if (!bills.length) {
+      return '<p class="empty-hint">在钱袋记一笔该分类的账，会自动同步到此处</p>';
+    }
+    return '<div class="muted small" style="margin-bottom:6px">' +
+      (raw.fromBill ? '由钱袋记账自动生成 · ' : '') + '金额/日期与账单互通（金融语义以账单为准）</div>' +
+      bills.map(function (b) {
+        return '<div class="mini-row"><span class="muted">' + U.escapeHtml(b.date) + '</span>' +
+          '<span class="tag">' + (b.type === 'income' ? '收入' : b.type === 'transfer' ? '转账' : '支出') + '</span>' +
+          '<span class="flex1">' + U.escapeHtml(b.note || '') + '</span>' +
+          '<strong>' + U.formatMoney(b.amount) + '</strong></div>';
+      }).join('');
+  }
+
   function openItemDetail(id) {
     const db = S.getDB();
     const raw = db.items.find(function (i) { return i.id === id; });
@@ -239,11 +274,17 @@ window.Views = (function () {
       .sort(function (a, b) { return (b.date || '').localeCompare(a.date || ''); });
     const lifeS = item.kind === 'life' ? M.lifeStatus(item) : null;
 
+    const stopped = item.retiredAt || item.soldDate;
     let costRows =
       row('购买价格', U.formatMoney(item.purchasePrice)) +
-      row('持有天数', cost.heldDays + ' 天') +
+      row(stopped ? '共使用' : '已使用', cost.heldDays + ' 天') +
       row('总投入', U.formatMoney(cost.invested)) +
-      row('日均成本', U.formatCost(cost.dailyCost) + ' / 天');
+      row('日均成本', U.formatCost(cost.dailyCost) + ' / 天' + (stopped ? '（已停用 · 固定值）' : ''));
+    // 使用周期（v1.1.0）：非在用物品显示截止日，成本类指标已冻结
+    if (item.retiredAt || item.soldDate) {
+      costRows += row('使用周期', U.cnDate(item.purchaseDate) + ' ~ ' + U.cnDate(item.retiredAt || item.soldDate)) +
+        row('成本状态', '已停用 · 固定值');
+    }
     if (item.kind === 'clothing') {
       costRows += row('穿着次数', item.wearCount + ' 次（自动 ' + item.autoWear + ' + 手动 ' + item.manualWear + '）') +
         row('每次穿着成本', cost.costPerUse != null ? U.formatCost(cost.costPerUse) : '尚未穿着');
@@ -297,6 +338,8 @@ window.Views = (function () {
           return '<div class="mini-row"><span class="muted">' + U.escapeHtml(e.date) + '</span>' +
             '<span class="tag">' + U.escapeHtml(e.type) + '</span><span class="flex1">' + U.escapeHtml(e.note || '') + '</span></div>';
         }).join('') : '<p class="empty-hint">暂无流水</p>') + '</div>' +
+        '<h4 class="detail-sub">关联账单（词条同步）</h4><div id="linked-bills">' +
+        linkedBillsHTML(raw) + '</div>' +
         '</div><div class="detail-side">' +
         '<h4 class="detail-sub">成本分析</h4><div class="detail-kv">' + costRows + '</div>' +
         '<div class="detail-actions">' +

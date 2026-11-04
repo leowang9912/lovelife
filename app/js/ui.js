@@ -327,7 +327,7 @@ window.UI = (function () {
     { key: 'daily', label: '单日使用成本', kinds: ['digital'], defDir: -1,
       dirs: ['低→高', '高→低'],
       cmp: cmpNumGet(function (i) { return i.cost && i.cost.dailyCost; }, 1) },
-    { key: 'held', label: '已持有天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+    { key: 'held', label: '使用天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
       dirs: ['短→长', '长→短'],
       cmp: cmpNumGet(function (i) { return i.cost && i.cost.heldDays; }, 1) },
     { key: 'idle', label: '吃灰天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
@@ -526,10 +526,14 @@ window.UI = (function () {
       (item.purchasePrice !== null && item.purchasePrice !== undefined ? item.purchasePrice : '') + '"></label>' +
       '<label><span class="f-label">购入渠道</span><input name="channel" value="' + U.escapeHtml(item.channel || '') + '" placeholder="京东/闲鱼/线下…"></label>' +
       '<label><span class="f-label">存放位置</span><input name="storageLocation" value="' + U.escapeHtml(item.storageLocation || '') + '" placeholder="如：书房抽屉2"></label>' +
-      '<label><span class="f-label">状态</span><select name="status">' +
+      '<label><span class="f-label">状态</span><select name="status" id="f-status">' +
       STATUS_OPTS.map(function (s) {
         return '<option value="' + s[0] + '"' + ((item.status || 'in_use') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select></label>' +
+      // 使用周期截止（v1.1.0）：非在用时补充停用时间，日均成本等使用类指标冻结在该日
+      '<label id="f-retired-row"' + ((item.status || 'in_use') === 'in_use' ? ' style="display:none"' : '') + '>' +
+      '<span class="f-label">停用时间</span><input type="date" name="retiredAt" value="' +
+      U.escapeHtml(item.retiredAt || U.todayStr()) + '"></label>' +
       '<label><span class="f-label">品牌</span><input name="brand" value="' + U.escapeHtml(item.brand || '') + '"></label>' +
       '<label class="f-full"><span class="f-label">备注</span><input name="notes" value="' + U.escapeHtml(item.notes || '') + '"></label>' +
       '<div class="f-full"><span class="f-label">标签（可多选）</span><div class="chip-row" id="tag-chips">' +
@@ -637,6 +641,19 @@ window.UI = (function () {
     }
     sel.addEventListener('change', update);
     if (sub) sub.addEventListener('change', update);
+    // 状态联动（v1.1.0）：非在用显示「停用时间」（默认今天），使用类指标从该日起冻结
+    const statusSel = formEl.querySelector('#f-status');
+    const retiredRow = formEl.querySelector('#f-retired-row');
+    if (statusSel && retiredRow) {
+      const retiredInput = retiredRow.querySelector('[name=retiredAt]');
+      const syncRetired = function () {
+        const off = statusSel.value !== 'in_use';
+        retiredRow.style.display = off ? '' : 'none';
+        if (off && retiredInput && !retiredInput.value) retiredInput.value = U.todayStr();
+      };
+      statusSel.addEventListener('change', syncRetired);
+      syncRetired();
+    }
     update();
   }
 
@@ -648,6 +665,12 @@ window.UI = (function () {
     item.subCategoryId = fd.get('subCategoryId') || '';
     item.name = (fd.get('name') || '').trim();
     item.status = fd.get('status') || 'in_use';
+    // 使用周期截止：非在用记停用时间（表单补充，默认今天）；在用则清除恢复计时
+    if (item.status !== 'in_use') {
+      item.retiredAt = fd.get('retiredAt') || U.todayStr();
+    } else {
+      delete item.retiredAt;
+    }
     item.purchaseDate = fd.get('purchaseDate') || '';
     const pp = fd.get('purchasePrice');
     item.purchasePrice = pp === '' || pp === null ? null : Number(pp);
@@ -847,8 +870,14 @@ window.UI = (function () {
       case 'uses': return ((item.kind === 'clothing' ? item.wearCount : item.useCount) || 0) + ' 次';
       case 'cpw': return item.cost && item.cost.costPerUse != null ? U.formatCost(item.cost.costPerUse) + ' / 次' : '暂无使用记录';
       case 'daily': return item.cost && item.cost.dailyCost != null ? U.formatCost(item.cost.dailyCost) + ' / 天' : '';
-      case 'held': return item.cost && item.cost.heldDays != null ? '已持有 ' + item.cost.heldDays + ' 天' : '';
+      case 'held': {
+        if (!item.cost || item.cost.heldDays == null) return '';
+        const stopped = item.retiredAt || item.soldDate;
+        return (stopped ? '共使用 ' : '已使用 ') + item.cost.heldDays + ' 天';
+      }
       case 'idle': {
+        // 已停用显示「已停用」（排序仍按数值参与）
+        if (item.retiredAt || item.soldDate) return '已停用';
         const d = window.Models.idleDaysOf(db, item);
         return d <= 1 ? '刚用过' : '吃灰 ' + d + ' 天';
       }

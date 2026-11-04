@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.0.9";
+  const FRONTEND_VERSION = "1.1.0";
 
   let current = 'plan';
   let booted = false;
@@ -15,6 +15,7 @@ window.App = (function () {
     { id: 'digital', label: '我的数码', icon: 'gamepad-2' },
     { id: 'clothing', label: '我的衣橱', icon: 'shirt' },
     { id: 'life', label: '我的生活', icon: 'heart' },
+    { id: 'wallet', label: '我的钱袋', icon: 'wallet' },
     { id: 'outfits', label: '穿搭日历', icon: 'calendar-days' },
     { id: 'food', label: '美食日历', icon: 'utensils' },
     { id: 'settings', label: '设置', icon: 'settings' }
@@ -160,6 +161,7 @@ window.App = (function () {
     else if (current === 'digital') window.Views.items(main, 'digital');
     else if (current === 'clothing') window.Views.items(main, 'clothing');
     else if (current === 'life') window.LifeView.render(main);
+    else if (current === 'wallet') window.WalletView.render(main);
     else if (current === 'outfits') window.Views.outfits(main);
     else if (current === 'food') window.FoodView.render(main);
     else if (current === 'settings') window.SettingsView.render(main);
