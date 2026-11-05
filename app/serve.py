@@ -48,7 +48,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.1.0"
+SERVER_BUILD = "1.1.1"
 
 _lock = threading.Lock()
 
@@ -392,7 +392,9 @@ WALLET_CAT_MIGRATION = {
 
 
 def migrate_wallet(wallet_raw):
-    """旧分类 id → 主流记账分类树 id（幂等；catsVersion=2 后不再迁移）。"""
+    """旧分类 id → 新分类树 id（幂等；catsVersion=2 后不再迁移）。
+    v1.2.0 修正：用户自定义分类**保留**（旧版整树覆盖导致自定义丢失、账单分类悬空），
+    迁移只做两件事：①账单 catId/subCatId 改写；②默认树换新，用户自定义节点挂回。"""
     if wallet_raw.get("catsVersion", 0) >= 2:
         wallet_raw["catsVersion"] = 2
         return wallet_raw
@@ -401,8 +403,32 @@ def migrate_wallet(wallet_raw):
             b["catId"] = WALLET_CAT_MIGRATION[b["catId"]]
         if b.get("subCatId") in WALLET_CAT_MIGRATION:
             b["subCatId"] = WALLET_CAT_MIGRATION[b["subCatId"]]
-    # 用户自定义分类保留（不动），仅默认树换新
-    wallet_raw["cats"] = json.loads(json.dumps(DEFAULT_WALLET_CATS))
+
+    new_cats = json.loads(json.dumps(DEFAULT_WALLET_CATS))
+    default_ids = set()
+    default_sub_ids = set()
+    for kind_nodes in new_cats.values():
+        for c in kind_nodes:
+            default_ids.add(c.get("id"))
+            for ch in c.get("children") or []:
+                default_sub_ids.add(ch.get("id"))
+    old_cats = wallet_raw.get("cats") or {}
+    for kind in ("expense", "income"):
+        for c in old_cats.get(kind) or []:
+            if not isinstance(c, dict):
+                continue
+            if c.get("id") not in default_ids:
+                new_cats[kind].append(c)  # 用户自定义一级分类：原样保留
+                continue
+            # 默认节点下可能挂着用户自定义二级：挂回新树对应父节点
+            custom_children = [ch for ch in (c.get("children") or [])
+                               if isinstance(ch, dict) and ch.get("id") not in default_sub_ids]
+            if custom_children:
+                for nc in new_cats[kind]:
+                    if nc.get("id") == c.get("id"):
+                        nc.setdefault("children", []).extend(custom_children)
+                        break
+    wallet_raw["cats"] = new_cats
     wallet_raw["catsVersion"] = 2
     return wallet_raw
 
@@ -541,7 +567,7 @@ CATEGORY_MAP = {
     "skin": ("life", "skin", ""), "skin_clean": ("life", "skin", "sk_clean"),
     "skin_toner": ("life", "skin", "sk_toner"), "skin_serum": ("life", "skin", "sk_serum"),
     "skin_lotion": ("life", "skin", "sk_lotion"), "skin_cream": ("life", "skin", "sk_cream"),
-    "skin_eye": ("life", "skin", "sk_cream"), "skin_sun": ("life", "skin", "sk_sun"),
+    "skin_eye": ("life", "skin", "sk_eye"), "skin_sun": ("life", "skin", "sk_sun"),
     "skin_mask": ("life", "skin", "sk_mask"), "skin_exfol": ("life", "skin", "sk_other"),
     "makeup": ("life", "makeup", ""), "mk_base": ("life", "makeup", "mk_foundation"),
     "mk_conceal": ("life", "makeup", "mk_foundation"), "mk_powder": ("life", "makeup", "mk_powder"),
@@ -631,6 +657,11 @@ def load_db(acc_id):
     events = _read_json(os.path.join(d, "events.json"), {"schemaVersion": SCHEMA_VERSION, "events": []})
     settings = _read_json(os.path.join(d, "settings.json"), {})
     wallet_raw = _read_json(os.path.join(d, "wallet.json"), {})
+    # 读取侧类型防御：字段被手工改坏时降级为空集合，不让整站 500
+    for _obj, _key, _fallback in ((items, "items", []), (outfits, "outfits", []),
+                                  (food, "records", []), (events, "events", [])):
+        if not isinstance(_obj.get(_key), list):
+            _obj[_key] = _fallback
     items["items"] = migrate_taxonomy(items.get("items", []))
 
     merged_settings = json.loads(json.dumps(DEFAULT_SETTINGS))
@@ -758,15 +789,27 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/update/status":
             return self._handle_update_status()
         # 账单导出 CSV：文件体带 BOM、响应带附件头，浏览器直接下载且 Excel 打开不乱码
+        # 可选筛选 query：from/to（YYYY-MM-DD 含边界）、catId（匹配一级或二级）、type（expense/income/transfer）
         if path == "/api/export/bills":
             if bill_export is None:
                 return self._json({"error": "export module unavailable"}, 500)
+            qs = urllib.parse.parse_qs(parsed.query)
             acc_id = self._acc(parsed)
             with _lock:
                 db = load_db(acc_id)
+            wallet = db.get("wallet") or {}
+            bills = bill_export.filter_bills(
+                wallet.get("bills") or [],
+                date_from=(qs.get("from") or [""])[0],
+                date_to=(qs.get("to") or [""])[0],
+                cat_id=(qs.get("catId") or [""])[0],
+                bill_type=(qs.get("type") or [""])[0],
+            )
             body = bill_export.build_bills_csv(
-                (db.get("wallet") or {}).get("bills") or [],
-                (db.get("wallet") or {}).get("cats") or {}
+                bills,
+                wallet.get("cats") or {},
+                accounts=wallet.get("accounts") or [],
+                tags=wallet.get("tags") or []
             ).encode("utf-8")
             return self._send(200, body, "text/csv; charset=utf-8",
                               {"Content-Disposition": 'attachment; filename="lovelife-bills.csv"'})
@@ -807,10 +850,21 @@ class Handler(BaseHTTPRequestHandler):
                 if bill_import is None:
                     return self._json({"error": "import module unavailable"}, 500)
                 payload = json.loads(self._read_body().decode("utf-8"))
-                text = payload.get("text") or ""
                 fname = payload.get("filename") or ""
-                fmt = bill_import.detect_format(fname, text)
-                out = bill_import.parse_bills(fmt, text)
+                raw = payload.get("text")
+                if raw is None:
+                    raw = payload.get("content") or ""
+                # parse_any：str/bytes 皆收（bytes 走 decode_bytes 兼容 GBK），fmt 按文件名探测
+                out = bill_import.parse_any(fname, raw)
+                # 与当前账号已有账单去重（含文件内互查）：逐条带 dup/matchNote，dups 为重复笔数
+                acc_id = payload.get("acc") or self._acc(parsed)
+                with _lock:
+                    db = load_db(acc_id)
+                plan = bill_import.build_import_plan(
+                    out.get("bills") or [],
+                    ((db.get("wallet") or {}).get("bills") or []))
+                out["bills"] = plan["bills"]
+                out["dups"] = plan["dups"]
                 out["ok"] = True
                 return self._json(out)
         except Exception as e:
@@ -848,6 +902,11 @@ class Handler(BaseHTTPRequestHandler):
         acc_id = payload.get("acc") or read_app_config().get("lastAccountId") or "me"
         target = payload.get("target")
         data = payload.get("data")
+        # 类型防御：脏数据不让进盘（否则下次加载 /api/db 直接 500 全站不可用）
+        if target in ("items", "outfits", "food", "events") and not isinstance(data, list):
+            return self._json({"error": "data must be a list"}, 400)
+        if target in ("settings", "wallet") and not isinstance(data, dict):
+            return self._json({"error": "data must be an object"}, 400)
         root = data_root()
         accounts = migrate_old_layout(root)
         if not any(a["id"] == acc_id for a in accounts):
@@ -899,7 +958,8 @@ class Handler(BaseHTTPRequestHandler):
             fm = re.search(r'filename="([^"]*)"', header_blob.decode("utf-8", "ignore"))
             if fm and "." in fm.group(1):
                 ext = os.path.splitext(fm.group(1))[1].lower() or ext
-            name = "img-%d-%04x%s" % (int(time.time() * 1000), os.getpid() & 0xFFFF, ext)
+            name = "img-%d-%04x%04x%s" % (int(time.time() * 1000), os.getpid() & 0xFFFF,
+                                          int.from_bytes(os.urandom(2), "little"), ext)
             with open(os.path.join(d, "images", name), "wb") as f:
                 f.write(content)
             return self._json({"ok": True, "path": "images/" + name})
@@ -978,7 +1038,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._json({"error": "path required"}, 400)
         new_root = os.path.abspath(new_root)
         cfg = read_app_config()
-        old_root = data_root()
+        old_root = os.path.abspath(data_root())
+        # 防护：新根位于旧根内部时 copytree 会递归复制自身直到磁盘写满，直接拒绝
+        if new_root == old_root or new_root.startswith(old_root + os.sep):
+            return self._json({"error": "新目录不能位于当前数据目录内部"}, 400)
         os.makedirs(new_root, exist_ok=True)
         # 迁移全程持锁：防迁移期间的保存写进旧根目录后丢失
         with _lock:

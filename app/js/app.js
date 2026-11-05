@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.1.0";
+  const FRONTEND_VERSION = "1.1.1";
 
   let current = 'plan';
   let booted = false;
@@ -24,6 +24,15 @@ window.App = (function () {
   const AVATARS = ['😊', '😎', '🐱', '🐶', '🦊', '🐼', '🦁', '🌟', '🌙', '🍀',
     '🔥', '💎', '🎨', '🎧', '🍰', '🚀', '🌈', '🦋', '🌊', '🍑',
     '⚽', '🎮', '📚', '☕'];
+
+  // 侧栏导航顺序：settings.navOrder 可在设置中排序；未登记的项按默认顺序排在后
+  function navOrdered(db) {
+    const order = (db && db.settings && db.settings.navOrder) || [];
+    return NAV.slice().sort(function (a, b) {
+      const ia = order.indexOf(a.id), ib = order.indexOf(b.id);
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+    });
+  }
 
   function go(id) {
     current = id;
@@ -140,7 +149,7 @@ window.App = (function () {
       '<div><div class="brand-name">人生管家</div><div class="brand-sub">' +
       U.escapeHtml((db.account && db.account.icon) || '') + ' ' + U.escapeHtml((db.account && db.account.name) || '') +
       '</div></div></div>' +
-      '<nav class="nav">' + NAV.map(function (n) {
+      '<nav class="nav">' + navOrdered(db).map(function (n) {
         return '<a class="nav-item' + (current === n.id ? ' active' : '') + '" data-nav="' + n.id + '">' +
           '<span class="nav-icon">' + window.UI.icon(n.icon, 20) + '</span><span>' + n.label + '</span></a>';
       }).join('') + '</nav>' +
@@ -233,9 +242,18 @@ window.App = (function () {
           results.push({ type: '美食', name: (f.name || f.foodType) + ' · ' + f.date, go: 'food' });
         }
       });
+      // 钱袋账单：备注/分类名/金额可搜，命中直达流水（v1.2.0）
+      const wb = (db.wallet || {}).bills || [];
+      wb.forEach(function (b) {
+        const catName = window.WalletView ? '' : ''; // 分类名走备注/金额匹配，避免重依赖
+        const hay = ((b.note || '') + ' ' + (b.accountName || '') + ' ' + String(b.amount || '')).toLowerCase();
+        if (hay.indexOf(q) >= 0) {
+          results.push({ type: '账单', name: (b.note || '账单') + ' · ' + b.date + ' · ¥' + (b.amount || 0), go: 'wallet', billDate: b.date });
+        }
+      });
       box.innerHTML = results.length
-        ? results.slice(0, 12).map(function (r) {
-          return '<div class="sr-row" data-go="' + r.go + '" data-id="' + (r.id || '') + '">' +
+        ? results.slice(0, 12).map(function (r, ri) {
+          return '<div class="sr-row" data-go="' + r.go + '" data-id="' + (r.id || '') + '" data-ri="' + ri + '">' +
             '<span class="tag">' + r.type + '</span><span class="flex1">' + U.escapeHtml(r.name) + '</span></div>';
         }).join('')
         : '<div class="sr-row"><span class="muted">没有找到相关内容</span></div>';
@@ -244,8 +262,13 @@ window.App = (function () {
         row.addEventListener('click', function () {
           const go = row.getAttribute('data-go');
           const id = row.getAttribute('data-id');
+          const r = results[Number(row.getAttribute('data-ri'))] || {};
           box.classList.remove('show');
           input.value = '';
+          if (go === 'wallet' && r.billDate && window.WalletView && window.WalletView.jumpTo) {
+            window.WalletView.jumpTo({ date: r.billDate }); // 账单命中直达流水并定位日期
+            return;
+          }
           goPage(go);
           if (id) setTimeout(function () { window.Views.openItemDetail(id); }, 120);
         });
@@ -356,6 +379,6 @@ window.App = (function () {
     go: go, refresh: refresh, render: render,
     showAccountPicker: showAccountPicker,
     avatarPickerHTML: avatarPickerHTML, bindAvatarPicker: bindAvatarPicker,
-    AVATARS: AVATARS, FRONTEND_VERSION: FRONTEND_VERSION
+    AVATARS: AVATARS, FRONTEND_VERSION: FRONTEND_VERSION, NAV: NAV
   };
 })();

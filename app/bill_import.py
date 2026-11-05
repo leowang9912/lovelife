@@ -1,16 +1,17 @@
 # -*- coding: utf-8 -*-
-"""账单导入解析：多格式探测 + 解析 + 去重计划
+"""账单导入解析：多格式探测 + 解析 + 去重计划 + 分类归类
 
-serve.py 调用链：decode_bytes → detect_format → parse_bills → build_import_plan。
+serve.py 调用链：parse_any（decode_bytes → detect_format → parse_bills）→ build_import_plan。
 纯解析模块，不碰磁盘/网络，便于单测。
 """
 import csv
 import io
 import json
+import math
 import re
 from datetime import datetime, date
 
-SUPPORTED_FORMATS = ("alipay_csv", "wechat_csv", "generic_csv", "app_json", "unknown")
+SUPPORTED_FORMATS = ("alipay_csv", "wechat_csv", "generic_csv", "app_json", "pasted_text", "unknown")
 
 # 微信「当前状态」成功态（导出里还有红包/零钱通等变体，放行常见几种）
 _WECHAT_OK_STATUS = {
@@ -25,7 +26,9 @@ _HEADER_KEYWORDS = [
     ("cat", "一级分类"), ("cat", "分类"), ("cat", "类别"), ("cat", "category"),
     ("amount", "金额"), ("amount", "money"), ("amount", "price"),
     ("account", "支付方式"), ("account", "账户"), ("account", "account"),
+    ("toaccount", "转入账户"), ("toaccount", "对方账户"), ("toaccount", "toaccount"),
     ("note", "备注"), ("note", "说明"), ("note", "摘要"), ("note", "remark"), ("note", "note"),
+    ("tagsname", "标签名称"), ("tagsname", "tagnames"),
     ("tags", "标签"), ("tags", "tag"),
     ("date", "date"), ("type", "type"),
 ]
@@ -47,7 +50,9 @@ _AMOUNT_KEYS = ("amount", "money", "price", "amt", "金额")
 _TYPE_KEYS = ("type", "billType", "direction", "收支", "类型")
 _CAT_KEYS = ("category", "catName", "categoryName", "cate", "分类", "一级分类")
 _SUBCAT_KEYS = ("subCategory", "childCategory", "subCatName", "二级分类", "子分类")
-_ACCOUNT_KEYS = ("account", "accountName", "payAccount", "payWay", "账户", "支付方式")
+_ACCOUNT_KEYS = ("accountName", "account", "payAccount", "payWay", "账户", "支付方式")
+_TO_ACCOUNT_KEYS = ("toAccountName", "toAccount", "toAccountNickName", "transferAccount", "targetAccount", "转入账户", "对方账户")
+_TAGSNAME_KEYS = ("tagsName", "tagNames", "tagList", "tags", "标签")
 _NOTE_KEYS = ("remark", "note", "description", "desc", "summary", "备注", "说明")
 # 递归找账单数组时优先看的键
 _LIST_KEYS = ("bills", "records", "list", "data", "items", "账单", "recordList", "billList", "details", "detail")
@@ -146,6 +151,7 @@ def _norm_amount(value):
     """金额归一 → (正 float 两位小数, 原值是否为负)；无法解析 (None, False)。
 
     去 ¥/￥/元/千分位；会计括号负数按负处理。方向由 type 表达，这里只出正数。
+    非有限数（NaN/Inf）一律拒收：它们会让 json 序列化出非法的 NaN，前端解析崩。
     """
     if value is None or isinstance(value, bool):
         return None, False
@@ -163,8 +169,25 @@ def _norm_amount(value):
             f = float(s)
         except ValueError:
             return None, False
+    if not math.isfinite(f):
+        return None, False
     neg = f < 0
     return round(abs(f), 2), neg
+
+
+# 金额非法跳过行时的提示：NaN/Inf 单独注明原因
+_NONFINITE_TOKENS = {"nan", "inf", "+inf", "-inf", "infinity", "+infinity", "-infinity", "∞", "-∞"}
+
+
+def _amount_skip_reason(value):
+    """金额无法解析时的 skipped 原因：NaN/Inf 单独注明，其余注明原值。"""
+    s = str(value if value is not None else "").strip()
+    probe = s.lower()
+    for ch in ("¥", "￥", "元", ",", " ", "\t"):
+        probe = probe.replace(ch, "")
+    if probe in _NONFINITE_TOKENS:
+        return "金额为 NaN/Inf，已跳过: %s" % s
+    return "金额无效: %s" % s
 
 
 def _norm_type(value, warnings):
@@ -251,6 +274,8 @@ def detect_format(filename: str, text: str) -> str:
         return "app_json"
     if _looks_like_generic_csv(t):
         return "generic_csv"
+    if _looks_like_pasted_text(t):
+        return "pasted_text"
     return "unknown"
 
 
@@ -337,7 +362,7 @@ def _parse_alipay(text):
             continue
         amt, neg = _norm_amount(_at(cells_r, i_amt))
         if amt is None:
-            res["skipped"].append({"raw": raw, "reason": "金额无效: %s" % _at(cells_r, i_amt)})
+            res["skipped"].append({"raw": raw, "reason": _amount_skip_reason(_at(cells_r, i_amt))})
             continue
         if neg:  # 支付宝金额一般不为负，出现就修正方向
             t = _flip_type(t)
@@ -405,7 +430,7 @@ def _parse_wechat(text):
             continue
         amt, neg = _norm_amount(_at(cells_r, i_amt))
         if amt is None:
-            res["skipped"].append({"raw": raw, "reason": "金额无效: %s" % _at(cells_r, i_amt)})
+            res["skipped"].append({"raw": raw, "reason": _amount_skip_reason(_at(cells_r, i_amt))})
             continue
         if neg:
             t = _flip_type(t)
@@ -508,7 +533,7 @@ def _parse_generic(text):
             continue
         amt, neg = _norm_amount(_at(cells_r, cols["amount"]))
         if amt is None:
-            res["skipped"].append({"raw": raw, "reason": "金额无效: %s" % _at(cells_r, cols["amount"])})
+            res["skipped"].append({"raw": raw, "reason": _amount_skip_reason(_at(cells_r, cols["amount"]))})
             continue
         t = None
         if "type" in cols:
@@ -521,8 +546,11 @@ def _parse_generic(text):
             t = _flip_type(t)
             res["warnings"].append("金额为负已转正并修正类型: %s" % raw)
         tags = ""
-        if "tags" in cols:
-            raw_tags = _at(cells_r, cols["tags"])
+        tag_col = cols.get("tagsname")
+        if tag_col is None:
+            tag_col = cols.get("tags")
+        if tag_col is not None:
+            raw_tags = _at(cells_r, tag_col)
             if raw_tags:
                 # 标签支持 | 或 , 分隔多个；CSV 里的逗号已被引号处理
                 parts = [p.strip() for p in re.split(r"[|,，]", raw_tags) if p.strip()]
@@ -535,10 +563,136 @@ def _parse_generic(text):
             "note": _at(cells_r, cols.get("note")),
             "raw": raw,
         }
+        to_name = ""
+        if "toaccount" in cols:
+            to_name = _at(cells_r, cols["toaccount"])
+        if to_name:
+            bill["toAccountName"] = to_name  # 转入账户名称直出
         if tags:
             bill["tags"] = tags  # 额外字段：模板的标签列，不挤占主字段
+            bill["tagsName"] = [p for p in tags.split("|") if p]  # 名称列表直出
         res["bills"].append(bill)
     return res
+
+
+# ---------------- 多行粘贴文本（宽松解析） ----------------
+# 每行形如「2026-11-01 支出 23.5 午饭」或「午饭 23.5」（缺日期用今天），空白分词
+_PASTED_TYPE_TOKENS = {
+    "支出": "expense", "收入": "income", "转账": "transfer",
+    "支": "expense", "收": "income", "转": "transfer",
+    "花": "expense", "赚": "income",
+    "-": "expense", "+": "income", "－": "expense", "＋": "income",
+}
+_PASTED_TIME_RE = re.compile(r"^\d{1,2}:\d{2}$")
+_PASTED_DATE_SHAPE_RE = re.compile(r"^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}$")
+# 纯数字 token（可带 ¥/元）才算金额；千分位必须 3 位一组，防「1,2」被当成 12
+_PASTED_NUM_RE = re.compile(r"[+-]?\d{1,3}(?:,\d{3})+(?:\.\d{1,2})?|[+-]?\d+(?:\.\d{1,2})?")
+
+
+def _pasted_amount(tok):
+    """宽松金额 token → float；不是纯数字形态返回 None。"""
+    s = str(tok).strip()
+    for ch in ("¥", "￥", "元", "块"):
+        s = s.replace(ch, "")
+    if not s or not _PASTED_NUM_RE.fullmatch(s):
+        return None
+    try:
+        f = float(s.replace(",", ""))
+    except ValueError:
+        return None
+    if not math.isfinite(f):
+        return None
+    return f
+
+
+def _parse_pasted_line(line, warnings):
+    """粘贴单行 → 账单 dict；缺金额/日期非法返回 None。
+
+    词性判定顺序：金额 → 类型 → 时间 → 日期 → 备注（数字优先，防「6.5」被当日期）。
+    首个金额/日期/时间/类型生效，多余的落备注。
+    """
+    tokens = [tk for tk in re.split(r"\s+", line.strip()) if tk]
+    if not tokens:
+        return None
+    date_s = time_s = None
+    t = None
+    amt = None
+    neg = False
+    bad_date = None
+    note_parts = []
+    for tk in tokens:
+        if amt is None:
+            a = _pasted_amount(tk)
+            if a is not None:
+                neg = a < 0
+                amt = round(abs(a), 2)
+                continue
+        if t is None and tk in _PASTED_TYPE_TOKENS:
+            t = _PASTED_TYPE_TOKENS[tk]
+            continue
+        if time_s is None and _PASTED_TIME_RE.match(tk):
+            try:
+                hh, mm = tk.split(":")
+                time_s = "%02d:%02d" % (int(hh), int(mm))
+                continue
+            except ValueError:
+                pass
+        if date_s is None and bad_date is None and _PASTED_DATE_SHAPE_RE.match(tk):
+            dt = _norm_dt(tk)
+            if dt is None:
+                bad_date = tk  # 长得像日期但非法（如 2026-13-40）：整行跳过
+                continue
+            date_s, extra_time = dt[0], dt[1]
+            if time_s is None and extra_time:
+                time_s = extra_time
+            continue
+        note_parts.append(tk)
+    if bad_date is not None:
+        return {"__skip__": "日期无效: %s" % bad_date}
+    if amt is None:
+        return None
+    if date_s is None:
+        date_s = date.today().strftime("%Y-%m-%d")  # 缺日期用今天
+    if t is None:
+        t = "expense"  # 缺类型按支出
+    if neg:
+        t = _flip_type(t)
+        warnings.append("金额为负已转正并修正类型: %s" % line[:160])
+    return {
+        "date": date_s, "time": time_s or "", "type": t, "amount": amt,
+        "catName": "", "subCatName": "", "accountName": "",
+        "note": " ".join(note_parts), "raw": _raw_summary([line]),
+    }
+
+
+def _parse_pasted(text):
+    """多行粘贴文本 → 账单；解析不了的行进 skipped（含原因），整体不抛。"""
+    res = {"bills": [], "skipped": [], "warnings": []}
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        bill = _parse_pasted_line(s, res["warnings"])
+        if bill is None:
+            res["skipped"].append({"raw": _raw_summary([s]), "reason": "无法解析该行（缺金额）"})
+        elif "__skip__" in bill:
+            res["skipped"].append({"raw": _raw_summary([s]), "reason": bill["__skip__"]})
+        else:
+            res["bills"].append(bill)
+    return res
+
+
+def _looks_like_pasted_text(text):
+    """启发式：多数非空行能拆出金额 token，即认为是粘贴文本（非 CSV）。"""
+    lines = [ln.strip() for ln in (text or "").splitlines() if ln.strip()][:50]
+    if not lines:
+        return False
+    ok = 0
+    for ln in lines:
+        tokens = [tk for tk in re.split(r"\s+", ln) if tk]
+        if any(_pasted_amount(tk) is not None for tk in tokens):
+            ok += 1
+    return ok >= 1 and ok >= (len(lines) + 1) // 2
 
 
 # ---------------- 其他记账 App 的 JSON ----------------
@@ -567,6 +721,24 @@ def _name_of(v):
     if isinstance(v, list):
         return "|".join(filter(None, (_name_of(x) for x in v)))
     return str(v).strip()
+
+
+def _names_list(v):
+    """标签值统一成名称列表：列表逐项取名；字符串支持 | / ，分隔多个。"""
+    if v is None:
+        return []
+    if isinstance(v, (list, tuple)):
+        out = []
+        for x in v:
+            s = _name_of(x)
+            if s:
+                out.append(s)
+        return out
+    s = _name_of(v)
+    if not s:
+        return []
+    parts = [p.strip() for p in re.split(r"[|,，]", s) if p.strip()]
+    return list(dict.fromkeys(parts))
 
 
 def _has_key(d, keys):
@@ -625,7 +797,7 @@ def _parse_app_json(text):
         av = _pick(rec, _AMOUNT_KEYS)
         amt, neg = _norm_amount(av)
         if amt is None:
-            res["skipped"].append({"raw": raw, "reason": "金额无效: %s" % av})
+            res["skipped"].append({"raw": raw, "reason": _amount_skip_reason(av)})
             continue
         tv = _pick(rec, _TYPE_KEYS)
         t = _norm_type(tv, res["warnings"])
@@ -636,22 +808,35 @@ def _parse_app_json(text):
         if neg:
             t = _flip_type(t)
             res["warnings"].append("金额为负已转正并修正类型: %s" % raw)
-        res["bills"].append({
+        bill = {
             "date": dt[0], "time": dt[1], "type": t, "amount": amt,
             "catName": _name_of(_pick(rec, _CAT_KEYS)),
             "subCatName": _name_of(_pick(rec, _SUBCAT_KEYS)),
             "accountName": _name_of(_pick(rec, _ACCOUNT_KEYS)),
             "note": _name_of(_pick(rec, _NOTE_KEYS)),
             "raw": raw,
-        })
+        }
+        to_name = _name_of(_pick(rec, _TO_ACCOUNT_KEYS))
+        if to_name:
+            bill["toAccountName"] = to_name  # 转入账户名称直出
+        tags_list = _names_list(_pick(rec, _TAGSNAME_KEYS))
+        if tags_list:
+            bill["tagsName"] = tags_list  # 标签名称直出
+        res["bills"].append(bill)
     return res
 
 
 # ---------------- 公共接口 ----------------
+_ENCODING_WARN = "文件可能为 GBK 编码，请另存为 UTF-8 后重试或使用新版前端"
+
+
 def parse_bills(fmt: str, text: str) -> dict:
     """解析为统一账单结构，失败行进 skipped，整体不抛异常。
 
-    返回 {"bills": [...], "skipped": [...], "warnings": [...], "format": fmt}。
+    返回 {"bills": [...], "skipped": [...], "warnings": [...], "format": fmt}；
+    文本含替换符（\ufffd，多为 GBK 被按 UTF-8 硬解）时附加
+    "suspect_encoding": True 并在 warnings 提示转存 UTF-8。
+    金额出口保证有限数（NaN/Inf 行进 skipped 注明原因），分类为空时按关键词猜默认值。
     """
     fmt = fmt if fmt in SUPPORTED_FORMATS else "unknown"
     t = text if isinstance(text, str) else decode_bytes(text or b"")
@@ -664,6 +849,8 @@ def parse_bills(fmt: str, text: str) -> dict:
             res = _parse_wechat(t)
         elif fmt == "app_json":
             res = _parse_app_json(t)
+        elif fmt == "pasted_text":
+            res = _parse_pasted(t)
         elif fmt == "generic_csv":
             res = _parse_generic(t)
         else:  # unknown：通用 CSV 兜底
@@ -674,7 +861,42 @@ def parse_bills(fmt: str, text: str) -> dict:
     res.setdefault("skipped", [])
     res.setdefault("warnings", [])
     res["format"] = fmt
+    # 金额出口安全：非有限（NaN/Inf）一律拦下，防止 json 出 NaN 让前端解析崩
+    safe = []
+    for b in res["bills"]:
+        a = b.get("amount")
+        if isinstance(a, (int, float)) and not isinstance(a, bool) and math.isfinite(float(a)):
+            safe.append(b)
+        else:
+            res["skipped"].append({"raw": b.get("raw", ""), "reason": _amount_skip_reason(a)})
+    res["bills"] = safe
+    # 分类自动归类：仅当原分类为空时填关键词猜出的默认值
+    for b in res["bills"]:
+        _apply_cat_guess(b)
+    # 已乱码文本（含替换符）标记，提示换编码
+    if "\ufffd" in t:
+        res["suspect_encoding"] = True
+        res["warnings"].append(_ENCODING_WARN)
     return res
+
+
+def parse_any(fmt_hint, raw_bytes_or_text) -> dict:
+    """统一解析入口：bytes 先 decode_bytes（UTF-8→GBK→latin-1 兜底），str 原样。
+
+    fmt_hint 传 SUPPORTED_FORMATS 之一则直接按该格式解析，
+    否则当文件名交给 detect_format 探测。
+    """
+    raw = raw_bytes_or_text
+    if isinstance(raw, str):
+        text = raw
+    elif raw is None:
+        text = ""
+    elif isinstance(raw, (bytes, bytearray, memoryview)):
+        text = decode_bytes(bytes(raw))
+    else:
+        text = str(raw)
+    fmt = fmt_hint if fmt_hint in SUPPORTED_FORMATS else detect_format(fmt_hint or "", text)
+    return parse_bills(fmt, text)
 
 
 def _norm_note(note):
@@ -682,42 +904,130 @@ def _norm_note(note):
     return re.sub(r"\s+", "", str(note or ""))
 
 
-def build_import_plan(bills: list, existing: list) -> dict:
-    """与已有账单去重后生成导入计划。
+# ---------------- 分类自动归类 ----------------
+# 备注关键词 → (一级分类, 二级分类)；名称对齐服务端主流记账分类树（DEFAULT_WALLET_CATS）。
+# 收入类为平铺一级，二级为空。规则按需扩充，命中取最长关键词（同长取表内靠前者）。
+_GUESS_RULES = [
+    (("打车", "滴滴", "网约车", "出租车"), "出行交通", "打车"),
+    (("地铁", "公交", "一卡通"), "出行交通", "公共交通"),
+    (("加油", "中石化", "中石油"), "出行交通", "加油"),
+    (("停车",), "出行交通", "停车费"),
+    (("高铁", "火车", "12306"), "出行交通", "火车"),
+    (("机票", "航空"), "出行交通", "飞机"),
+    (("早餐", "早饭", "包子", "豆浆"), "食品餐饮", "早餐"),
+    (("午餐", "午饭", "快餐", "便当", "外卖", "美团", "饿了么"), "食品餐饮", "午餐"),
+    (("晚餐", "晚饭", "餐厅", "饭店"), "食品餐饮", "晚餐"),
+    (("奶茶", "咖啡", "星巴克", "瑞幸", "蜜雪"), "食品餐饮", "饮料酒水"),
+    (("超市", "菜市场", "生鲜", "盒马"), "食品餐饮", "生鲜食品"),
+    (("零食", "便利店", "全家", "711"), "食品餐饮", "休闲零食"),
+    (("淘宝", "天猫", "京东", "拼多多", "网购"), "购物消费", "其他"),
+    (("手机", "数码", "耳机", "苹果", "华为"), "购物消费", "手机数码"),
+    (("衣服", "鞋", "优衣库", "ZARA"), "购物消费", "服饰运动"),
+    (("美妆", "护肤", "口红", "屈臣氏"), "购物消费", "个护美妆"),
+    (("充值", "话费充值", "流量"), "购物消费", "虚拟充值"),
+    (("水费",), "居家生活", "水费"),
+    (("电费",), "居家生活", "电费"),
+    (("燃气",), "居家生活", "燃气费"),
+    (("物业",), "居家生活", "物业费"),
+    (("房租",), "居家生活", "房租还贷"),
+    (("话费", "宽带"), "居家生活", "话费宽带"),
+    (("电影", "KTV", "唱歌"), "休闲娱乐", "电影唱歌"),
+    (("演出",), "休闲娱乐", "演出"),
+    (("健身", "游泳"), "休闲娱乐", "运动健身"),
+    (("药店", "药房", "买药"), "健康医疗", "买药"),
+    (("医院", "挂号"), "健康医疗", "医院"),
+    (("红包",), "送礼人情", "红包"),
+    (("礼物", "礼品", "送礼", "份子"), "送礼人情", "礼物"),
+    (("工资", "薪资", "月薪"), "工资", ""),
+    (("奖金", "年终奖"), "奖金", ""),
+    (("报销",), "报销", ""),
+]
 
-    重复判定：同 date + 同 amount + 同 type，且 note 去空白后相同或其中一侧为空。
-    rows 里每条带 "dup": False；duplicates 里每条带 "dup": True 和 "matchNote"。
+
+def guess_category(note: str, cat_name: str = "") -> tuple:
+    """按备注关键词猜分类 → (catName, subCatName)。
+
+    规则：note 含关键词即命中，多个命中取最长关键词（同长取表内靠前者）；
+    未命中回退 (cat_name, "") 保留原分类。
     """
-    rows, dups = [], []
-    ex = existing or []
+    s = str(note or "").lower()
+    best_len, best = 0, None
+    for keywords, cat, sub in _GUESS_RULES:
+        for kw in keywords:
+            if kw.lower() in s and len(kw) > best_len:
+                best_len, best = len(kw), (cat, sub)
+    if best:
+        return best
+    return str(cat_name or "").strip(), ""
+
+
+def _apply_cat_guess(bill):
+    """分类默认值：仅当原分类（catName）为空时按关键词填 catName/subCatName。"""
+    if bill.get("catName"):
+        return
+    cat, sub = guess_category(bill.get("note") or "", "")
+    if cat:
+        bill["catName"] = cat
+    if sub and not bill.get("subCatName"):
+        bill["subCatName"] = sub
+
+
+# ---------------- 导入计划（去重） ----------------
+def _match_bill(item, pool):
+    """pool 中找重复：同 date + 同 amount + 同 type，且 note 归一后相同或一侧为空。"""
+    try:
+        ba = round(float(item.get("amount")), 2)
+        if not math.isfinite(ba):
+            ba = None
+    except (TypeError, ValueError):
+        ba = None
+    bn = _norm_note(item.get("note"))
+    for e in pool:
+        if e.get("date") != item.get("date") or e.get("type") != item.get("type"):
+            continue
+        try:
+            ea = round(float(e.get("amount")), 2)
+        except (TypeError, ValueError):
+            continue
+        if ba is None or not math.isfinite(ea) or ea != ba:
+            continue
+        en = _norm_note(e.get("note"))
+        if bn == en or not bn or not en:
+            return e
+    return None
+
+
+def build_import_plan(bills: list, existing: list) -> dict:
+    """与已有账单去重 + 文件内互查后生成导入计划。
+
+    重复判定：同 date + 同 amount + 同 type，且 note 去空白后相同或其中一侧为空；
+    文件内互重（后出现者判重）matchNote 固定为「文件内重复」。
+    返回：
+      rows        非重复账单（带 dup=False、matchNote=""）
+      duplicates  重复账单（带 dup=True、matchNote）
+      bills       全部账单（保持输入顺序，逐条带 dup/matchNote）
+      dups        重复笔数
+    """
+    rows, dups, all_rows = [], [], []
+    ex = list(existing or [])
+    seen = []  # 文件内已放行账单，供互查
     for b in bills or []:
         item = dict(b)
-        try:
-            ba = round(float(item.get("amount")), 2)
-        except (TypeError, ValueError):
-            ba = None
-        bn = _norm_note(item.get("note"))
-        match = None
-        for e in ex:
-            if e.get("date") != item.get("date") or e.get("type") != item.get("type"):
-                continue
-            try:
-                if ba is None or round(float(e.get("amount")), 2) != ba:
-                    continue
-            except (TypeError, ValueError):
-                continue
-            en = _norm_note(e.get("note"))
-            if bn == en or not bn or not en:
-                match = e
-                break
+        match = _match_bill(item, ex)
+        in_file = match is None
+        if in_file:
+            match = _match_bill(item, seen)
         if match is not None:
             item["dup"] = True
-            item["matchNote"] = match.get("note") or ""
+            item["matchNote"] = "文件内重复" if in_file else (match.get("note") or "")
             dups.append(item)
         else:
             item["dup"] = False
+            item["matchNote"] = ""
             rows.append(item)
-    return {"rows": rows, "duplicates": dups}
+            seen.append(item)
+        all_rows.append(item)
+    return {"rows": rows, "duplicates": dups, "bills": all_rows, "dups": len(dups)}
 
 
 def build_template_csv() -> str:

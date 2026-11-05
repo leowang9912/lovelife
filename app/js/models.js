@@ -383,10 +383,12 @@ window.Models = (function () {
         if (k === mk) curInc += a;
       } else if (b.type === 'expense') {
         monthExpense[k] = (monthExpense[k] || 0) + a;
-        if (b.itemId) monthLinked[k] = (monthLinked[k] || 0) + a;
+        // 已关联物品词条或美食条目的账单，在合并口径里不再重复计（P0 修复：正餐账单曾被算两遍）
+        const linked = b.itemId || b.foodId;
+        if (linked) monthLinked[k] = (monthLinked[k] || 0) + a;
         if (k === mk) {
           curExp += a;
-          if (b.itemId) curLinked += a;
+          if (linked) curLinked += a;
           const key = b.subCatId || b.catId || 'other';
           byCat[key] = (byCat[key] || 0) + a;
         }

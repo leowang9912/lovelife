@@ -45,7 +45,11 @@ window.SettingsView = (function () {
         '<button class="btn btn-ghost btn-sm" id="btn-import">' + UI.icon('upload', 14) + ' 从备份恢复</button>' +
         '<input type="file" id="import-file" accept=".gz,.tar,.tgz" hidden></div>' +
         '<h4 class="detail-sub">账单导入 / 导出（我的钱袋）</h4>' +
-        '<div id="s-bill-io"></div>') +
+        '<div id="s-bill-io"></div>' +
+        '<h4 class="detail-sub">数据体检</h4>' +
+        '<p class="muted small">检查并修复：账单与词条/美食的悬空关联、自动同步的孤儿记录、余额快照的失效账户。安全可重复执行。</p>' +
+        '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="btn-repair">' + UI.icon('stethoscope', 14) + ' 开始体检</button>' +
+        '<span id="repair-result" class="muted small"></span></div>') +
 
       /* 3️⃣ 消费与统计口径 */
       section('cost', '消费与统计口径',
@@ -56,7 +60,16 @@ window.SettingsView = (function () {
         '<label><span class="f-label">衣服预算</span><input type="number" id="b-clothing" value="' + ((budget.categories || {}).clothing || 0) + '"></label>' +
         '<label><span class="f-label">生活预算</span><input type="number" id="b-life" value="' + ((budget.categories || {}).life || 0) + '"></label>' +
         '<label><span class="f-label">美食预算</span><input type="number" id="b-food" value="' + ((budget.categories || {}).food || 0) + '"></label>' +
-        '</div><div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-budget">' + UI.icon('save', 14) + ' 保存预算</button></div>' +
+        '</div>' +
+        '<h4 class="detail-sub">记账分类预算（可选，0=不设）</h4>' +
+        '<div class="form-grid">' +
+        [['w_food', '食品餐饮'], ['w_shop', '购物消费'], ['w_traffic', '出行交通'],
+        ['w_home', '居家生活'], ['w_fun', '休闲娱乐'], ['w_gift', '人情往来']].map(function (c) {
+          return '<label><span class="f-label">' + c[1] + '</span><input type="number" data-wcat-budget="' + c[0] +
+            '" value="' + ((budget.walletCats || {})[c[0]] || 0) + '"></label>';
+        }).join('') +
+        '</div>' +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-budget">' + UI.icon('save', 14) + ' 保存预算</button></div>' +
         '<h4 class="detail-sub">成本模型（寿命 / 残值率）</h4>' +
         catTable('digital', '数码（含游戏）', cats.digital) +
         catTable('clothing', '服饰（寿命参考）', cats.clothing) +
@@ -78,6 +91,9 @@ window.SettingsView = (function () {
           return '<label class="chip-check"><input type="checkbox" data-block-pref="' + b.id + '"' +
             (on ? ' checked' : '') + '><span>' + b.name + '</span></label>';
         }).join('') + '</div>' +
+        '<h4 class="detail-sub">侧栏导航排序</h4>' +
+        '<p class="muted small">调整左侧各栏目的显示顺序。</p>' +
+        '<div class="mini-table" id="nav-order-list"></div>' +
         '<h4 class="detail-sub">标签管理</h4>' +
         '<p class="muted">个人标签库：录入表单可直接选用。删除只影响标签库，已打标签的物品不受影响。</p>' +
         '<div class="mini-table" id="tag-lib-list"></div>' +
@@ -98,12 +114,51 @@ window.SettingsView = (function () {
 
       /* 6️⃣ 危险操作 */
       '<div class="panel panel-danger stab" data-stab="danger"><div class="panel-head"><h3>危险操作</h3></div><div class="panel-body">' +
-      '<p class="muted">清空当前账号的全部物品、穿搭、美食、流水记录，不可恢复。建议先导出备份。</p>' +
+      '<p class="muted">清空当前账号的全部数据（物品、穿搭、美食、记账账单/账户/余额记录、流水记录），不可恢复。建议先导出备份。</p>' +
       '<div class="btn-row"><button class="btn btn-danger" id="btn-reset">' + UI.icon('trash-2', 14) + ' 清空当前账号数据</button></div></div></div>' +
 
       '</div>';
 
     bind(root, db, accounts, cur);
+  }
+
+  /* 侧栏导航排序（v1.1.1）：上移/下移调整顺序，立即生效 */
+  function refreshNavOrder(root, db) {
+    const box = root.querySelector('#nav-order-list');
+    if (!box || !window.App || !window.App.NAV) return;
+    const order = db.settings.navOrder && db.settings.navOrder.length
+      ? db.settings.navOrder
+      : window.App.NAV.map(function (n) { return n.id; });
+    const byId = {};
+    window.App.NAV.forEach(function (n) { byId[n.id] = n; });
+    const items = order.filter(function (id) { return byId[id]; })
+      .concat(window.App.NAV.map(function (n) { return n.id; }).filter(function (id) { return order.indexOf(id) < 0; }));
+    box.innerHTML = items.map(function (id, i) {
+      return '<div class="mini-row"><span class="flex1">' + UI.icon(byId[id].icon, 14) + ' ' + byId[id].label + '</span>' +
+        '<button class="btn-icon" data-nav-up="' + i + '" title="上移">' + UI.icon('chevron-up', 14) + '</button>' +
+        '<button class="btn-icon" data-nav-down="' + i + '" title="下移">' + UI.icon('chevron-down', 14) + '</button></div>';
+    }).join('');
+    async function move(from, to) {
+      if (to < 0 || to >= items.length) return;
+      const arr = items.slice();
+      const tmp = arr[from]; arr[from] = arr[to]; arr[to] = tmp;
+      db.settings.navOrder = arr;
+      await S.saveSettings();
+      refreshNavOrder(root, db);
+      window.UI.toast('导航顺序已保存', 'success');
+    }
+    box.querySelectorAll('[data-nav-up]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const i = Number(b.getAttribute('data-nav-up'));
+        move(i, i - 1);
+      });
+    });
+    box.querySelectorAll('[data-nav-down]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const i = Number(b.getAttribute('data-nav-down'));
+        move(i, i + 1);
+      });
+    });
   }
 
   /* 标签库管理（v1.0.9）：增删个人标签库；预设只读展示 */
@@ -283,6 +338,11 @@ window.SettingsView = (function () {
 
     /* 消费与统计口径 */
     root.querySelector('#btn-save-budget').addEventListener('click', async function () {
+      const walletCats = {};
+      root.querySelectorAll('[data-wcat-budget]').forEach(function (el) {
+        const v = Number(el.value) || 0;
+        if (v > 0) walletCats[el.getAttribute('data-wcat-budget')] = v;
+      });
       db.settings.budget = {
         monthlyTotal: Number(root.querySelector('#b-total').value) || 0,
         categories: {
@@ -290,10 +350,27 @@ window.SettingsView = (function () {
           clothing: Number(root.querySelector('#b-clothing').value) || 0,
           life: Number(root.querySelector('#b-life').value) || 0,
           food: Number(root.querySelector('#b-food').value) || 0
-        }
+        },
+        walletCats: walletCats
       };
       await S.saveSettings();
       UI.toast('预算已保存', 'success');
+    });
+    // 数据体检（v1.2.0）：修复悬空关联/孤儿同步记录
+    const repairBtn = root.querySelector('#btn-repair');
+    if (repairBtn) repairBtn.addEventListener('click', async function () {
+      repairBtn.disabled = true;
+      try {
+        const r = await S.repairData();
+        root.querySelector('#repair-result').textContent = r.fixed
+          ? '已修复 ' + r.fixed + ' 处数据问题' : '数据健康，无需修复';
+        UI.toast(r.fixed ? '体检完成，修复 ' + r.fixed + ' 处' : '数据健康', 'success');
+        window.App.refresh();
+      } catch (e) {
+        root.querySelector('#repair-result').textContent = '体检失败：' + e.message;
+      } finally {
+        repairBtn.disabled = false;
+      }
     });
     root.querySelector('#btn-save-cats').addEventListener('click', async function () {
       // 改动存 settings.costModelOverrides（服务端 load_db 会合并回分类树），
@@ -323,6 +400,7 @@ window.SettingsView = (function () {
     });
 
     /* 使用偏好 */
+    refreshNavOrder(root, db);
     refreshTagLib(root, db);
     const tagAddBtn = root.querySelector('#tag-lib-add');
     if (tagAddBtn) tagAddBtn.addEventListener('click', async function () {

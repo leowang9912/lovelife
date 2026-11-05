@@ -44,7 +44,8 @@ window.FoodView = (function () {
             : '') + '</div>'
           : recs.length
             ? '<div class="cal-outfits">' + recs.map(function (r) {
-              return '<div class="cal-outfit-chip" data-open-rec="' + r.id + '"><span>' + U.escapeHtml(r.meal || '') + ' · ' +
+              return '<div class="cal-outfit-chip" data-open-rec="' + r.id + '"><span>' + U.escapeHtml(r.meal || '') +
+                (r.fromBill || (r.linkedBillIds || []).length ? ' <i class="tag" title="来自钱袋账单" style="font-style:normal;padding:0 5px">账</i>' : '') + ' · ' +
                 U.escapeHtml(r.name || r.foodCuisine || '') + '</span></div>';
             }).join('') + '</div>'
             : UI.calHint()) +
@@ -170,6 +171,7 @@ window.FoodView = (function () {
             '<button class="btn-icon" data-edit-food="' + f.id + '" title="编辑">' + UI.icon('pencil', 14) + '</button>' +
             '<button class="btn-icon" data-del-food="' + f.id + '">' + UI.icon('trash-2', 14) + '</button></div>';
         }).join('') + '</div>' : '') +
+        (rec.fromBill ? '<p class="muted small">' + UI.icon('receipt', 12) + ' 来自钱袋账单（自动同步）；改账单会同步更新此处，这里补充的评分/图片等会保留</p>' : '') +
         '<form id="food-form"><div class="form-grid">' +
         '<label><span class="f-label">菜系 <span class="req-star"> *</span></span>' +
         '<select name="foodCuisine"><option value="">请选择</option>' +

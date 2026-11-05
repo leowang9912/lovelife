@@ -114,13 +114,62 @@ window.PlanView = (function () {
     return { start: start, end: end };
   }
 
-  function walletStatSection(id, db, tagHTML) {
+  /* 已过天数（含今天）：周=周一起、月=1 号起、年=1 月 1 日起 → 今天。
+     用于日均分母与走势取段：未来日还没发生，算进分母会把日均稀释、画成 0 柱 */
+  function elapsedDays() {
+    const p = statPeriod();
+    return Math.max(1, U.daysBetween(p.start, new Date()) + 1);
+  }
+
+  /* ===== 统计下钻：点图跳钱袋流水（jumpTo 由钱袋视图提供，未就绪时静默忽略） ===== */
+  function jumpToWallet(filter) {
+    if (window.WalletView && typeof window.WalletView.jumpTo === 'function') window.WalletView.jumpTo(filter);
+  }
+
+  /* 渲染后给图表元素补 data-drill-* 并绑定点击（body 每次渲染都会重建，故每轮重绑）：
+     - svg 图表（wTrend 柱 rect / wCatPie 扇区 path|circle）由 charts.js 生成、无属性入口，
+       这里按数据顺序补属性；环图图例与扇区同序同参
+     - 热力格 HTML 由本文件生成，已自带 data-drill-*，这里统一绑点击 */
+  function bindWalletDrill(body, drills) {
+    if (drills && drills.length) {
+      const shapes = body.querySelectorAll('svg rect, svg path, svg circle');
+      drills.forEach(function (d, i) {
+        const el = shapes[i];
+        if (!el || !d) return;
+        if (d.catId) el.setAttribute('data-drill-cat', d.catId);
+        else if (d.date) el.setAttribute('data-drill-date', d.date);
+        else if (d.month) el.setAttribute('data-drill-month', d.month);
+        else return;
+        el.style.cursor = 'pointer';
+      });
+      const rows = body.querySelectorAll('.donut-legend-row');
+      drills.forEach(function (d, i) {
+        const el = rows[i];
+        if (!el || !d || !d.catId) return;
+        el.setAttribute('data-drill-cat', d.catId);
+        el.style.cursor = 'pointer';
+      });
+    }
+    body.querySelectorAll('[data-drill-cat]').forEach(function (el) {
+      el.addEventListener('click', function () { jumpToWallet({ catId: el.getAttribute('data-drill-cat') }); });
+    });
+    body.querySelectorAll('[data-drill-date]').forEach(function (el) {
+      el.addEventListener('click', function () { jumpToWallet({ date: el.getAttribute('data-drill-date') }); });
+    });
+    body.querySelectorAll('[data-drill-month]').forEach(function (el) {
+      el.addEventListener('click', function () { jumpToWallet({ month: el.getAttribute('data-drill-month') }); });
+    });
+  }
+
+  function walletStatSection(id, db, tagHTML, out) {
+    out = out || {};
     const bills = ((db.wallet || {}).bills) || [];
     const p = statPeriod();
     const rs = bills.filter(function (b) {
       if (!b.date || b.type === 'transfer') return false;
-      const t = new Date(b.date);
-      return t >= p.start && t < p.end;
+      // 日期统一 U.parseDate 本地零点解析：new Date('YYYY-MM-DD') 按 UTC 解析，跨时区会错天/错月
+      const t = U.parseDate(b.date);
+      return !!t && t >= p.start && t < p.end;
     });
     let exp = 0, inc = 0;
     rs.forEach(function (b) {
@@ -129,28 +178,69 @@ window.PlanView = (function () {
     });
 
     if (id === 'wBalance') {
-      /* 主流记账「收支统计」：收入 / 支出 / 结余 三大数字 */
+      /* 主流记账「收支统计」：收入 / 支出 / 结余 三大数字 + 月度小结（自动生成，可复制存档） */
+      let summaryLine = '';
+      if (statRange === 'month') {
+        const mk3 = U.monthKey(U.todayStr());
+        const prevD = new Date();
+        prevD.setMonth(prevD.getMonth() - 1);
+        const pk3 = U.monthKey(U.todayStr(prevD));
+        let pExp = 0;
+        bills.forEach(function (b) {
+          if (b.type === 'expense' && U.monthKey(b.date || '') === pk3) pExp += Math.abs(Number(b.amount) || 0);
+        });
+        const deltaPct = pExp ? Math.round((exp - pExp) / pExp * 100) : null;
+        const byTop = {};
+        rs.forEach(function (b) {
+          if (b.type !== 'expense') return;
+          let top = b.catId || '其他';
+          const cats = ((db.wallet || {}).cats || {}).expense || [];
+          cats.forEach(function (c) {
+            (c.children || []).forEach(function (ch) {
+              if (ch.id === b.subCatId) top = c.name;
+            });
+            if (c.id === b.catId) top = c.name;
+          });
+          byTop[top] = (byTop[top] || 0) + Math.abs(Number(b.amount) || 0);
+        });
+        const top3 = Object.keys(byTop).sort(function (a, b) { return byTop[b] - byTop[a]; }).slice(0, 3)
+          .map(function (k) { return k + ' ' + U.formatMoney(byTop[k]); }).join(' / ');
+        const budgetTotal = Number(((db.settings || {}).budget || {}).monthlyTotal) || 0;
+        summaryLine = '<div class="yw-summary muted small" style="margin-top:8px">' + Number(mk3.slice(5, 7)) + ' 月小结：支出 ' +
+          U.formatMoney(exp) + (deltaPct === null ? '' : '（环比 ' + (deltaPct >= 0 ? '↑' : '↓') + Math.abs(deltaPct) + '%）') +
+          '，收入 ' + U.formatMoney(inc) + '，结余 ' + U.formatMoney(inc - exp) +
+          (top3 ? '。支出 Top3：' + top3 : '') +
+          (budgetTotal > 0 ? '。预算达成 ' + Math.min(999, Math.round(exp / budgetTotal * 100)) + '%' : '') +
+          '。</div>';
+      }
       return '<div class="yw-balance">' +
         '<div class="yw-bal-cell"><div class="yw-bal-label">收入</div><div class="yw-bal-val in">' + U.formatMoney(inc) + '</div></div>' +
         '<div class="yw-bal-cell"><div class="yw-bal-label">支出</div><div class="yw-bal-val out">' + U.formatMoney(exp) + '</div></div>' +
         '<div class="yw-bal-cell"><div class="yw-bal-label">结余</div><div class="yw-bal-val' + (inc - exp < 0 ? ' out' : '') + '">' + U.formatMoney(inc - exp) + '</div></div>' +
-        '</div>' + tagHTML;
+        '</div>' + summaryLine + tagHTML;
     }
 
     if (id === 'wTrend') {
-      /* 主流记账「收支走势」：柱状图（周/月按日、年按月） */
+      /* 主流记账「收支走势」：柱状图（周/月按日、年按月）
+         口径（统计修复）：只画「已过」的天/月（含今天/当月），未来日不进图，与日均的已过天数口径一致 */
       let data = [];
       if (statRange === 'year') {
-        for (let m = 0; m < 12; m++) {
+        const y = p.start.getFullYear();
+        const curM = new Date().getMonth(); // 只画到当月（已过月份）
+        for (let m = 0; m <= curM; m++) {
           let v = 0;
           rs.forEach(function (b) {
-            if (b.type === 'expense' && new Date(b.date).getMonth() === m) v += Math.abs(Number(b.amount) || 0);
+            const d = U.parseDate(b.date); // 本地解析，防跨时区错月
+            if (b.type === 'expense' && d && d.getMonth() === m) v += Math.abs(Number(b.amount) || 0);
           });
-          data.push({ label: (m + 1) + '月', value: Math.round(v), color: '#ff3b30' });
+          data.push({
+            label: (m + 1) + '月', value: Math.round(v), color: '#ff3b30',
+            drill: { month: y + '-' + String(m + 1).padStart(2, '0') }
+          });
         }
       } else {
-        const days = statRange === 'week' ? 7 : (new Date(p.end - 86400000).getDate());
-        const base = new Date(p.start);
+        const days = elapsedDays(); // 已过天数（含今天），不再把未来日画成 0 柱
+        const base = p.start;
         for (let d = 0; d < days; d++) {
           const day = new Date(base.getFullYear(), base.getMonth(), base.getDate() + d);
           const key = U.todayStr(day);
@@ -158,14 +248,16 @@ window.PlanView = (function () {
           rs.forEach(function (b) {
             if (b.type === 'expense' && b.date === key) v += Math.abs(Number(b.amount) || 0);
           });
-          data.push({ label: key.slice(5).replace('-', '/'), value: Math.round(v), color: '#ff3b30' });
+          data.push({ label: key.slice(5).replace('-', '/'), value: Math.round(v), color: '#ff3b30', drill: { date: key } });
         }
       }
-      return C.bar(data) + '<div class="muted small" style="margin-top:6px">红柱=支出　本期收入 ' + U.formatMoney(inc) + '</div>' + tagHTML;
+      out.drill = data.map(function (d) { return d.drill; });
+      return C.bar(data) + '<div class="muted small" style="margin-top:6px">红柱=支出　本期收入 ' + U.formatMoney(inc) +
+        (statRange === 'year' ? '（按已过月份：1 月至今）' : '（按已过天数：' + data.length + ' 天）') + '</div>' + tagHTML;
     }
 
     if (id === 'wCatPie') {
-      /* 主流记账「分类统计」：金额、笔数、占比 */
+      /* 主流记账「分类统计」：金额、笔数、占比（byCat 的 key 即分类 id，下钻时原样带回流水筛选） */
       const byCat = {};
       rs.forEach(function (b) {
         if (b.type !== 'expense') return;
@@ -178,48 +270,89 @@ window.PlanView = (function () {
         return {
           label: findWalletCat(db, k) || k,
           value: Math.round(byCat[k].v * 100) / 100,
-          valueText: U.formatMoney(byCat[k].v) + ' · ' + byCat[k].n + '笔'
+          valueText: U.formatMoney(byCat[k].v) + ' · ' + byCat[k].n + '笔',
+          catId: k === 'other' ? '' : k // other 是无分类兜底桶，没有真实分类 id，不下钻
         };
       }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+      out.drill = data.map(function (d) { return d.catId ? { catId: d.catId } : null; });
       return (data.length ? C.donut(data) : '<p class="empty-hint">本期还没有支出</p>') + tagHTML;
     }
 
     if (id === 'wDaily') {
-      /* 主流记账「日均」：日均支出 / 日均收入 / 日均结余 / 日均预算 */
-      const dayCount = Math.max(1, Math.round((p.end - p.start) / 86400000));
+      /* 主流记账「日均」：日均支出 / 日均收入 / 日均结余 / 日均预算
+         口径（统计修复）：收支分母 = 已过天数（含今天，不含未来日），避免整期天数把日均稀释；
+         日均预算固定 = 月预算 ÷ 30，与周期无关、跨周期可比 */
+      const dayCount = elapsedDays();
       const budget = ((db.settings || {}).budget || {}).monthlyTotal || 0;
       return '<div class="yw-daily">' +
         '<div class="yw-daily-cell"><div class="yw-bal-label">日均支出</div><div class="yw-bal-val">' + U.formatMoney(exp / dayCount) + '</div></div>' +
         '<div class="yw-daily-cell"><div class="yw-bal-label">日均收入</div><div class="yw-bal-val">' + U.formatMoney(inc / dayCount) + '</div></div>' +
         '<div class="yw-daily-cell"><div class="yw-bal-label">日均结余</div><div class="yw-bal-val">' + U.formatMoney((inc - exp) / dayCount) + '</div></div>' +
         '<div class="yw-daily-cell"><div class="yw-bal-label">日均预算</div><div class="yw-bal-val">' +
-        (budget > 0 ? U.formatMoney(budget / dayCount) : '未设置') + '</div></div>' +
-        '</div>' + tagHTML;
+        (budget > 0 ? U.formatMoney(budget / 30) : '未设置') + '</div></div>' +
+        '</div><div class="muted small" style="margin-top:6px">口径：收支按已过 ' + dayCount + ' 天计（含今天）；日均预算 = 月预算 ÷ 30</div>' + tagHTML;
     }
 
     if (id === 'wHeat') {
-      /* 主流记账「收支热力」：日历热力格（深浅=当日支出） */
-      const y = p.start.getFullYear(), m = p.start.getMonth();
-      const first = new Date(y, m, 1);
-      const days = new Date(y, m + 1, 0).getDate();
-      const pad = (first.getDay() + 6) % 7;
+      /* 主流记账「收支热力」：热力格随周期切换（统计修复，此前固定画整月）
+         week = 本周 7 格（周一起）、month = 当月日历格、year = 12 个月月度热力（深浅=当月支出） */
       const byDay = {};
       rs.forEach(function (b) {
-        if (b.type !== 'expense') return;
+        if (b.type !== 'expense' || !b.date) return;
         byDay[b.date] = (byDay[b.date] || 0) + Math.abs(Number(b.amount) || 0);
       });
-      const maxV = Math.max.apply(null, Object.keys(byDay).map(function (k) { return byDay[k]; }).concat([1]));
-      let cells = '';
-      for (let i = 0; i < pad; i++) cells += '<div class="yw-heat-cell empty"></div>';
-      for (let d = 1; d <= days; d++) {
-        const key = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
-        const v = byDay[key] || 0;
-        const alpha = v ? Math.max(0.12, v / maxV * 0.85) : 0;
-        cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" title="' + key + ' 支出 ' + v + '"' +
-          ' style="background:' + (v ? 'rgba(255,59,48,' + alpha.toFixed(2) + ')' : '#f6f6f9') + '">' +
-          '<span>' + d + '</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
+      function heatBg(v, maxV) {
+        return v ? 'rgba(255,59,48,' + Math.max(0.12, v / maxV * 0.85).toFixed(2) + ')' : '#f6f6f9';
       }
-      return '<div class="yw-heat-title muted small">' + y + ' 年 ' + (m + 1) + ' 月 · 深浅=当日支出</div>' +
+      const maxOf = function (obj) {
+        return Math.max.apply(null, Object.keys(obj).map(function (k) { return obj[k]; }).concat([1]));
+      };
+      let cells = '', title = '';
+      if (statRange === 'year') {
+        const y = p.start.getFullYear();
+        const byMonth = {};
+        Object.keys(byDay).forEach(function (k) {
+          const mk = k.slice(0, 7);
+          byMonth[mk] = (byMonth[mk] || 0) + byDay[k];
+        });
+        const maxV = maxOf(byMonth);
+        for (let m = 1; m <= 12; m++) {
+          const mk = y + '-' + String(m).padStart(2, '0');
+          const v = byMonth[mk] || 0;
+          cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" data-drill-month="' + mk + '"' +
+            ' title="' + mk + ' 支出 ' + v + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
+            '<span>' + m + '月</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
+        }
+        title = y + ' 年 · 深浅=当月支出';
+      } else if (statRange === 'week') {
+        const maxV = maxOf(byDay);
+        for (let d = 0; d < 7; d++) {
+          const day = new Date(p.start.getFullYear(), p.start.getMonth(), p.start.getDate() + d);
+          const key = U.todayStr(day);
+          const v = byDay[key] || 0;
+          cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" data-drill-date="' + key + '"' +
+            ' title="' + key + ' 支出 ' + v + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
+            '<span>' + day.getDate() + '</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
+        }
+        title = '本周 ' + U.todayStr(p.start) + ' ~ ' +
+          U.todayStr(new Date(p.start.getFullYear(), p.start.getMonth(), p.start.getDate() + 6)) + ' · 深浅=当日支出';
+      } else {
+        const y = p.start.getFullYear(), m = p.start.getMonth();
+        const first = new Date(y, m, 1);
+        const days = new Date(y, m + 1, 0).getDate();
+        const pad = (first.getDay() + 6) % 7;
+        const maxV = maxOf(byDay);
+        for (let i = 0; i < pad; i++) cells += '<div class="yw-heat-cell empty"></div>';
+        for (let d = 1; d <= days; d++) {
+          const key = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+          const v = byDay[key] || 0;
+          cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" data-drill-date="' + key + '"' +
+            ' title="' + key + ' 支出 ' + v + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
+            '<span>' + d + '</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
+        }
+        title = y + ' 年 ' + (m + 1) + ' 月 · 深浅=当日支出';
+      }
+      return '<div class="yw-heat-title muted small">' + title + '</div>' +
         '<div class="yw-heat">' + cells + '</div>' + tagHTML;
     }
 
@@ -232,9 +365,11 @@ window.PlanView = (function () {
       const curTotal = accs.reduce(function (s, a) { return s + (Number(a.balance) || 0); }, 0);
 
       // 近 90 天总资产曲线：从当前余额按账单净影响逐日倒推
+      // 口径（统计修复）：只计「区分账户」的账单（accountId 非空）——不区分账户的账单不动账户余额，计入会让历史失真
       const N = 90;
       const netByDay = {};
       allBills.forEach(function (b) {
+        if (!b.accountId) return; // 不区分账户：不影响账户余额，不进曲线
         const a = Math.abs(Number(b.amount) || 0);
         const n = b.type === 'income' ? a : b.type === 'expense' ? -a : 0; // 转账不影响总资产
         if (b.date) netByDay[b.date] = (netByDay[b.date] || 0) + n;
@@ -244,20 +379,28 @@ window.PlanView = (function () {
       for (let i = N - 1; i >= 0; i--) {
         dayKeys.push(U.todayStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i)));
       }
-      let rangeNet = 0;
-      dayKeys.forEach(function (k) { rangeNet += (netByDay[k] || 0); });
-      let bal = curTotal - rangeNet;
-      const series = dayKeys.map(function (k) {
-        const v = Math.round(bal * 100) / 100;
-        bal += (netByDay[k] || 0);
-        return v;
-      });
+      // 序列收口：末点（今天）= 当前总资产；往前按「次日净影响」倒推，保证曲线终点与三大卡数字一致
+      const series = new Array(N);
+      series[N - 1] = curTotal;
+      for (let i = N - 2; i >= 0; i--) {
+        series[i] = series[i + 1] - (netByDay[dayKeys[i + 1]] || 0);
+      }
+      // 余额快照：同日同账户取最新一条（createdAt 优先，无 createdAt 时数组后者覆盖），不同账户才相加，
+      // 避免同日多条快照被 += 双加把余额虚增
       const snapByDay = {};
       snaps.forEach(function (s) {
-        snapByDay[s.date] = (snapByDay[s.date] || 0) + (Number(s.balance) || 0);
+        if (!s || !s.date) return;
+        const accKey = s.accountId || '';
+        snapByDay[s.date] = snapByDay[s.date] || {};
+        const prev = snapByDay[s.date][accKey];
+        const bothTs = prev && prev.createdAt && s.createdAt;
+        if (!prev || (bothTs ? String(s.createdAt) >= String(prev.createdAt) : true)) snapByDay[s.date][accKey] = s;
       });
       const snapMarks = Object.keys(snapByDay).map(function (d) {
-        return d + ' ' + U.formatMoney(snapByDay[d]);
+        const dayTotal = Object.keys(snapByDay[d]).reduce(function (t, k) {
+          return t + (Number(snapByDay[d][k].balance) || 0);
+        }, 0);
+        return d + ' ' + U.formatMoney(dayTotal);
       });
 
       // 本月净变动 = 收入 − 支出
@@ -277,9 +420,9 @@ window.PlanView = (function () {
         '<div class="yw-bal-cell"><div class="yw-bal-label">余额记录</div><div class="yw-bal-val">' + snaps.length + ' 条</div></div>' +
         '</div>' +
         C.line(dayKeys.map(function (k, i) {
-          return { label: k.slice(5).replace('-', '/'), value: series[i] };
+          return { label: k.slice(5).replace('-', '/'), value: Math.round(series[i] * 100) / 100 };
         })) +
-        '<div class="muted small" style="margin:6px 0">总资产走势（近 90 天，账单流水倒推' +
+        '<div class="muted small" style="margin:6px 0">总资产走势（近 90 天，区分账户账单倒推 · 末点=当前总资产' +
         (snapMarks.length ? ' · 快照：' + U.escapeHtml(snapMarks.join('，')) : '') + '）</div>' +
         C.rankBars(accs.map(function (a) {
           return {
@@ -675,12 +818,15 @@ window.PlanView = (function () {
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#0071e3' },
         { label: '衣橱', value: sum.items.filter(function (i) { return i.kind === 'clothing' && i.status !== 'sold'; })
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#ff2d55' },
-        { label: '生活', value: sum.items.filter(function (i) { return i.kind === 'life'; })
+        // 生活域口径统一（统计修复）：卖出/赠送的不再计入，与数码域一致；此前 sold/gifted 也算导致虚高
+        { label: '生活', value: sum.items.filter(function (i) { return i.kind === 'life' && i.status !== 'sold' && i.status !== 'gifted'; })
           .reduce(function (a, b) { return a + M.ownInvested(db, b); }, 0), color: '#af52de' },
         { label: '美食', value: sum.food.totalSpend || 0, color: '#ff9500' }
       ];
       kindData.forEach(function (d) { d.valueText = U.formatMoney(Math.round(d.value)); });
-      body.innerHTML = C.donut(kindData, { centerText: U.formatMoney(sum.activeInvest), centerSub: '在手总投入' });
+      // 中心数字=四扇区展示值合计（同口径）：此前用 sum.activeInvest 与扇区合计对不上（口径不同）
+      const investSum = kindData.reduce(function (a, d) { return a + Math.round(d.value); }, 0);
+      body.innerHTML = C.donut(kindData, { centerText: U.formatMoney(investSum), centerSub: '合计投入' });
       return;
     }
     if (id === 'monthly') {
@@ -690,8 +836,10 @@ window.PlanView = (function () {
     }
     /* ===== 统一风格的收支统计（复刻主流记账统计模块） ===== */
     if (id === 'wBalance' || id === 'wTrend' || id === 'wCatPie' || id === 'wDaily' || id === 'wHeat' || id === 'wAssets') {
-      body.innerHTML = walletStatSection(id, db, statRangeTag());
+      const wout = {};
+      body.innerHTML = walletStatSection(id, db, statRangeTag(), wout);
       bindStatRange(body);
+      bindWalletDrill(body, wout.drill); // 点图下钻流水（body 每次渲染重建，绑定放渲染后逐次执行）
       return;
     }
     if (id === 'catRank') {
@@ -715,6 +863,27 @@ window.PlanView = (function () {
         { label: '生活', v: spent.life || 0, max: Number((b.categories || {}).life) || 0 },
         { label: '美食', v: spent.food || 0, max: Number((b.categories || {}).food) || 0 }
       ];
+      // 记账分类预算（v1.2.0，设置页维护）：本月该一级分类的账单支出 vs 预算
+      const wc = b.walletCats || {};
+      Object.keys(wc).forEach(function (cid) {
+        const max = Number(wc[cid]) || 0;
+        if (!(max > 0)) return;
+        let v = 0;
+        ((db.wallet || {}).bills || []).forEach(function (bill) {
+          if (bill.type !== 'expense') return;
+          if (U.monthKey(bill.date || '') !== U.monthKey(U.todayStr())) return;
+          // 归到一级分类
+          let top = bill.catId || '';
+          const cats = ((db.wallet || {}).cats || {}).expense || [];
+          cats.forEach(function (c) {
+            (c.children || []).forEach(function (ch) {
+              if (ch.id === bill.subCatId) top = c.id;
+            });
+          });
+          if (top === cid) v += Math.abs(Number(bill.amount) || 0);
+        });
+        rows.push({ label: findWalletCat(db, cid), v: Math.round(v * 100) / 100, max: max });
+      });
       body.innerHTML = rows.map(function (r) {
         if (r.max > 0) {
           const pct = Math.min(100, Math.round(r.v / r.max * 100));
@@ -985,8 +1154,9 @@ window.PlanView = (function () {
     }
     if (id === 'lFresh') {
       // 开封新鲜度：开封最久的排前面（提醒尽快用完）
+      // 终点用 useEndDate（售出/退役截止日）：非在用物品开封时长冻结不再增长，与详情页 lifeStatus.openedDays 同口径
       const opened = sum.items.filter(function (i) { return i.kind === 'life' && U.parseDate(i.openedDate); })
-        .map(function (i) { return { item: i, days: U.daysBetween(U.parseDate(i.openedDate), now) }; })
+        .map(function (i) { return { item: i, days: U.daysBetween(U.parseDate(i.openedDate), M.useEndDate(i, now)) }; })
         .sort(function (a, b) { return b.days - a.days; }).slice(0, 8);
       body.innerHTML = opened.length ? C.rankBars(opened.map(function (x) {
         return { label: x.item.name, value: x.days, valueText: '已开封 ' + x.days + ' 天' };

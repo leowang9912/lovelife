@@ -52,14 +52,19 @@ window.UI = (function () {
 
   function confirmDialog(title, text) {
     return new Promise(function (resolve) {
+      let settled = false;
+      const done = function (v) { if (!settled) { settled = true; resolve(v); } };
       modal({
         title: title,
         bodyHTML: '<p class="confirm-text">' + U.escapeHtml(text) + '</p>',
         footerHTML: '<button class="btn btn-ghost" data-act="no">取消</button><button class="btn btn-danger" data-act="yes">确认</button>',
         onMount: function (wrap, close) {
-          wrap.querySelector('[data-act=no]').addEventListener('click', function () { close(); resolve(false); });
-          wrap.querySelector('[data-act=yes]').addEventListener('click', function () { close(); resolve(true); });
-        }
+          // 先结算再 close：close 会触发 onClose 的 done(false)，done 幂等保证按钮结果优先
+          wrap.querySelector('[data-act=no]').addEventListener('click', function () { done(false); close(); });
+          wrap.querySelector('[data-act=yes]').addEventListener('click', function () { done(true); close(); });
+        },
+        // 点遮罩/× 关闭同样结算（否则调用方 await 永久挂起、重复点击叠加确认框）
+        onClose: function () { done(false); }
       });
     });
   }
