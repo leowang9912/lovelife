@@ -817,13 +817,25 @@ window.WalletView = (function () {
       '<div class="panel-body">' +
       '<p class="muted small">记录某个时间点各账户的余额（对账快照）。资产走势统计结合账单流水自动倒推每日余额，快照用于校准——见「我的统计 → 资产走势」。</p>' +
       (records.length
-        ? '<div class="mini-table">' + records.map(function (r) {
-          return '<div class="mini-row"><span class="muted">' + esc(r.date) + '</span>' +
-            '<span class="flex1">' + esc(accountName(r.accountId) || '账户') + '</span>' +
-            '<strong>' + money(r.balance) + '</strong>' +
-            (r.note ? '<span class="muted small">' + esc(r.note) + '</span>' : '') +
-            '<button class="btn btn-ghost btn-sm" data-bal-del="' + esc(r.id) + '">删除</button></div>';
-        }).join('') + '</div>'
+        ? (function () {
+          // 按日期分组：同一天多个账户的记录归一组（多账户快照）
+          const byDate = {};
+          const order = [];
+          records.forEach(function (r) {
+            const d = r.date || '';
+            if (!byDate[d]) { byDate[d] = []; order.push(d); }
+            byDate[d].push(r);
+          });
+          return order.map(function (d) {
+            return '<div class="yw-bal-group"><div class="yw-day-label">' + esc(d) + '</div>' +
+              byDate[d].map(function (r) {
+                return '<div class="mini-row"><span class="flex1">' + esc(accountName(r.accountId) || '账户') + '</span>' +
+                  '<strong>' + money(r.balance) + '</strong>' +
+                  (r.note ? '<span class="muted small">' + esc(r.note) + '</span>' : '') +
+                  '<button class="btn btn-ghost btn-sm" data-bal-del="' + esc(r.id) + '">删除</button></div>';
+              }).join('') + '</div>';
+          }).join('');
+        })()
         : '<div class="empty-hint muted">还没有余额记录</div>') +
       '</div></div>';
 
@@ -860,37 +872,40 @@ window.WalletView = (function () {
     });
   }
 
-  // 记余额：某日某账户的余额快照
+  // 记余额（v1.1.2）：一次记录多个账户的余额（留空跳过该账户），同批次同日期
   function openBalanceForm() {
     const accs = ((S.getDB().wallet || {}).accounts) || [];
     if (!accs.length) { UI.toast('请先添加账户', 'error'); return; }
     UI.modal({
-      title: '记余额', width: 460,
+      title: '记余额（可同时记录多个账户）', width: 520,
       bodyHTML: '<div class="form-grid">' +
-        '<label><span class="f-label">日期</span><input type="date" id="bf-date" value="' + today() + '"></label>' +
-        '<label><span class="f-label">账户</span><select id="bf-acc">' + accs.map(function (a) {
-          return '<option value="' + esc(a.id) + '">' + esc(a.name) + '</option>';
-        }).join('') + '</select></label>' +
-        '<label><span class="f-label">当时的余额 <span class="req-star">*</span></span>' +
-        '<input id="bf-bal" type="number" step="0.01" placeholder="0.00"></label>' +
-        '<label class="f-full"><span class="f-label">备注</span><input id="bf-note" placeholder="如：对账 / 发薪后"></label></div>',
+        '<label class="f-full"><span class="f-label">日期</span><input type="date" id="bf-date" value="' + today() + '"></label>' +
+        accs.map(function (a) {
+          return '<label><span class="f-label">' + esc(a.name) + '</span>' +
+            '<input type="number" step="0.01" data-bal-acc="' + esc(a.id) + '" placeholder="留空=不记" value="' + esc(a.balance) + '"></label>';
+        }).join('') +
+        '<label class="f-full"><span class="f-label">备注</span><input id="bf-note" placeholder="如：对账 / 发薪后"></label></div>' +
+        '<p class="muted small">默认填入当前余额，只改有变化的即可；留空的账户本次不记录。</p>',
       footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button><button class="btn btn-primary" data-x="s">保存</button>',
       onMount: function (w, close) {
         w.querySelector('[data-x=c]').addEventListener('click', close);
         w.querySelector('[data-x=s]').addEventListener('click', async function () {
-          const bal = Math.abs(Number(w.querySelector('#bf-bal').value) || 0);
-          if (!w.querySelector('#bf-bal').value && w.querySelector('#bf-bal').value !== '0') {
-            UI.toast('请填写余额', 'error'); return;
-          }
-          await S.saveBalanceRecord({
-            id: U.uid(), date: w.querySelector('#bf-date').value,
-            accountId: w.querySelector('#bf-acc').value,
-            balance: Number(w.querySelector('#bf-bal').value) || 0,
-            note: w.querySelector('#bf-note').value.trim(),
-            createdAt: new Date().toISOString()
+          const date = w.querySelector('#bf-date').value;
+          const note = w.querySelector('#bf-note').value.trim();
+          const recs = [];
+          w.querySelectorAll('[data-bal-acc]').forEach(function (el) {
+            const raw = el.value.trim();
+            if (raw === '') return; // 留空不记
+            recs.push({
+              id: U.uid(), date: date, accountId: el.getAttribute('data-bal-acc'),
+              balance: Number(raw) || 0, note: note,
+              createdAt: new Date().toISOString()
+            });
           });
+          if (!recs.length) { UI.toast('至少填写一个账户的余额', 'error'); return; }
+          await S.saveBalanceRecords(recs);
           close();
-          UI.toast('余额已记录', 'success');
+          UI.toast('已记录 ' + recs.length + ' 个账户的余额', 'success');
           window.App.refresh();
         });
       }

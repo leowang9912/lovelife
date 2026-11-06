@@ -21,6 +21,47 @@
   --sidebar-w: 232px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+
+  /* ===== 质感令牌层（提炼自成熟设计系统的质感配方，中文行高微调） =====
+     字阶成套（字重/字号/行高/字体族四元组，用法：font: var(--f-body)）
+     注意：必须带 var(--font)，否则 font 简写会把字体族重置为浏览器默认 */
+  --f-title-1: 700 24px/34px var(--font);      /* 页面主标题 */
+  --f-title-2: 600 20px/28px var(--font);      /* 大卡片标题 */
+  --f-title-3: 600 18px/26px var(--font);      /* 面板标题 */
+  --f-headline: 600 16px/24px var(--font);     /* 小节标题 */
+  --f-body: 400 14px/21px var(--font);         /* 主正文 */
+  --f-body-m: 500 14px/21px var(--font);       /* 主正文·强调 */
+  --f-body-2: 400 13px/19px var(--font);       /* 次级正文 */
+  --f-body-2-m: 500 13px/19px var(--font);     /* 次级正文·强调 */
+  --f-cap: 400 12px/17px var(--font);          /* 说明文字 */
+  --f-cap-m: 500 12px/17px var(--font);        /* 说明文字·强调 */
+  --f-cap-2: 500 11px/15px var(--font);        /* 微标签（tracking 略放） */
+  /* 阴影阶梯（6%/10% 柔和配方：近影浅、远影散） */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, .06), 0 1px 3px 0 rgba(0, 0, 0, .10);
+  --shadow-md: 0 2px 4px -1px rgba(0, 0, 0, .06), 0 4px 6px -1px rgba(0, 0, 0, .10);
+  --shadow-xl: 0 10px 10px -5px rgba(0, 0, 0, .04), 0 20px 25px -5px rgba(0, 0, 0, .10);
+  --shadow-card: 0 1px 1px 0 rgba(0, 0, 0, .05);   /* 白卡贴地 1px contact 影 */
+  --shadow-pop: 0 1px 1px 0 rgba(0, 0, 0, .04), 0 4px 12px 0 rgba(0, 0, 0, .08), 0 0 1px 0 rgba(0, 0, 0, .30);
+  /* 圆角阶梯 */
+  --r-sm: 6px;   /* 小控件/标签 */
+  --r-md: 8px;   /* 输入框/按钮 */
+  --r-lg: 10px;  /* 大按钮/卡片行 */
+  --r-xl: 12px;  /* 卡片 */
+  --r-2xl: 16px; /* 弹窗/大面板 */
+  /* 边框灰阶递进（默认→悬停→按下）+ 焦点环 */
+  --line-hover: #b8b8bf;
+  --line-active: #aeaeb2;
+  --focus-ring: 0 0 0 3.5px rgba(0, 113, 227, .28);
+  /* 主按钮纵向渐变（默认→悬停提亮→按下加深→禁用灰化） */
+  --grad-btn: linear-gradient(180deg, #2383e2 0%, var(--accent) 100%);
+  --grad-btn-hover: linear-gradient(180deg, #3795ec 0%, #1673cf 100%);
+  --grad-btn-active: linear-gradient(180deg, #0062c4 0%, #0058b0 100%);
+  --grad-btn-danger: linear-gradient(180deg, #ff453a 0%, var(--red) 100%);
+  /* 动效（统一缓动与时长档位） */
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --t-fast: .12s;
+  --t-base: .18s;
+  --t-slow: .28s;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }

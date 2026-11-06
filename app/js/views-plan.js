@@ -499,11 +499,8 @@ window.PlanView = (function () {
     root.innerHTML =
       '<div class="page-head"><h2>我的统计</h2><div class="page-actions">' +
       '<button class="btn btn-ghost" id="btn-edit-sections">' + (editMode ? '完成' : UI.icon('sliders-horizontal', 14) + ' 栏目设置') + '</button>' +
-      '<button class="btn btn-primary" data-act="add-device">' + UI.icon('plus', 14) + ' 记数码</button>' +
-      '<button class="btn btn-primary" data-act="add-clothing">' + UI.icon('plus', 14) + ' 记衣服</button>' +
-      '<button class="btn btn-primary" data-act="add-life">' + UI.icon('plus', 14) + ' 记美妆</button>' +
-      '<button class="btn btn-ghost" data-act="outfit">' + UI.icon('calendar-check', 14) + ' 穿搭打卡</button>' +
-      '<button class="btn btn-ghost" data-act="food">' + UI.icon('utensils', 14) + ' 美食打卡</button></div></div>' +
+      // 快捷记账/打卡已移至「我的主页」，此处不再重复（v1.1.2）
+      '</div></div>' +
       (editMode ? '<p class="muted pad-8">拖动面板可块内换序；按钮调宽度/隐藏/上下移；可整块屏蔽（屏蔽后可在栏目设置或设置页恢复）。</p>' : '') +
       '<div class="plan-wrap" id="plan-wrap"></div>';
 
@@ -614,16 +611,6 @@ window.PlanView = (function () {
         const idx = Number(b.getAttribute('data-size-btn'));
         db.settings.planSections[idx].size = b.getAttribute('data-size-val');
         S.saveSettings().then(function () { render(root); }).catch(function () { UI.toast('保存失败', 'error'); });
-      });
-    });
-    root.querySelectorAll('[data-act]').forEach(function (btn) {
-      btn.addEventListener('click', function () {
-        const act = btn.getAttribute('data-act');
-        if (act === 'add-device') window.Views.openItemEditor(null, 'digital');
-        if (act === 'add-clothing') window.Views.openItemEditor(null, 'clothing');
-        if (act === 'add-life') window.Views.openItemEditor(null, 'life');
-        if (act === 'outfit') window.Views.openOutfitEditor(U.todayStr());
-        if (act === 'food' && window.FoodView && window.FoodView.openFoodEditor) window.FoodView.openFoodEditor(U.todayStr(), null);
       });
     });
   }

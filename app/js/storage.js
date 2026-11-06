@@ -828,6 +828,20 @@ window.Storage = (function () {
     return persist('wallet');
   }
 
+  // 多账户批量快照（v1.1.2）：一次记录多个账户的余额（同批次同日期）
+  function saveBalanceRecords(recs) {
+    const list = db.wallet.balances || (db.wallet.balances = []);
+    const batchId = U.uid();
+    (recs || []).forEach(function (rec) {
+      if (!rec.id) rec.id = U.uid();
+      rec.batchId = rec.batchId || batchId;
+      const idx = list.findIndex(function (r) { return r.id === rec.id; });
+      if (idx >= 0) list[idx] = rec;
+      else list.push(rec);
+    });
+    return persist('wallet');
+  }
+
   function removeBalanceRecord(id) {
     db.wallet.balances = (db.wallet.balances || []).filter(function (r) { return r.id !== id; });
     return persist('wallet');
@@ -907,6 +921,33 @@ window.Storage = (function () {
     return Promise.all([persist('wallet'), persist('items'), persist('food')]);
   }
 
+  /* 物品 → 账单（v1.1.2）：已有词条一键生成购入账单并双向关联（词条同步的反向链路） */
+  function addBillFromItem(item) {
+    if (!item) return Promise.reject(new Error('物品不存在'));
+    // 已有购入账单则不重复生成
+    const exists = db.wallet.bills.find(function (b) { return b.itemId === item.id; });
+    if (exists) return Promise.reject(new Error('该物品已有购入账单'));
+    const kindMap = { device: 'w_shop_digital', game: 'w_shop_digital', clothing: 'w_shop_clothing', life: 'w_shop_beauty' };
+    const bill = {
+      id: U.uid(), type: 'expense',
+      amount: Math.abs(Number(item.purchasePrice) || 0),
+      date: item.purchaseDate || U.todayStr(), time: '',
+      catId: 'w_shop', subCatId: kindMap[item.kind] || 'w_shop_other',
+      accountId: '', note: item.name || '',
+      tagIds: [], itemId: item.id, source: 'manual',
+      createdAt: new Date().toISOString()
+    };
+    return saveBill(bill).then(function () {
+      // saveBill 的自动同步会挂关联；手动物品只补空字段不覆盖金额——补记场景强制对齐物品
+      const it = db.items.find(function (i) { return i.id === item.id; });
+      if (it) {
+        if (!it.purchasePrice) it.purchasePrice = bill.amount;
+        if (!it.purchaseDate) it.purchaseDate = bill.date;
+      }
+      return Promise.all([persist('items')]).then(function () { return bill; });
+    });
+  }
+
   function saveSettings() { return persist('settings'); }
 
   function resetAll() {
@@ -940,12 +981,13 @@ window.Storage = (function () {
     saveWalletTag: saveWalletTag, removeWalletTag: removeWalletTag,
     saveImportBatch: saveImportBatch, revertImport: revertImport,
     saveBillTemplate: saveBillTemplate, removeBillTemplate: removeBillTemplate,
-    unlinkBillSync: unlinkBillSync,
+    unlinkBillSync: unlinkBillSync, addBillFromItem: addBillFromItem,
     /* 词条同步（自动） */
     syncKindOfBill: syncKindOfBill, billsOfItem: billsOfItem,
     autoSyncItemFromBill: autoSyncItemFromBill, guessItemCat: guessItemCat,
     /* 账户余额记录 */
-    saveBalanceRecord: saveBalanceRecord, removeBalanceRecord: removeBalanceRecord,
+    saveBalanceRecord: saveBalanceRecord, saveBalanceRecords: saveBalanceRecords,
+    removeBalanceRecord: removeBalanceRecord,
     repairData: repairData,
     saveSettings: saveSettings, resetAll: resetAll
   };

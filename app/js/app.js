@@ -5,12 +5,13 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.1.1";
+  const FRONTEND_VERSION = "1.1.2";
 
-  let current = 'plan';
+  let current = 'home'; // 默认首屏=我的主页（v1.1.2）
   let booted = false;
 
   const NAV = [
+    { id: 'home', label: '我的主页', icon: 'house' },
     { id: 'plan', label: '我的统计', icon: 'chart-column' },
     { id: 'digital', label: '我的数码', icon: 'gamepad-2' },
     { id: 'clothing', label: '我的衣橱', icon: 'shirt' },
@@ -145,28 +146,43 @@ window.App = (function () {
     }
     app.innerHTML =
       '<aside class="sidebar">' +
-      '<div class="brand"><span class="brand-icon">∞</span>' +
-      '<div><div class="brand-name">人生管家</div><div class="brand-sub">' +
-      U.escapeHtml((db.account && db.account.icon) || '') + ' ' + U.escapeHtml((db.account && db.account.name) || '') +
-      '</div></div></div>' +
-      '<nav class="nav">' + navOrdered(db).map(function (n) {
+      '<div class="side-search"><span class="side-search-ic">' + window.UI.icon('search', 18) + '</span>' +
+      '<input id="global-search" placeholder="快速搜索"><span class="side-kbd">Ctrl K</span>' +
+      '<div class="search-results" id="search-results"></div></div>' +
+      '<nav class="nav">' + navOrdered(db).filter(function (n) { return n.id !== 'settings'; }).map(function (n) {
         return '<a class="nav-item' + (current === n.id ? ' active' : '') + '" data-nav="' + n.id + '">' +
           '<span class="nav-icon">' + window.UI.icon(n.icon, 20) + '</span><span>' + n.label + '</span></a>';
       }).join('') + '</nav>' +
-      '<div class="sidebar-foot"><div class="muted small">Ctrl+K 全局搜索 · 可整包迁移</div></div>' +
+      '<div class="sidebar-foot">' +
+      '<a class="nav-item' + (current === 'settings' ? ' active' : '') + '" data-nav="settings">' +
+      '<span class="nav-icon">' + window.UI.icon('settings', 20) + '</span><span>设置</span></a>' +
+      '<div class="side-divider"></div>' +
+      '<div class="side-account" id="side-account-jump" title="账号设置">' +
+      '<div class="side-avatar">' + U.escapeHtml((db.account && db.account.icon) || '😊') + '</div>' +
+      '<div class="side-account-name">' + U.escapeHtml((db.account && db.account.name) || '') + '</div>' +
+      '</div>' +
+      '</div>' +
       '<div class="sidebar-resizer" id="sidebar-resizer" title="拖动调节侧栏宽度；双击恢复默认"></div>' +
       '</aside>' +
       '<main class="main">' +
-      '<div class="top-search"><input id="global-search" placeholder="全局搜索物品 / 穿搭 / 美食…（Ctrl+K）">' +
-      '<div class="search-results" id="search-results"></div></div>' +
       '<div id="main-content"></div></main>';
 
     app.querySelectorAll('[data-nav]').forEach(function (el) {
       el.addEventListener('click', function () { go(el.getAttribute('data-nav')); });
     });
+    // 账户行：直达设置 → 账号页（v1.1.2）
+    const accJump = app.querySelector('#side-account-jump');
+    if (accJump) accJump.addEventListener('click', function () {
+      go('settings');
+      setTimeout(function () {
+        const b = document.querySelector('[data-stab-btn="account"]');
+        if (b) b.click();
+      }, 60);
+    });
 
     const main = document.getElementById('main-content');
-    if (current === 'plan') window.PlanView.render(main);
+    if (current === 'home') window.HomeView.render(main);
+    else if (current === 'plan') window.PlanView.render(main);
     else if (current === 'digital') window.Views.items(main, 'digital');
     else if (current === 'clothing') window.Views.items(main, 'clothing');
     else if (current === 'life') window.LifeView.render(main);
@@ -183,7 +199,7 @@ window.App = (function () {
   function bindSidebarResize(db) {
     const handle = document.getElementById('sidebar-resizer');
     if (!handle) return;
-    const MIN = 200, MAX = 360, DEF = 232;
+    const MIN = 176, MAX = 300, DEF = 200;
     let dragging = false;
     let lastW = Number(db.settings.sidebarWidth) || DEF;
     handle.addEventListener('pointerdown', function (e) {
@@ -282,7 +298,7 @@ window.App = (function () {
     if (!docClickBound) {
       docClickBound = true;
       document.addEventListener('click', function (e) {
-        if (!e.target.closest('.top-search')) {
+        if (!e.target.closest('.side-search') && !e.target.closest('.search-results')) {
           const rb = document.getElementById('search-results'); // 实时查找，避免闭包旧元素
           if (rb) rb.classList.remove('show');
         }

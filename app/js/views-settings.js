@@ -1,4 +1,4 @@
-/* views-settings.js — 设置页：6 组单列纵向排列（任何窗口下同宽逐项排布） */
+/* views-settings.js — 设置页：7 组单列纵向排列（账号/数据备份/记账设置/预算与成本/界面与偏好/软件/危险操作） */
 window.SettingsView = (function () {
   const U = window.Utils;
   const M = window.Models;
@@ -33,8 +33,8 @@ window.SettingsView = (function () {
         '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-add-acc">' + UI.icon('plus', 14) + ' 新建账号</button>' +
         '<button class="btn btn-ghost btn-sm" id="btn-switch-page">回到启动页</button></div>') +
 
-      /* 2️⃣ 数据与备份 */
-      section('data', '数据与备份',
+      /* 2️⃣ 数据备份：目录迁移 / 备份恢复 / 数据体检 */
+      section('data', '数据备份',
         '<p class="muted">数据按账号存放在根目录子文件夹（JSON + 图片），可整体迁移。</p>' +
         '<p class="path-text">当前根目录：<strong class="path-text">' + U.escapeHtml(db.dataRoot || '') + '</strong></p>' +
         '<div class="form-grid"><label class="f-full"><span class="f-label">新的数据根目录（绝对路径）</span>' +
@@ -44,23 +44,17 @@ window.SettingsView = (function () {
         '<button class="btn btn-ghost btn-sm" id="btn-export">' + UI.icon('download', 14) + ' 导出全量备份包</button>' +
         '<button class="btn btn-ghost btn-sm" id="btn-import">' + UI.icon('upload', 14) + ' 从备份恢复</button>' +
         '<input type="file" id="import-file" accept=".gz,.tar,.tgz" hidden></div>' +
-        '<h4 class="detail-sub">账单导入 / 导出（我的钱袋）</h4>' +
-        '<div id="s-bill-io"></div>' +
         '<h4 class="detail-sub">数据体检</h4>' +
         '<p class="muted small">检查并修复：账单与词条/美食的悬空关联、自动同步的孤儿记录、余额快照的失效账户。安全可重复执行。</p>' +
         '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="btn-repair">' + UI.icon('stethoscope', 14) + ' 开始体检</button>' +
         '<span id="repair-result" class="muted small"></span></div>') +
 
-      /* 3️⃣ 消费与统计口径 */
-      section('cost', '消费与统计口径',
-        '<h4 class="detail-sub">月度预算</h4>' +
-        '<div class="form-grid">' +
-        '<label><span class="f-label">每月总预算</span><input type="number" id="b-total" value="' + (budget.monthlyTotal || 0) + '"></label>' +
-        '<label><span class="f-label">数码预算</span><input type="number" id="b-digital" value="' + ((budget.categories || {}).digital || 0) + '"></label>' +
-        '<label><span class="f-label">衣服预算</span><input type="number" id="b-clothing" value="' + ((budget.categories || {}).clothing || 0) + '"></label>' +
-        '<label><span class="f-label">生活预算</span><input type="number" id="b-life" value="' + ((budget.categories || {}).life || 0) + '"></label>' +
-        '<label><span class="f-label">美食预算</span><input type="number" id="b-food" value="' + ((budget.categories || {}).food || 0) + '"></label>' +
-        '</div>' +
+      /* 3️⃣ 记账设置：账单导入导出 / 分类一览 / 分类预算 */
+      section('bill', '记账设置',
+        '<h4 class="detail-sub">账单导入 / 导出（我的钱袋）</h4>' +
+        '<div id="s-bill-io"></div>' +
+        '<h4 class="detail-sub">记账分类一览</h4>' +
+        (window.WalletView ? window.WalletView.catTreeCompactHTML() : '<p class="muted small">钱袋模块未加载</p>') +
         '<h4 class="detail-sub">记账分类预算（可选，0=不设）</h4>' +
         '<div class="form-grid">' +
         [['w_food', '食品餐饮'], ['w_shop', '购物消费'], ['w_traffic', '出行交通'],
@@ -69,20 +63,33 @@ window.SettingsView = (function () {
             '" value="' + ((budget.walletCats || {})[c[0]] || 0) + '"></label>';
         }).join('') +
         '</div>' +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-wcat-budget">' + UI.icon('save', 14) + ' 保存记账分类预算</button></div>') +
+
+      /* 4️⃣ 预算与成本：总预算 / 物品分域预算 / 成本模型 */
+      section('cost', '预算与成本',
+        '<h4 class="detail-sub">月度预算</h4>' +
+        '<div class="form-grid">' +
+        '<label><span class="f-label">每月总预算</span><input type="number" id="b-total" value="' + (budget.monthlyTotal || 0) + '"></label>' +
+        '</div>' +
+        '<h4 class="detail-sub">物品分域预算</h4>' +
+        '<div class="form-grid">' +
+        '<label><span class="f-label">数码预算</span><input type="number" id="b-digital" value="' + ((budget.categories || {}).digital || 0) + '"></label>' +
+        '<label><span class="f-label">衣服预算</span><input type="number" id="b-clothing" value="' + ((budget.categories || {}).clothing || 0) + '"></label>' +
+        '<label><span class="f-label">生活预算</span><input type="number" id="b-life" value="' + ((budget.categories || {}).life || 0) + '"></label>' +
+        '<label><span class="f-label">美食预算</span><input type="number" id="b-food" value="' + ((budget.categories || {}).food || 0) + '"></label>' +
+        '</div>' +
         '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-budget">' + UI.icon('save', 14) + ' 保存预算</button></div>' +
         '<h4 class="detail-sub">成本模型（寿命 / 残值率）</h4>' +
         catTable('digital', '数码（含游戏）', cats.digital) +
         catTable('clothing', '服饰（寿命参考）', cats.clothing) +
         catTable('life', '美妆（寿命参考）', cats.life) +
-        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">' + UI.icon('save', 14) + ' 保存成本模型</button></div>' +
-        '<h4 class="detail-sub">记账分类一览</h4>' +
-        (window.WalletView ? window.WalletView.catTreeCompactHTML() : '<p class="muted small">钱袋模块未加载</p>')) +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">' + UI.icon('save', 14) + ' 保存成本模型</button></div>') +
 
-      /* 4️⃣ 使用偏好 */
-      section('pref', '使用偏好',
-        '<div class="form-grid"><label><span class="f-label">吃灰预警天数</span>' +
-        '<input type="number" id="set-idle" value="' + (db.settings.idleWarnDays || 60) + '"></label></div>' +
-        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-settings">' + UI.icon('save', 14) + ' 保存偏好</button></div>' +
+      /* 5️⃣ 界面与偏好：导航排序 / 板块显示 / 吃灰预警 / 标签管理（两库并列） */
+      section('pref', '界面与偏好',
+        '<h4 class="detail-sub">侧栏导航排序</h4>' +
+        '<p class="muted small">调整左侧各栏目的显示顺序。</p>' +
+        '<div class="mini-table" id="nav-order-list"></div>' +
         '<h4 class="detail-sub">我的统计板块显示</h4>' +
         '<p class="muted">屏蔽后该板块整体从「我的统计」隐藏；可随时恢复。</p>' +
         '<div class="chip-row">' +
@@ -91,16 +98,22 @@ window.SettingsView = (function () {
           return '<label class="chip-check"><input type="checkbox" data-block-pref="' + b.id + '"' +
             (on ? ' checked' : '') + '><span>' + b.name + '</span></label>';
         }).join('') + '</div>' +
-        '<h4 class="detail-sub">侧栏导航排序</h4>' +
-        '<p class="muted small">调整左侧各栏目的显示顺序。</p>' +
-        '<div class="mini-table" id="nav-order-list"></div>' +
-        '<h4 class="detail-sub">标签管理</h4>' +
+        '<h4 class="detail-sub">吃灰预警天数</h4>' +
+        '<div class="form-grid"><label><span class="f-label">吃灰预警天数</span>' +
+        '<input type="number" id="set-idle" value="' + (db.settings.idleWarnDays || 60) + '"></label></div>' +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-settings">' + UI.icon('save', 14) + ' 保存偏好</button></div>' +
+        '<h4 class="detail-sub">物品标签库</h4>' +
         '<p class="muted">个人标签库：录入表单可直接选用。删除只影响标签库，已打标签的物品不受影响。</p>' +
         '<div class="mini-table" id="tag-lib-list"></div>' +
-        '<div class="tag-add-row"><input id="tag-lib-new" placeholder="添加标签到标签库">' +
-        '<button type="button" class="btn btn-ghost btn-sm" id="tag-lib-add">添加</button></div>') +
+        '<div class="tag-add-row"><input id="tag-lib-new" placeholder="添加标签到物品标签库">' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="tag-lib-add">添加</button></div>' +
+        '<h4 class="detail-sub">钱袋标签库</h4>' +
+        '<p class="muted">钱袋账单标签库：记一笔时可直接选用。删除时已打此标签的账单会移除标记。</p>' +
+        '<div class="mini-table" id="wtag-list"></div>' +
+        '<div class="tag-add-row"><input id="wtag-new" placeholder="添加标签到钱袋标签库">' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="wtag-add">添加</button></div>') +
 
-      /* 5️⃣ 软件 */
+      /* 6️⃣ 软件 */
       section('soft', '软件',
         '<p>当前版本：<strong id="cur-ver">…</strong> <span class="muted small" id="fe-ver"></span></p>' +
         '<div id="ver-mismatch"></div>' +
@@ -112,7 +125,7 @@ window.SettingsView = (function () {
         '<p class="muted small">在桌面创建「人生管家」快捷方式，双击即可启动（自动打开应用窗口）。</p>' +
         '<div id="update-info" class="muted small"></div>') +
 
-      /* 6️⃣ 危险操作 */
+      /* 7️⃣ 危险操作 */
       '<div class="panel panel-danger stab" data-stab="danger"><div class="panel-head"><h3>危险操作</h3></div><div class="panel-body">' +
       '<p class="muted">清空当前账号的全部数据（物品、穿搭、美食、记账账单/账户/余额记录、流水记录），不可恢复。建议先导出备份。</p>' +
       '<div class="btn-row"><button class="btn btn-danger" id="btn-reset">' + UI.icon('trash-2', 14) + ' 清空当前账号数据</button></div></div></div>' +
@@ -161,7 +174,7 @@ window.SettingsView = (function () {
     });
   }
 
-  /* 标签库管理（v1.0.9）：增删个人标签库；预设只读展示 */
+  /* 物品标签库（v1.0.9）：增删物品自定义标签库（customTags）；预设只读展示 */
   function refreshTagLib(root, db) {
     const box = root.querySelector('#tag-lib-list');
     if (!box) return;
@@ -172,17 +185,40 @@ window.SettingsView = (function () {
       '<span class="muted small">' + (presets.length ? presets.join('、') : '—') + '</span></div>' +
       (lib.length ? lib.map(function (t) {
         return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(t) + '</span>' +
-          '<button class="btn-icon" data-del-taglib="' + U.escapeHtml(t) + '" title="从标签库删除">' +
+          '<button class="btn-icon" data-del-taglib="' + U.escapeHtml(t) + '" title="从物品标签库删除">' +
           UI.icon('trash-2', 14) + '</button></div>';
       }).join('') : '<div class="mini-row"><span class="muted">标签库为空，可在录入表单输入自定义标签后自动入</span></div>');
     box.querySelectorAll('[data-del-taglib]').forEach(function (b) {
       b.addEventListener('click', async function () {
         const v = b.getAttribute('data-del-taglib');
-        if (!await UI.confirmDialog('删除标签', '从标签库删除「' + v + '」？已打此标签的物品不受影响。')) return;
+        if (!await UI.confirmDialog('删除标签', '从物品标签库删除「' + v + '」？已打此标签的物品不受影响。')) return;
         db.settings.customTags = (db.settings.customTags || []).filter(function (x) { return x !== v; });
         await S.saveSettings();
-        UI.toast('已从标签库删除', 'success');
+        UI.toast('已从物品标签库删除', 'success');
         refreshTagLib(root, db);
+      });
+    });
+  }
+
+  /* 钱袋标签库（六分组重组新增）：wallet.tags 增删，账单标签与物品标签分库管理 */
+  function refreshWalletTags(root, db) {
+    const box = root.querySelector('#wtag-list');
+    if (!box) return;
+    const tags = (db.wallet && db.wallet.tags) || [];
+    box.innerHTML = tags.length ? tags.map(function (t) {
+      return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(t.name) + '</span>' +
+        '<button class="btn-icon" data-del-wtag="' + U.escapeHtml(t.id) + '" title="从钱袋标签库删除">' +
+        UI.icon('trash-2', 14) + '</button></div>';
+    }).join('') : '<div class="mini-row"><span class="muted">钱袋标签库为空，记账时输入的标签会自动入库</span></div>';
+    box.querySelectorAll('[data-del-wtag]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        const id = b.getAttribute('data-del-wtag');
+        const tag = ((db.wallet && db.wallet.tags) || []).find(function (t) { return t.id === id; });
+        const name = tag ? tag.name : '';
+        if (!await UI.confirmDialog('删除标签', '从钱袋标签库删除「' + name + '」？已打此标签的账单会移除标记。')) return;
+        await S.removeWalletTag(id);
+        UI.toast('已从钱袋标签库删除', 'success');
+        refreshWalletTags(root, db);
       });
     });
   }
@@ -190,9 +226,10 @@ window.SettingsView = (function () {
   /* 分标签渲染（v1.0.9）：一次只显示一组；切换只换显隐，既有绑定不受影响 */
   const STABS = [
     { id: 'account', label: '账号', icon: 'users' },
-    { id: 'data', label: '数据与备份', icon: 'database' },
-    { id: 'cost', label: '消费与统计口径', icon: 'wallet' },
-    { id: 'pref', label: '使用偏好', icon: 'sliders-horizontal' },
+    { id: 'data', label: '数据备份', icon: 'database' },
+    { id: 'bill', label: '记账设置', icon: 'receipt' },
+    { id: 'cost', label: '预算与成本', icon: 'coins' },
+    { id: 'pref', label: '界面与偏好', icon: 'sliders-horizontal' },
     { id: 'soft', label: '软件', icon: 'app-window' },
     { id: 'danger', label: '危险操作', icon: 'triangle-alert' }
   ];
@@ -303,7 +340,7 @@ window.SettingsView = (function () {
       window.App.showAccountPicker();
     });
 
-    /* 数据与备份 */
+    /* 数据备份 */
     root.querySelector('#btn-move-root').addEventListener('click', async function () {
       const path = root.querySelector('#new-root').value.trim();
       if (!path) { UI.toast('请填写新路径', 'error'); return; }
@@ -332,30 +369,6 @@ window.SettingsView = (function () {
         UI.toast('已恢复', 'success'); window.App.refresh();
       } catch (err) { UI.toast(err.message, 'error'); }
     });
-    // 账单导入/导出（钱袋入口统一收在设置）
-    const billIO = root.querySelector('#s-bill-io');
-    if (billIO && window.WalletView) window.WalletView.mountImportUI(billIO);
-
-    /* 消费与统计口径 */
-    root.querySelector('#btn-save-budget').addEventListener('click', async function () {
-      const walletCats = {};
-      root.querySelectorAll('[data-wcat-budget]').forEach(function (el) {
-        const v = Number(el.value) || 0;
-        if (v > 0) walletCats[el.getAttribute('data-wcat-budget')] = v;
-      });
-      db.settings.budget = {
-        monthlyTotal: Number(root.querySelector('#b-total').value) || 0,
-        categories: {
-          digital: Number(root.querySelector('#b-digital').value) || 0,
-          clothing: Number(root.querySelector('#b-clothing').value) || 0,
-          life: Number(root.querySelector('#b-life').value) || 0,
-          food: Number(root.querySelector('#b-food').value) || 0
-        },
-        walletCats: walletCats
-      };
-      await S.saveSettings();
-      UI.toast('预算已保存', 'success');
-    });
     // 数据体检（v1.2.0）：修复悬空关联/孤儿同步记录
     const repairBtn = root.querySelector('#btn-repair');
     if (repairBtn) repairBtn.addEventListener('click', async function () {
@@ -371,6 +384,38 @@ window.SettingsView = (function () {
       } finally {
         repairBtn.disabled = false;
       }
+    });
+
+    /* 记账设置 */
+    // 账单导入/导出（钱袋入口统一收在设置）
+    const billIO = root.querySelector('#s-bill-io');
+    if (billIO && window.WalletView) window.WalletView.mountImportUI(billIO);
+    // 记账分类预算：只写 walletCats，与「预算与成本」的保存按钮互不覆盖
+    root.querySelector('#btn-save-wcat-budget').addEventListener('click', async function () {
+      const walletCats = {};
+      root.querySelectorAll('[data-wcat-budget]').forEach(function (el) {
+        const v = Number(el.value) || 0;
+        if (v > 0) walletCats[el.getAttribute('data-wcat-budget')] = v;
+      });
+      db.settings.budget = db.settings.budget || {};
+      db.settings.budget.walletCats = walletCats;
+      await S.saveSettings();
+      UI.toast('记账分类预算已保存', 'success');
+    });
+
+    /* 预算与成本 */
+    // 月度总预算 + 物品分域预算：只写 monthlyTotal+categories，walletCats 由记账设置单独维护，此处不动
+    root.querySelector('#btn-save-budget').addEventListener('click', async function () {
+      db.settings.budget = db.settings.budget || {};
+      db.settings.budget.monthlyTotal = Number(root.querySelector('#b-total').value) || 0;
+      db.settings.budget.categories = {
+        digital: Number(root.querySelector('#b-digital').value) || 0,
+        clothing: Number(root.querySelector('#b-clothing').value) || 0,
+        life: Number(root.querySelector('#b-life').value) || 0,
+        food: Number(root.querySelector('#b-food').value) || 0
+      };
+      await S.saveSettings();
+      UI.toast('预算已保存', 'success');
     });
     root.querySelector('#btn-save-cats').addEventListener('click', async function () {
       // 改动存 settings.costModelOverrides（服务端 load_db 会合并回分类树），
@@ -399,8 +444,9 @@ window.SettingsView = (function () {
       UI.toast('成本模型已保存', 'success');
     });
 
-    /* 使用偏好 */
+    /* 界面与偏好 */
     refreshNavOrder(root, db);
+    // 物品标签库（customTags）
     refreshTagLib(root, db);
     const tagAddBtn = root.querySelector('#tag-lib-add');
     if (tagAddBtn) tagAddBtn.addEventListener('click', async function () {
@@ -411,8 +457,22 @@ window.SettingsView = (function () {
       if (db.settings.customTags.indexOf(v) < 0) db.settings.customTags.push(v);
       inp.value = '';
       await S.saveSettings();
-      UI.toast('已加入标签库', 'success');
+      UI.toast('已加入物品标签库', 'success');
       refreshTagLib(root, db);
+    });
+    // 钱袋标签库（wallet.tags）
+    refreshWalletTags(root, db);
+    const wtagAddBtn = root.querySelector('#wtag-add');
+    if (wtagAddBtn) wtagAddBtn.addEventListener('click', async function () {
+      const inp = root.querySelector('#wtag-new');
+      const v = (inp.value || '').trim();
+      if (!v) { inp.focus(); return; }
+      const tags = (db.wallet && db.wallet.tags) || [];
+      if (tags.some(function (t) { return t.name === v; })) { UI.toast('该标签已存在', 'error'); return; }
+      await S.saveWalletTag({ name: v });
+      inp.value = '';
+      UI.toast('已加入钱袋标签库', 'success');
+      refreshWalletTags(root, db);
     });
     root.querySelector('#btn-save-settings').addEventListener('click', async function () {
       db.settings.idleWarnDays = Number(root.querySelector('#set-idle').value) || 60;

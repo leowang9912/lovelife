@@ -191,13 +191,57 @@ window.Views = (function () {
       title: (id ? '编辑' : '记') + (formKind === 'digital' ? '数码' : formKind === 'life' ? '美妆' : kindLabel(item.kind || formKind)),
       width: 720,
       bodyHTML: '<form id="item-form">' + UI.itemFormHTML(db, item, formKind) + '</form>' +
-        // 词条同步：新建物品可顺手记一笔购入账单（账单与物品双向关联）
-        (id ? '' : '<div class="form-section"><div class="form-section-title">' + UI.icon('receipt', 16) +
-          ' 词条同步</div><label class="chip-check"><input type="checkbox" id="item-sync-bill" checked>' +
-          '<span>同时在钱袋记一笔购入账单（金额/日期取本表单，可稍后修改）</span></label></div>'),
+        // 账单同步（v1.1.2）：新建可顺手记账；已有词条可补生成购入账单/查看关联
+        '<div class="form-section"><div class="form-section-title">' + UI.icon('receipt', 16) +
+        ' 账单同步</div><div id="item-bill-sync"></div></div>',
       footerHTML: '<button class="btn btn-ghost" data-act="cancel">取消</button><button class="btn btn-primary" data-act="save">保存</button>',
       onMount: function (wrap, close) {
         const form = wrap.querySelector('#item-form');
+        // 账单同步区：新建=顺手记账勾选；已有词条=生成购入账单/关联管理（v1.1.2）
+        function renderBillSync() {
+          const box = wrap.querySelector('#item-bill-sync');
+          if (!box) return;
+          const linked = id ? (S.billsOfItem ? S.billsOfItem(id) : []) : [];
+          if (!id) {
+            box.innerHTML = '<label class="chip-check"><input type="checkbox" id="item-sync-bill" checked>' +
+              '<span>同时在钱袋记一笔购入账单（金额/日期取本表单，可稍后修改）</span></label>';
+            return;
+          }
+          if (linked.length) {
+            box.innerHTML = '<p class="muted small">已关联 ' + linked.length + ' 笔账单（金额/日期互通）：</p>' +
+              linked.map(function (b) {
+                return '<div class="mini-row"><span class="muted">' + U.escapeHtml(b.date) + '</span>' +
+                  '<span class="flex1">' + U.escapeHtml(b.note || '') + '</span><strong>' +
+                  U.formatMoney(b.amount) + '</strong></div>';
+              }).join('') +
+              '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="btn-unlink-bill">解除关联</button></div>';
+            box.querySelector('#btn-unlink-bill').addEventListener('click', async function () {
+              if (await UI.confirmDialog('解除关联', '解除该物品与账单的关联？（账单保留）')) {
+                for (let i = 0; i < linked.length; i++) await S.unlinkBillSync(linked[i].id);
+                renderBillSync();
+                UI.toast('已解除关联', 'success');
+              }
+            });
+          } else {
+            box.innerHTML = '<p class="muted small">该词条还没有关联账单。可按当前物品信息（名称/购入价/购买日期）生成一笔购入账单，实现词条与账单互通。</p>' +
+              '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="btn-gen-bill">' +
+              UI.icon('receipt', 14) + ' 生成购入账单</button></div>';
+            box.querySelector('#btn-gen-bill').addEventListener('click', async function () {
+              try {
+                // 先保存当前表单（确保物品信息最新），再生成账单
+                const data = UI.readItemForm(form, item, formKind);
+                await S.saveItem(data);
+                await S.addBillFromItem(data);
+                UI.toast('已生成购入账单（可在钱袋查看/修改）', 'success');
+                renderBillSync();
+                window.App.refresh();
+              } catch (e) {
+                UI.toast(e.message || '生成失败', 'error');
+              }
+            });
+          }
+        }
+        renderBillSync();
         UI.bindFormToggles(form, db, formKind);
         UI.bindTagAdd(form);
         const uploader = UI.imageUploader(wrap.querySelector('#form-img-uploader'), { paths: item.images || [] });
@@ -676,13 +720,10 @@ window.Views = (function () {
       }).join('') + '</select>' +
       '<button class="btn btn-ghost" id="btn-today">今天</button>' +
       '<button class="btn btn-primary" id="btn-add-outfit">' + UI.icon('calendar-check', 14) + ' 穿搭打卡</button></div></div>' +
-      '<div class="panel weather-card" id="weather-card"><div class="panel-body">' +
-      '<p class="muted small">天气 · 穿搭推荐加载中…</p></div></div>' +
+      // 天气穿搭推荐已移至「我的主页」（v1.1.2），此处不再重复展示
       '<div class="cal-grid">' +
       ['日', '一', '二', '三', '四', '五', '六'].map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('') +
       cells + '</div>';
-
-    renderOutfitRec(root.querySelector('#weather-card'));
 
     root.querySelector('#jump-year').addEventListener('change', function (e) {
       calYear = Number(e.target.value); outfits(root);
@@ -987,6 +1028,6 @@ window.Views = (function () {
   return {
     items: items, outfits: outfits,
     openItemEditor: openItemEditor, openItemDetail: openItemDetail,
-    openOutfitEditor: openOutfitEditor
+    openOutfitEditor: openOutfitEditor, renderOutfitRec: renderOutfitRec
   };
 })();
