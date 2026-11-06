@@ -52,7 +52,11 @@ echo [INFO] Edge and Chrome not found, open with system default browser.
 start "" "http://127.0.0.1:8765/index.html"
 exit /b 0
 :RUN_BROWSER
-start "" "%BROWSER%" --app="http://127.0.0.1:8765/index.html" --window-size=1480,940
+rem window-size.txt = last window size saved by the app (format WxH); default 1480x940
+set "WW=1480"
+set "WH=940"
+if exist "%~dp0window-size.txt" for /f "usebackq tokens=1,2 delims=x" %%a in ("%~dp0window-size.txt") do (set "WW=%%a" & set "WH=%%b")
+start "" "%BROWSER%" --app="http://127.0.0.1:8765/index.html" --window-size=%WW%,%WH%
 exit /b 0
 
 :ALREADY_RUNNING

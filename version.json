@@ -1,14 +1,13 @@
 {
-  "version": "1.1.3",
+  "version": "1.1.4",
   "minSchema": 3,
   "publishedAt": "2026-11-06",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "钱袋升级：账户卡直接记余额+余额历史、导入明示余额影响可选不动余额、重复项可逐条勾回、分类管理可用、按筛选导出",
-    "数据安全加固：修复模板账单丢失、坏文件自动隔离、转账双侧校验、恢复前自动快照、删账号两档选择",
-    "词条同步修复：解除关联保留词条、同步美食可补图评分、售出价/回血率可见",
-    "体验升级：弹窗 Esc/遮罩防护、中文输入法保护、天气重新定位、统计环比口径、化妆品 0 次档、60+ 回归测试",
-    "UI：侧栏低调选中态、弹窗宽度三档、空态引导卡、修复大金额输入字号"
+    "修复穿搭打卡点分类筛选导致软件\"重启\"（表单按钮误提交整页刷新）",
+    "穿搭日历照片窗口固定 9:16 竖长条，旧照片完整显示；打卡照片按 9:16 裁切上传",
+    "窗口最小尺寸限制（小于 1024x700 自动拉回，布局不畸形）",
+    "窗口大小记忆：关闭时保存，下次启动按上次大小打开"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -16,6 +15,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.3/lovelife-v1.1.3-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.4/lovelife-v1.1.4-win64.zip"
   }
 }
