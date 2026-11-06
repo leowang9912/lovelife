@@ -6,8 +6,10 @@ window.Storage = (function () {
   let db = null;
   let session = null; // {accounts, lastAccountId, dataRoot}
   const listeners = [];
+  const accountChangeListeners = []; // 账号切换成功后的钩子（A3：模块筛选/搜索/排序状态统一重置）
 
   function onChange(fn) { listeners.push(fn); }
+  function onAccountChange(fn) { accountChangeListeners.push(fn); }
   function emit() {
     const ref = db;
     listeners.forEach(function (fn) { try { fn(ref); } catch (e) { console.error(e); } });
@@ -20,8 +22,30 @@ window.Storage = (function () {
 
   async function api(path, opts) {
     const r = await fetch(path, opts);
-    if (!r.ok && r.status >= 500) throw new Error('数据服务错误 ' + r.status);
+    if (!r.ok) {
+      // 服务端错误文案透传（如 409「账号已删除或已切换」），让 toast 能提示用户怎么办
+      let msg = '';
+      try {
+        const out = await r.json();
+        msg = out && out.error ? String(out.error) : '';
+      } catch (e) { /* 非 JSON 错误体忽略 */ }
+      throw new Error(msg || ('数据服务错误 ' + r.status));
+    }
     return r;
+  }
+
+  // load_db 读取侧体检提示（坏文件隔离/脏元素剔除）：toast 提醒一次，防静默丢数据
+  const warnedMsgs = {};
+  function notifyWarnings(list) {
+    if (!list || !list.length) return;
+    const UI = window.UI;
+    if (!UI || !UI.toast) return;
+    list.slice(0, 3).forEach(function (m) {
+      const key = String(m || '');
+      if (!key || warnedMsgs[key]) return;
+      warnedMsgs[key] = 1;
+      UI.toast(key, 'error');
+    });
   }
 
   /* ---------- 会话 / 账号 ---------- */
@@ -61,6 +85,15 @@ window.Storage = (function () {
     const out = await r.json();
     if (!out.ok) throw new Error(out.error || '删除失败');
     session.accounts = out.accounts;
+    // 删除的是当前登录账号：停止会话——清内存 db 并重载 /api/session，
+    // 防止旧会话继续保存把已删数据目录写活（目录复活）；调用方据此回到账号选择屏
+    const curId = (db && db.account && db.account.id) || '';
+    if (curId === id) {
+      db = null;
+      if (session) session.lastAccountId = '';
+      await loadSession().catch(function () {});
+      if (session) session.lastAccountId = '';
+    }
     return out.accounts;
   }
 
@@ -71,6 +104,8 @@ window.Storage = (function () {
     });
     if (session) session.lastAccountId = id;
     await loadAll(id);
+    // 账号切换成功：通知钩子重置各模块的筛选/搜索/排序状态（A3），防上一账号的状态残留
+    accountChangeListeners.forEach(function (fn) { try { fn(id); } catch (e) { console.error(e); } });
     return db;
   }
 
@@ -101,7 +136,9 @@ window.Storage = (function () {
       categories: raw.categories || M.defaultCategories(),
       settings: Object.assign(M.defaultSettings(), raw.settings || {}),
       wallet: Object.assign({
-        bills: [], accounts: [], cats: { expense: [], income: [] }, tags: [], imports: []
+        bills: [], accounts: [], cats: { expense: [], income: [] }, tags: [], imports: [],
+        // templates 兜底：服务端未下发（旧 exe）时必须是数组，否则 persist 会把 undefined 洗成 [] 毁掉已存模板
+        templates: [], balances: []
       }, raw.wallet || {}),
       dataRoot: raw.dataRoot || ''
     };
@@ -124,6 +161,7 @@ window.Storage = (function () {
         w_shop_beauty: 'life', w_shop_appliance: 'life', w_shop_home: 'life'
       };
     }
+    notifyWarnings(raw.warnings); // 服务端读取侧体检提示（坏文件已隔离等）
     emit();
     return db;
   }
@@ -160,7 +198,8 @@ window.Storage = (function () {
     const results = await Promise.all(jobs);
     for (const r of results) {
       const out = await r.json();
-      if (!out.ok) throw new Error('保存失败');
+      // 服务端 error 文案透传（如 409 账号已删除），toast 才能提示到点上
+      if (!out.ok) throw new Error(out.error || '保存失败');
     }
     emit();
   }
@@ -251,6 +290,7 @@ window.Storage = (function () {
   }
 
   function removeItem(id) {
+    const gone = db.items.find(function (i) { return i.id === id; });
     db.items = db.items.filter(function (i) { return i.id !== id; });
     db.outfits.forEach(function (o) {
       o.itemIds = (o.itemIds || []).filter(function (x) { return x !== id; });
@@ -258,11 +298,31 @@ window.Storage = (function () {
       if (o.cosmeticQty) delete o.cosmeticQty[id];
     });
     db.events = db.events.filter(function (e) { return e.itemId !== id; });
+    // 子物品的父引用置空（防 parentItemId 悬空）
+    db.items.forEach(function (i) {
+      if (i.parentItemId === id) delete i.parentItemId;
+    });
+    // 组合（妆容/穿搭 look）成员引用同步摘除（settings 里的组合成员，P1-3c 级联）
+    if (db.settings) {
+      ['makeupLooks', 'outfitLooks'].forEach(function (k) {
+        (db.settings[k] || []).forEach(function (c) {
+          if (c && Array.isArray(c.itemIds)) {
+            c.itemIds = c.itemIds.filter(function (x) { return x !== id; });
+          }
+        });
+      });
+    }
     // 钱袋账单解除关联（账单本身保留，只是不再指向这个物品）
     if (db.wallet) {
-      db.wallet.bills.forEach(function (b) { if (b.itemId === id) delete b.itemId; });
+      db.wallet.bills.forEach(function (b) {
+        if (b.itemId !== id) return;
+        delete b.itemId;
+        // 用户删掉了该账单自动生成的词条 = 不要这条同步，记 syncOff 防编辑账单时复活
+        if (gone && gone.fromBill === b.id) b.syncOff = true;
+      });
     }
-    return Promise.all([persist('items'), persist('outfits'), persist('events'), persist('wallet')]);
+    return Promise.all([persist('items'), persist('outfits'), persist('events'),
+      persist('settings'), persist('wallet')]);
   }
 
   /* 妆品使用次数（v1.0.9）：打卡可带 cosmeticQty {id: 次数}；旧记录无该字段视为 1 次
@@ -344,9 +404,15 @@ window.Storage = (function () {
   }
 
   function removeFood(id) {
+    const gone = db.food.find(function (f) { return f.id === id; });
     db.food = db.food.filter(function (f) { return f.id !== id; });
     // 账单侧解除美食引用（防止悬空 foodId 影响合并口径）
-    db.wallet.bills.forEach(function (b) { if (b.foodId === id) delete b.foodId; });
+    db.wallet.bills.forEach(function (b) {
+      if (b.foodId !== id) return;
+      delete b.foodId;
+      // 用户删掉了该账单自动生成的美食 = 不要这条同步，记 syncOff 防编辑账单时复活
+      if (gone && gone.fromBill === b.id) b.syncOff = true;
+    });
     return Promise.all([persist('food'), persist('wallet')]);
   }
 
@@ -375,9 +441,16 @@ window.Storage = (function () {
       return (db.wallet.accounts || []).find(function (a) { return a.id === id; });
     };
     if (bill.type === 'transfer') {
-      const from = find(bill.accountId), to = find(bill.toAccountId);
-      if (from) from.balance = (Number(from.balance) || 0) - s * amt;
-      if (to) to.balance = (Number(to.balance) || 0) + s * amt;
+      // 转账必须双侧账户都在（P0-4）：任一侧缺失/为空则两侧都不动——
+      // 单边生效 = 凭空造钱（只加不减）或吞钱（只减不加）
+      const from = bill.accountId ? find(bill.accountId) : null;
+      const to = bill.toAccountId ? find(bill.toAccountId) : null;
+      if (!from || !to) {
+        console.warn('[lovelife] 转账单边账户缺失，已跳过余额调整', bill.id, bill.accountId, bill.toAccountId);
+        return;
+      }
+      from.balance = (Number(from.balance) || 0) - s * amt;
+      to.balance = (Number(to.balance) || 0) + s * amt;
     } else if (bill.accountId) {
       const acc = find(bill.accountId);
       if (acc) acc.balance = (Number(acc.balance) || 0) + (bill.type === 'income' ? s * amt : -s * amt);
@@ -390,6 +463,9 @@ window.Storage = (function () {
     if (idx >= 0) {
       applyBillToBalance(db.wallet.bills[idx], -1);
       bill.createdAt = db.wallet.bills[idx].createdAt || bill.createdAt;
+      // syncOff（解除关联/删过同步记录的记忆）随账单本体继承：
+      // 编辑表单重建 rec 时可能丢该字段，漏继承会让同步"自动复活"（口径禁止）
+      if (!bill.syncOff && db.wallet.bills[idx].syncOff) bill.syncOff = true;
       db.wallet.bills[idx] = bill;
     } else {
       bill.createdAt = bill.createdAt || new Date().toISOString();
@@ -408,6 +484,7 @@ window.Storage = (function () {
     if (bill.syncOff && !explicitItemId) {
       // 用户解除过关联/删除过同步词条：不再自动同步（可手动关联回来）
       if (prevItem) autoCleanupItemForBill({ id: bill.id, itemId: prevItem.id });
+      if (prevFood) autoCleanupFoodForBill({ id: bill.id, foodId: prevFood.id });
     } else if (bill.type === 'expense' && domain && prevItem && prevItem.fromBill === bill.id) {
       const nm = billSyncName(bill);
       if (prevItem.name !== nm) prevItem.name = nm;
@@ -437,10 +514,12 @@ window.Storage = (function () {
 
     const isMeal = bill.syncOff ? null : MEAL_BY_CAT[bill.subCatId || bill.catId];
     // 二手回血：「二手闲置」收入按名称关联合品，自动回填售出价/售出日（回血率计算链路现成）
+    // 同名多个词条时跳过（P2-10）：唯一命中才回填，防误改别件的状态/售出价
     if (bill.type === 'income' && (bill.subCatId === 'w_in_resale' || bill.catId === 'w_in_resale')) {
       const nm = billSyncName(bill);
-      const soldItem = (db.items || []).find(function (i) { return i.name === nm; });
-      if (soldItem) {
+      const hits = (db.items || []).filter(function (i) { return i.name === nm; });
+      if (hits.length === 1) {
+        const soldItem = hits[0];
         soldItem.soldPrice = Number(bill.amount) || soldItem.soldPrice;
         soldItem.soldDate = bill.date;
         soldItem.status = 'sold';
@@ -448,16 +527,24 @@ window.Storage = (function () {
         soldItem.linkedBillIds = soldItem.linkedBillIds || [];
         if (soldItem.linkedBillIds.indexOf(bill.id) < 0) soldItem.linkedBillIds.push(bill.id);
         bill.itemId = soldItem.id;
+      } else if (hits.length > 1) {
+        console.warn('[lovelife] 二手回血：同名词条 ' + hits.length + ' 个，跳过售出回填以免误改', nm);
       }
     }
     if (bill.type === 'expense' && isMeal && prevFood && prevFood.fromBill === bill.id) {
       prevFood.linkedBillIds = prevFood.linkedBillIds || [];
       if (prevFood.linkedBillIds.indexOf(bill.id) < 0) prevFood.linkedBillIds.push(bill.id);
       bill.foodId = prevFood.id;
-      const fBills = db.wallet.bills.filter(function (b) { return b.foodId === prevFood.id; });
-      prevFood.price = Math.round(fBills.reduce(function (s, b) {
-        return s + Math.abs(Number(b.amount) || 0);
-      }, 0) * 100) / 100;
+      // 账单备注变更 → 美食名称跟随（与物品侧同口径，A7）
+      const foodName = billSyncName(bill);
+      if (prevFood.name !== foodName) prevFood.name = foodName;
+      // 价格默认=关联账单合计；用户改过（priceManual）则保留，不被账单静默改写（A7，与物品侧同口径）
+      if (!prevFood.priceManual) {
+        const fBills = db.wallet.bills.filter(function (b) { return b.foodId === prevFood.id; });
+        prevFood.price = Math.round(fBills.reduce(function (s, b) {
+          return s + Math.abs(Number(b.amount) || 0);
+        }, 0) * 100) / 100;
+      }
     } else {
       if (prevFood) autoCleanupFoodForBill({ id: bill.id, foodId: prevFood.id });
       autoSyncFoodFromBill(bill);
@@ -474,15 +561,9 @@ window.Storage = (function () {
     const prev = idx >= 0 ? JSON.parse(JSON.stringify(db.wallet.bills[idx])) : null;
     _applyBillMemory(bill, prev, idx);
     return _persistWalletAll().catch(function (err) {
-      // 持久化失败 → 回滚内存（防后续保存把未落盘的脏状态带上去）
-      applyBillToBalance(bill, -1);
-      if (idx >= 0) {
-        db.wallet.bills[idx] = prev;
-        applyBillToBalance(prev, 1);
-      } else {
-        db.wallet.bills = db.wallet.bills.filter(function (b) { return b.id !== bill.id; });
-      }
-      throw err;
+      // 持久化失败 → 从盘整体重载回滚全部内存副作用（词条/美食/余额/账单都可能被改过，
+      // 逐项手撤必然漏；磁盘是未成功的旧态，重载即一致），再把错误抛回给调用方 toast
+      return loadAll().catch(function () {}).then(function () { throw err; });
     });
   }
 
@@ -493,7 +574,10 @@ window.Storage = (function () {
       const idx = db.wallet.bills.findIndex(function (b) { return b.id === bill.id; });
       _applyBillMemory(bill, idx >= 0 ? db.wallet.bills[idx] : null, idx);
     });
-    return _persistWalletAll();
+    return _persistWalletAll().catch(function (err) {
+      // 失败同样整体重载回滚（批次 billIds 由调用方先记录全量，失败也可追溯/整批撤销）
+      return loadAll().catch(function () {}).then(function () { throw err; });
+    });
   }
 
   function removeBill(id) {
@@ -525,6 +609,10 @@ window.Storage = (function () {
     db.wallet.accounts = db.wallet.accounts.filter(function (a) { return a.id !== id; });
     // 同步清理该账户的余额快照（不留孤儿引用）
     db.wallet.balances = (db.wallet.balances || []).filter(function (r) { return r.accountId !== id; });
+    // 模板引用该账户的字段置空（模板保留，P2-11）
+    (db.wallet.templates || []).forEach(function (t) {
+      if (t && t.accountId === id) t.accountId = '';
+    });
     return persist('wallet');
   }
 
@@ -550,6 +638,12 @@ window.Storage = (function () {
         });
     };
     db.wallet.cats[kind] = strip(list);
+    // 模板引用该分类的字段置空（模板保留，P2-11）；一级被删时二级必悬空，一并置空
+    (db.wallet.templates || []).forEach(function (t) {
+      if (!t) return;
+      if (t.catId === id) { t.catId = ''; t.subCatId = ''; }
+      else if (t.subCatId === id) { t.subCatId = ''; }
+    });
     return persist('wallet');
   }
 
@@ -581,9 +675,10 @@ window.Storage = (function () {
   // 撤销一次导入：删除该批次账单、回滚余额，并清理自动同步的词条/美食（不留孤儿）
   function revertImport(batchId) {
     const batch = db.wallet.imports.find(function (x) { return x.id === batchId; });
-    const ids = (batch && batch.billIds) || [];
+    const ids = (batch && Array.isArray(batch.billIds)) ? batch.billIds : [];
     ids.forEach(function (id) {
-      const bill = db.wallet.bills.find(function (b) { return b.id === id; });
+      // 失败批次可能有 billIds 从未落盘：不存在的 id 容错跳过（不误伤别的账单）
+      const bill = db.wallet.bills.find(function (b) { return b && b.id === id; });
       if (!bill) return;
       applyBillToBalance(bill, -1);
       autoCleanupItemForBill(bill);
@@ -742,6 +837,7 @@ window.Storage = (function () {
   };
 
   function autoSyncFoodFromBill(bill) {
+    if (bill.syncOff) return null; // 解除关联/删过同步美食：防自动复活（与词条侧同口径）
     const cat = bill.subCatId || bill.catId;
     const meal = MEAL_BY_CAT[cat];
     if (!meal || bill.type !== 'expense') return null;
@@ -764,16 +860,21 @@ window.Storage = (function () {
       rec.linkedBillIds = rec.linkedBillIds || [];
       if (rec.linkedBillIds.indexOf(bill.id) < 0) rec.linkedBillIds.push(bill.id);
       if (rec.fromBill) {
-        const bills = db.wallet.bills.filter(function (b) { return b.foodId === rec.id; });
-        bills.push(bill);
-        rec.price = Math.round(bills.reduce(function (s, b) { return s + Math.abs(Number(b.amount) || 0); }, 0) * 100) / 100;
+        // 价格默认=关联账单合计；用户改过（priceManual）则保留（A7）
+        if (!rec.priceManual) {
+          const bills = db.wallet.bills.filter(function (b) { return b.foodId === rec.id; });
+          bills.push(bill);
+          rec.price = Math.round(bills.reduce(function (s, b) { return s + Math.abs(Number(b.amount) || 0); }, 0) * 100) / 100;
+        }
       } else if (rec.price == null || rec.price === '') {
         rec.price = Number(bill.amount) || 0;
       }
     } else {
       rec = {
         id: U.uid(), date: bill.date, meal: meal,
-        foodCuisine: '', foodType: '', name: name,
+        // 菜系预填「其他」（甲1）：账单来源没有菜系概念，空值会被编辑器"菜系必填"卡住，
+        // 补评分/图片永远存不上；预填「其他」最稳，手动新建仍必填
+        foodCuisine: '其他', foodType: '', name: name,
         price: Number(bill.amount) || 0, note: '', tags: [], images: [],
         linkedBillIds: [bill.id], fromBill: bill.id
       };
@@ -847,21 +948,83 @@ window.Storage = (function () {
     return persist('wallet');
   }
 
-  /* 数据体检（v1.2.0）：修复悬空关联/孤儿同步记录，报告修复数量 */
+  /* 数据体检（v1.2.0）：修复悬空关联/孤儿同步记录，报告修复数量
+     v1.1.3 口径：修引用但绝不删用户真实记录内容（置空/摘引用可以）；
+     删行仅限真孤儿（fromBill 指向已删账单且无其他关联的自动建档记录）。
+     步骤顺序：先清洗引用 → 再判孤儿 → 孤儿剔除后再清一遍引用 → 余额快照。 */
   function repairData() {
     let fixed = 0;
+    const warnings = [];
     const itemIds = {};
-    db.items.forEach(function (i) { itemIds[i.id] = true; });
+    db.items.forEach(function (i) { if (i && i.id) itemIds[i.id] = true; });
     const foodIds = {};
-    db.food.forEach(function (f) { foodIds[f.id] = true; });
+    db.food.forEach(function (f) { if (f && f.id) foodIds[f.id] = true; });
     const billIds = {};
-    db.wallet.bills.forEach(function (b) { billIds[b.id] = true; });
-    // 1. 账单指向不存在的词条/美食 → 解除
-    db.wallet.bills.forEach(function (b) {
-      if (b.itemId && !itemIds[b.itemId]) { delete b.itemId; fixed++; }
-      if (b.foodId && !foodIds[b.foodId]) { delete b.foodId; fixed++; }
-    });
-    // 2. 自动同步的孤儿记录（来源账单已不存在且无其他关联）→ 清理
+    db.wallet.bills.forEach(function (b) { if (b && b.id) billIds[b.id] = true; });
+    const accIds = {};
+    (db.wallet.accounts || []).forEach(function (a) { if (a && a.id) accIds[a.id] = true; });
+
+    // ---- 清洗悬空引用（只摘引用，不删记录本体） ----
+    function cleanRefs() {
+      // 账单 → 词条/美食：悬空解除
+      db.wallet.bills.forEach(function (b) {
+        if (b.itemId && !itemIds[b.itemId]) { delete b.itemId; fixed++; }
+        if (b.foodId && !foodIds[b.foodId]) { delete b.foodId; fixed++; }
+        // 账单指向已删账户：置空（不删账单）；转账双侧口径由 applyBillToBalance 兜底
+        if (b.accountId && !accIds[b.accountId]) { b.accountId = ''; fixed++; }
+        if (b.toAccountId && !accIds[b.toAccountId]) { b.toAccountId = ''; fixed++; }
+      });
+      // 词条/美食 linkedBillIds 悬空 → 摘除
+      [db.items, db.food].forEach(function (list) {
+        list.forEach(function (r) {
+          if (!r || !Array.isArray(r.linkedBillIds)) return;
+          const before = r.linkedBillIds.length;
+          r.linkedBillIds = r.linkedBillIds.filter(function (x) { return billIds[x]; });
+          if (r.linkedBillIds.length !== before) fixed++;
+        });
+      });
+      // 词条 parentItemId 悬空 → 置空
+      db.items.forEach(function (i) {
+        if (i && i.parentItemId && !itemIds[i.parentItemId]) { delete i.parentItemId; fixed++; }
+      });
+      // 穿搭打卡 itemIds/cosmeticIds/cosmeticQty 悬空 → 摘除
+      db.outfits.forEach(function (o) {
+        if (!o) return;
+        ['itemIds', 'cosmeticIds'].forEach(function (k) {
+          if (!Array.isArray(o[k])) return;
+          const before = o[k].length;
+          o[k] = o[k].filter(function (x) { return itemIds[x]; });
+          if (o[k].length !== before) fixed++;
+        });
+        if (o.cosmeticQty && typeof o.cosmeticQty === 'object') {
+          Object.keys(o.cosmeticQty).forEach(function (cid) {
+            if (!itemIds[cid]) { delete o.cosmeticQty[cid]; fixed++; }
+          });
+        }
+      });
+      // 事件 itemId 悬空 → 置空（事件本体保留）
+      db.events.forEach(function (e) {
+        if (e && e.itemId && !itemIds[e.itemId]) { delete e.itemId; fixed++; }
+      });
+      // 组合（妆容/穿搭 look）成员悬空 → 摘除
+      ['makeupLooks', 'outfitLooks'].forEach(function (k) {
+        (db.settings && db.settings[k] || []).forEach(function (c) {
+          if (!c || !Array.isArray(c.itemIds)) return;
+          const before = c.itemIds.length;
+          c.itemIds = c.itemIds.filter(function (x) { return itemIds[x]; });
+          if (c.itemIds.length !== before) fixed++;
+        });
+      });
+      // 导入批次 billIds 悬空 → 摘除
+      (db.wallet.imports || []).forEach(function (im) {
+        if (!im || !Array.isArray(im.billIds)) return;
+        const before = im.billIds.length;
+        im.billIds = im.billIds.filter(function (x) { return billIds[x]; });
+        if (im.billIds.length !== before) fixed++;
+      });
+    }
+    cleanRefs(); // 先清洗引用再判孤儿（否则 linkedBillIds 里的死引用会让真孤儿漏判）
+    // 自动同步的孤儿记录（来源账单已不存在且无其他关联）→ 清理（既有语义：真孤儿才删）
     db.items = db.items.filter(function (i) {
       if (i.fromBill && !billIds[i.fromBill] && !(i.linkedBillIds || []).length) { fixed++; return false; }
       return true;
@@ -870,27 +1033,55 @@ window.Storage = (function () {
       if (f.fromBill && !billIds[f.fromBill] && !(f.linkedBillIds || []).length) { fixed++; return false; }
       return true;
     });
-    // 3. linkedBillIds 里的悬空引用 → 剔除
+    cleanRefs(); // 孤儿剔除可能产生新的悬空引用（如打卡/账单还指着被清的词条），再清一遍
+
+    // ---- 停用物品补记停用时间（甲11，v1.1.6 数据体检）----
+    // v1.1.0 前停用的物品从未补写 retiredAt，useEndDate 走 now 兜底导致「共使用 X 天」每天还在涨。
+    // 回填规则：status ∈ 闲置/借出/待出闲置/损坏报废/已售出/已转赠 且无 retiredAt 的物品，
+    // retiredAt = 最近使用记录日期（usageLog 最大 date）|| updatedAt（ISO 取日期部分）|| purchaseDate || 今天。
+    // 只在 repairData（数据体检）触发；自动保存路径（saveItem）维持既有口径不变。幂等：补过就不再动。
+    const RETIRED_STATUS = { idle: 1, borrowed: 1, to_sell: 1, broken: 1, sold: 1, gifted: 1 };
+    const dateRe = /^\d{4}-\d{2}-\d{2}/;
+    let backfilled = 0;
     db.items.forEach(function (i) {
-      if (!i.linkedBillIds) return;
-      const before = i.linkedBillIds.length;
-      i.linkedBillIds = i.linkedBillIds.filter(function (x) { return billIds[x]; });
-      if (i.linkedBillIds.length !== before) fixed++;
+      if (!i || i.retiredAt || !RETIRED_STATUS[i.status]) return;
+      let d = '';
+      (i.usageLog || []).forEach(function (l) {
+        const ld = l && l.date && dateRe.test(String(l.date)) ? String(l.date).slice(0, 10) : '';
+        if (ld && ld > d) d = ld;
+      });
+      if (!d && i.updatedAt && dateRe.test(String(i.updatedAt))) d = String(i.updatedAt).slice(0, 10);
+      if (!d && i.purchaseDate && dateRe.test(String(i.purchaseDate))) d = String(i.purchaseDate).slice(0, 10);
+      if (!d) d = U.todayStr();
+      i.retiredAt = d;
+      backfilled++;
     });
-    db.food.forEach(function (f) {
-      if (!f.linkedBillIds) return;
-      const before = f.linkedBillIds.length;
-      f.linkedBillIds = f.linkedBillIds.filter(function (x) { return billIds[x]; });
-      if (f.linkedBillIds.length !== before) fixed++;
+    if (backfilled) warnings.push('已为 ' + backfilled + ' 件停用物品补记停用时间');
+
+    // ---- 余额快照 ----
+    // 无 accountId 的旧余额记录（v1.1.2 前的数据）不是孤儿，绝不删：
+    // 只有一个账户时回填它；多账户保留原样并计 warnings
+    let legacy = 0;
+    const onlyAcc = (db.wallet.accounts || []).length === 1 ? db.wallet.accounts[0].id : '';
+    const kept = [];
+    (db.wallet.balances || []).forEach(function (r) {
+      if (!r || !r.accountId) {
+        if (r) {
+          if (onlyAcc) { r.accountId = onlyAcc; fixed++; }
+          else legacy++;
+          kept.push(r);
+        }
+      } else if (accIds[r.accountId]) {
+        kept.push(r);
+      } else {
+        fixed++; // 指向已删账户的孤儿快照才删
+      }
     });
-    // 4. 余额快照指向不存在的账户 → 剔除
-    const accIds = {};
-    (db.wallet.accounts || []).forEach(function (a) { accIds[a.id] = true; });
-    const balBefore = (db.wallet.balances || []).length;
-    db.wallet.balances = (db.wallet.balances || []).filter(function (r) { return accIds[r.accountId]; });
-    if (db.wallet.balances.length !== balBefore) fixed += balBefore - db.wallet.balances.length;
+    db.wallet.balances = kept;
+    if (legacy) warnings.push('有 ' + legacy + ' 条旧余额记录未关联账户（多账户无法自动归属，已保留原样）');
+    if (warnings.length) notifyWarnings(warnings);
     return Promise.all([persist('items'), persist('food'), persist('wallet')]).then(function () {
-      return { fixed: fixed };
+      return { fixed: fixed, warnings: warnings };
     });
   }
 
@@ -910,12 +1101,25 @@ window.Storage = (function () {
   }
 
   // 解除账单的词条同步（用户手动断开；syncOff 后编辑不再自动复活）
-  function unlinkBillSync(billId) {
+  // keepRec=true（「解除关联」入口，A6）：只解绑不删词条——词条保留并转手动维护
+  // （fromBill 摘除，此后任何路径都不得触发删除）；keepRec 省略=既有语义
+  // （自动生成且无其他关联的词条随同步删除），与 v113 回归锁口径一致
+  function unlinkBillSync(billId, keepRec) {
     const bill = db.wallet.bills.find(function (b) { return b.id === billId; });
     if (!bill) return Promise.resolve();
     bill.syncOff = true;
-    autoCleanupItemForBill({ id: billId, itemId: bill.itemId });
-    autoCleanupFoodForBill({ id: billId, foodId: bill.foodId });
+    if (keepRec) {
+      const item = bill.itemId ? db.items.find(function (i) { return i.id === bill.itemId; }) : null;
+      const food = bill.foodId ? db.food.find(function (f) { return f.id === bill.foodId; }) : null;
+      [item, food].forEach(function (rec) {
+        if (!rec) return;
+        rec.linkedBillIds = (rec.linkedBillIds || []).filter(function (x) { return x !== billId; });
+        if (rec.fromBill === billId) delete rec.fromBill;
+      });
+    } else {
+      autoCleanupItemForBill({ id: billId, itemId: bill.itemId });
+      autoCleanupFoodForBill({ id: billId, foodId: bill.foodId });
+    }
     delete bill.itemId;
     delete bill.foodId;
     return Promise.all([persist('wallet'), persist('items'), persist('food')]);
@@ -924,8 +1128,10 @@ window.Storage = (function () {
   /* 物品 → 账单（v1.1.2）：已有词条一键生成购入账单并双向关联（词条同步的反向链路） */
   function addBillFromItem(item) {
     if (!item) return Promise.reject(new Error('物品不存在'));
-    // 已有购入账单则不重复生成
-    const exists = db.wallet.bills.find(function (b) { return b.itemId === item.id; });
+    // 已有购入（支出）账单则不重复生成；二手回血收入账单不算购入，不能误挡补记（P2-9）
+    const exists = db.wallet.bills.find(function (b) {
+      return b.itemId === item.id && b.type === 'expense';
+    });
     if (exists) return Promise.reject(new Error('该物品已有购入账单'));
     const kindMap = { device: 'w_shop_digital', game: 'w_shop_digital', clothing: 'w_shop_clothing', life: 'w_shop_beauty' };
     const bill = {
@@ -966,7 +1172,8 @@ window.Storage = (function () {
     createAccount: createAccount, updateAccount: updateAccount,
     deleteAccount: deleteAccount, selectAccount: selectAccount,
     setDataRoot: setDataRoot, accId: accId,
-    getDB: getDB, onChange: onChange, loadAll: loadAll, persist: persist,
+    getDB: getDB, onChange: onChange, onAccountChange: onAccountChange,
+    loadAll: loadAll, persist: persist,
     uploadBlob: uploadBlob, saveImages: saveImages, saveImage: saveImage,
     compressImage: compressImage, getImageURL: getImageURL,
     exportBackup: exportBackup, importBackup: importBackup,

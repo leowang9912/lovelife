@@ -6,27 +6,42 @@ window.Views = (function () {
   const UI = window.UI;
 
   function kindLabel(k) {
-    return { digital: '数码', device: '设备', game: '游戏', clothing: '衣服', life: '生活' }[k] || k;
+    // 域标签统一到页面叫法（我的数码/我的衣橱/我的生活），与钱袋 domainLabel 同口径
+    return { digital: '我的数码', device: '我的数码', game: '我的数码', clothing: '我的衣橱', life: '我的生活' }[k] || k;
   }
 
   /* =============== 物品库 =============== */
-  const itemState = { kind: null, filterCat: '', filterStatus: '', filterTag: '', search: '', sorts: {} };
+  // 筛选记忆策略统一（甲23-④）：数码/衣橱各自独立记忆，切页不互清（此前互切清空、
+  // 切去钱袋回来保留，两套行为不一致）
+  const itemState = { kind: null, filters: {}, sorts: {} };
+  function filterStateOf(kind) {
+    if (!itemState.filters[kind]) {
+      itemState.filters[kind] = { filterCat: '', filterStatus: '', filterTag: '', search: '' };
+    }
+    return itemState.filters[kind];
+  }
+
+  /* 账号切换重置（A3）：清筛选/搜索/排序缓存，排序记忆改从新账号 listSort 重读 */
+  function resetState() {
+    itemState.kind = null;
+    itemState.filters = {};
+    itemState.sorts = {};
+  }
 
   function items(root, kind) {
-    if (itemState.kind !== kind) {
-      itemState.kind = kind; itemState.filterCat = ''; itemState.filterStatus = ''; itemState.filterTag = ''; itemState.search = '';
-    }
+    const fs = filterStateOf(kind);
+    itemState.kind = kind;
     const db = S.getDB();
     if (!db) return;
     const cats = UI.catsFor(db, kind);
     const kinds = kind === 'digital' ? ['device', 'game'] : [kind];
     const all = M.itemsWithComputed(db).filter(function (i) { return kinds.indexOf(i.kind) >= 0; });
     let list = all;
-    if (itemState.filterCat) list = list.filter(function (i) { return i.categoryId === itemState.filterCat || i.subCategoryId === itemState.filterCat; });
-    if (itemState.filterStatus) list = list.filter(function (i) { return (i.status || 'in_use') === itemState.filterStatus; });
-    if (itemState.filterTag) list = list.filter(function (i) { return (i.tags || []).indexOf(itemState.filterTag) >= 0; });
-    if (itemState.search) {
-      const q = itemState.search.toLowerCase();
+    if (fs.filterCat) list = list.filter(function (i) { return i.categoryId === fs.filterCat || i.subCategoryId === fs.filterCat; });
+    if (fs.filterStatus) list = list.filter(function (i) { return (i.status || 'in_use') === fs.filterStatus; });
+    if (fs.filterTag) list = list.filter(function (i) { return (i.tags || []).indexOf(fs.filterTag) >= 0; });
+    if (fs.search) {
+      const q = fs.search.toLowerCase();
       list = list.filter(function (i) {
         return (i.name || '').toLowerCase().indexOf(q) >= 0 || (i.brand || '').toLowerCase().indexOf(q) >= 0 ||
           (i.notes || '').toLowerCase().indexOf(q) >= 0 || (i.shade || '').toLowerCase().indexOf(q) >= 0;
@@ -55,24 +70,24 @@ window.Views = (function () {
       (kind === 'clothing' ? '<button class="btn btn-ghost" id="btn-outfit-looks">' + UI.icon('layers', 14) + ' 穿搭组合</button>' : '') +
       '<button class="btn btn-primary" id="btn-add-item">' + UI.icon('plus', 14) + ' 记' + (kind === 'digital' ? '数码' : '衣服') + '</button></div></div>' +
       '<div class="filter-bar">' +
-      '<input class="search-input" id="item-search" placeholder="搜索名称 / 品牌 / 备注…" value="' + U.escapeHtml(itemState.search) + '">' +
+      '<input class="search-input" id="item-search" placeholder="搜索名称 / 品牌 / 备注…" value="' + U.escapeHtml(fs.search) + '">' +
       '<select id="filter-cat"><option value="">全部种类</option>' +
       cats.map(function (c) {
-        let opts = '<option value="' + c.id + '"' + (itemState.filterCat === c.id ? ' selected' : '') + '>' + U.escapeHtml(c.name) + '</option>';
+        let opts = '<option value="' + c.id + '"' + (fs.filterCat === c.id ? ' selected' : '') + '>' + U.escapeHtml(c.name) + '</option>';
         if (c.children) {
           c.children.forEach(function (s) {
-            opts += '<option value="' + s.id + '"' + (itemState.filterCat === s.id ? ' selected' : '') + '>　' + U.escapeHtml(s.name) + '</option>';
+            opts += '<option value="' + s.id + '"' + (fs.filterCat === s.id ? ' selected' : '') + '>　' + U.escapeHtml(s.name) + '</option>';
           });
         }
         return opts;
       }).join('') + '</select>' +
       '<select id="filter-status"><option value="">全部状态</option>' +
       [['in_use', '在用'], ['idle', '闲置'], ['borrowed', '借出'], ['to_sell', '待出闲置'], ['broken', '损坏报废'], ['sold', '已售出'], ['gifted', '已转赠']].map(function (s) {
-        return '<option value="' + s[0] + '"' + (itemState.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
+        return '<option value="' + s[0] + '"' + (fs.filterStatus === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select>' +
       '<select id="filter-tag"><option value="">全部标签</option>' +
       tagOptions.map(function (t) {
-        return '<option value="' + U.escapeHtml(t) + '"' + (itemState.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
+        return '<option value="' + U.escapeHtml(t) + '"' + (fs.filterTag === t ? ' selected' : '') + '>' + U.escapeHtml(t) + '</option>';
       }).join('') + '</select>' +
       '<select id="filter-sort" title="排序字段">' +
       UI.sortOptionsFor(sortKinds).map(function (d) {
@@ -86,40 +101,55 @@ window.Views = (function () {
           return UI.itemCard(i, { icon: icons[kind], quickAdd: true, sortKey: sortState.key });
         }).join('') + '</div>'
         : (all.length
-          ? '<div class="empty-state"><div class="empty-icon">' + UI.iconOrEmoji(icons[kind], 48) + '</div>' +
+          // 空态卡化（丙3）：有筛选保留「清除筛选」
+          ? '<div class="empty-state empty-card"><div class="empty-icon">' + UI.iconOrEmoji(icons[kind], 48) + '</div>' +
             '<p>没有符合筛选的结果</p><button class="btn btn-ghost" id="btn-clear-filter">清除筛选</button></div>'
-          : '<div class="empty-state"><div class="empty-icon">' + UI.iconOrEmoji(icons[kind], 48) + '</div><p>还没有记录</p></div>'));
+          : '<div class="empty-state empty-card"><div class="empty-icon">' + UI.iconOrEmoji(icons[kind], 48) + '</div>' +
+            '<p>还没有记录，先记' + (kind === 'digital' ? '一件数码' : '一件衣服') + '吧</p>' +
+            '<button class="btn btn-ghost" id="btn-empty-add">＋ 记' + (kind === 'digital' ? '数码' : '衣服') + '</button></div>'));
 
     root.querySelector('#btn-add-item').addEventListener('click', function () { openItemEditor(null, kind); });
+    const emptyAdd = root.querySelector('#btn-empty-add');
+    if (emptyAdd) emptyAdd.addEventListener('click', function () { openItemEditor(null, kind); });
     const btnLooks = root.querySelector('#btn-outfit-looks');
     if (btnLooks) btnLooks.addEventListener('click', function () { openOutfitLooks(root); });
-    // 中文输入法组词期间不重绘（否则候选窗被打断），组词结束再刷新（v1.0.9）
+    // 中文输入法组词期间不重绘（否则候选窗被打断），组词结束再刷新（v1.0.9）；
+    // 重绘后恢复光标 offset（甲9）：不再一律跳末尾
     const searchEl = root.querySelector('#item-search');
     let composing = false;
-    const refreshSearch = function (val) {
-      itemState.search = val;
+    const refreshSearch = function (val, selStart, selEnd) {
+      fs.search = val;
       items(root, kind);
       const inp = root.querySelector('#item-search');
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      if (inp) {
+        inp.focus();
+        try {
+          const pos = selStart == null ? inp.value.length : selStart;
+          inp.setSelectionRange(pos, selEnd == null ? pos : selEnd);
+        } catch (e) { /* date 类输入不支持 selection，忽略 */ }
+      }
     };
     searchEl.addEventListener('compositionstart', function () { composing = true; });
-    searchEl.addEventListener('compositionend', function (e) { composing = false; refreshSearch(e.target.value); });
+    searchEl.addEventListener('compositionend', function (e) {
+      composing = false;
+      refreshSearch(e.target.value, e.target.selectionStart, e.target.selectionEnd);
+    });
     searchEl.addEventListener('input', U.debounce(function (e) {
       if (composing) return;
-      refreshSearch(e.target.value);
+      refreshSearch(e.target.value, e.target.selectionStart, e.target.selectionEnd);
     }, 280));
     root.querySelector('#filter-cat').addEventListener('change', function (e) {
-      itemState.filterCat = e.target.value; items(root, kind);
+      fs.filterCat = e.target.value; items(root, kind);
     });
     root.querySelector('#filter-status').addEventListener('change', function (e) {
-      itemState.filterStatus = e.target.value; items(root, kind);
+      fs.filterStatus = e.target.value; items(root, kind);
     });
     root.querySelector('#filter-tag').addEventListener('change', function (e) {
-      itemState.filterTag = e.target.value; items(root, kind);
+      fs.filterTag = e.target.value; items(root, kind);
     });
     const clearBtn = root.querySelector('#btn-clear-filter');
     if (clearBtn) clearBtn.addEventListener('click', function () {
-      itemState.filterCat = ''; itemState.filterStatus = ''; itemState.filterTag = ''; itemState.search = '';
+      fs.filterCat = ''; fs.filterStatus = ''; fs.filterTag = ''; fs.search = '';
       items(root, kind);
     });
     function persistSort() {
@@ -158,7 +188,7 @@ window.Views = (function () {
           UI.toast('保存失败，已还原', 'error');
           return;
         }
-        UI.toast('穿着 +1', 'success');
+        UI.toast(kind === 'clothing' ? '穿着 +1' : '使用 +1', 'success');
         items(root, kind);
       });
     });
@@ -187,14 +217,20 @@ window.Views = (function () {
       };
     }
     const formKind = kind || item.kind;
+    // 弹窗标题统一到按钮叫法（记/编辑 + 数码/衣服/美妆）：device/game 归「数码」，不再冒「编辑设备」
+    const titleWord = formKind === 'life' ? '美妆'
+      : formKind === 'clothing' ? '衣服'
+        : (formKind === 'digital' || formKind === 'device' || formKind === 'game') ? '数码'
+          : kindLabel(item.kind || formKind);
     UI.modal({
-      title: (id ? '编辑' : '记') + (formKind === 'digital' ? '数码' : formKind === 'life' ? '美妆' : kindLabel(item.kind || formKind)),
+      title: (id ? '编辑' : '记') + titleWord,
       width: 720,
       bodyHTML: '<form id="item-form">' + UI.itemFormHTML(db, item, formKind) + '</form>' +
         // 账单同步（v1.1.2）：新建可顺手记账；已有词条可补生成购入账单/查看关联
         '<div class="form-section"><div class="form-section-title">' + UI.icon('receipt', 16) +
         ' 账单同步</div><div id="item-bill-sync"></div></div>',
       footerHTML: '<button class="btn btn-ghost" data-act="cancel">取消</button><button class="btn btn-primary" data-act="save">保存</button>',
+      formGuard: true, // 带表单弹窗：误点遮罩先确认「放弃已填内容？」（甲8）
       onMount: function (wrap, close) {
         const form = wrap.querySelector('#item-form');
         // 账单同步区：新建=顺手记账勾选；已有词条=生成购入账单/关联管理（v1.1.2）
@@ -216,25 +252,36 @@ window.Views = (function () {
               }).join('') +
               '<div class="btn-row"><button type="button" class="btn btn-ghost btn-sm" id="btn-unlink-bill">解除关联</button></div>';
             box.querySelector('#btn-unlink-bill').addEventListener('click', async function () {
-              if (await UI.confirmDialog('解除关联', '解除该物品与账单的关联？（账单保留）')) {
-                for (let i = 0; i < linked.length; i++) await S.unlinkBillSync(linked[i].id);
+              // 文案与行为一致（A6）：解除关联只解绑不删词条
+              if (await UI.confirmDialog('解除关联', '解除后词条将保留，不再与账单同步')) {
+                for (let i = 0; i < linked.length; i++) await S.unlinkBillSync(linked[i].id, true);
                 renderBillSync();
                 UI.toast('已解除关联', 'success');
               }
             });
           } else {
-            box.innerHTML = '<p class="muted small">该词条还没有关联账单。可按当前物品信息（名称/购入价/购买日期）生成一笔购入账单，实现词条与账单互通。</p>' +
+            box.innerHTML = '<p class="muted small">该词条还没有关联账单。点下面的按钮会<b>先保存物品当前内容</b>（含校验与新图片），再按名称/购入价/购买日期生成一笔购入账单，实现词条与账单互通。</p>' +
               '<div class="btn-row"><button type="button" class="btn btn-primary btn-sm" id="btn-gen-bill">' +
-              UI.icon('receipt', 14) + ' 生成购入账单</button></div>';
+              UI.icon('receipt', 14) + ' 生成购入账单（将先保存物品当前内容）</button></div>';
             box.querySelector('#btn-gen-bill').addEventListener('click', async function () {
+              const gbtn = box.querySelector('#btn-gen-bill');
               try {
-                // 先保存当前表单（确保物品信息最新），再生成账单
+                // 甲3：先跑校验 + 图片落盘保存物品当前内容，再生成账单——
+                // 不再空名称/0 元裸生成，也不再丢新增图片
                 const data = UI.readItemForm(form, item, formKind);
-                await S.saveItem(data);
-                await S.addBillFromItem(data);
-                UI.toast('已生成购入账单（可在钱袋查看/修改）', 'success');
-                renderBillSync();
-                window.App.refresh();
+                const errs = M.validateItem(db, data);
+                if (errs.length) { UI.toast(errs.join('；'), 'error'); return; }
+                UI.loadingBtn(gbtn, true);
+                try {
+                  data.images = await uploader.finalize();
+                  await S.saveItem(data);
+                  await S.addBillFromItem(data);
+                  UI.toast('已生成购入账单（可在钱袋查看/修改）', 'success');
+                  renderBillSync();
+                  window.App.refresh();
+                } finally {
+                  UI.loadingBtn(gbtn, false);
+                }
               } catch (e) {
                 UI.toast(e.message || '生成失败', 'error');
               }
@@ -251,7 +298,7 @@ window.Views = (function () {
           const errs = M.validateItem(db, data);
           if (errs.length) { UI.toast(errs.join('；'), 'error'); return; }
           const btn = wrap.querySelector('[data-act=save]');
-          btn.disabled = true; btn.textContent = '保存中…';
+          UI.loadingBtn(btn, true); // 丙4：保存中 loading
           try {
             data.images = await uploader.finalize();
             // 次数改动记「修正」流水（与详情页同口径：总数=流水合计，v1.0.9；新物品不记）
@@ -269,22 +316,25 @@ window.Views = (function () {
             // 词条同步：勾选则生成购入账单并双向关联（金额/日期/名称互通）
             const syncBox = wrap.querySelector('#item-sync-bill');
             if (syncBox && syncBox.checked) {
-              const accs = (S.getDB().wallet || {}).accounts || [];
               const kindMap = { device: 'w_shop_digital', game: 'w_shop_digital', clothing: 'w_shop_clothing', life: 'w_shop_beauty' };
               await S.saveBill({
                 id: U.uid(), type: 'expense',
                 amount: Math.abs(Number(data.purchasePrice) || 0),
                 date: data.purchaseDate || U.todayStr(), time: '',
                 catId: 'w_shop', subCatId: kindMap[data.kind] || 'w_shop_other',
-                accountId: (accs[0] || {}).id || '', note: data.name || '',
+                // 用户没选账户 = 不区分账户（不动余额），与「生成购入账单」同口径；
+                // 不能默认塞给第一个账户静默改余额
+                accountId: '', note: data.name || '',
                 tagIds: [], itemId: data.id, source: 'manual',
                 createdAt: new Date().toISOString()
               });
             }
             close(); UI.toast('已保存', 'success'); window.App.refresh();
           } catch (e) {
+            // 保存失败回滚内存副作用（物品/次数流水），与磁盘旧态一致（甲23-③）
+            try { await S.loadAll(); } catch (e2) {}
             UI.toast('保存失败：' + e.message, 'error');
-            btn.disabled = false; btn.textContent = '保存';
+            UI.loadingBtn(btn, false);
           }
         });
       }
@@ -347,6 +397,11 @@ window.Views = (function () {
       if (cost.costPerHour) costRows += row('每小时成本', U.formatCost(cost.costPerHour));
     }
     costRows += row('折旧现值', U.formatMoney(cost.currentValue));
+    // 售出回血（甲4）：有售出价时补「净成本 / 回血率」两行（models 早算好了，此前详情页不显示）
+    if (cost.netCost != null) {
+      costRows += row('净成本', U.formatMoney(cost.netCost)) +
+        row('回血率', cost.recoveryRate != null ? Math.round(cost.recoveryRate * 100) + '%' : '—');
+    }
 
     UI.modal({
       title: item.name, width: 760,
@@ -392,9 +447,12 @@ window.Views = (function () {
       onMount: function (wrap, close) {
         if (item.images && item.images.length) {
           const box = wrap.querySelector('#detail-imgs');
-          item.images.forEach(async function (p) {
-            const url = await S.getImageURL(p);
-            if (url) { const im = document.createElement('img'); im.src = url; box.appendChild(im); }
+          // 图片按选择顺序排列（甲23-①）：先按序建占位再异步填 src，
+          // 不再按异步完成顺序插入（与上传时的选择顺序脱节）
+          item.images.forEach(function (p) {
+            const im = document.createElement('img');
+            box.appendChild(im);
+            S.getImageURL(p).then(function (url) { if (url) im.src = url; });
           });
         }
         const plus = wrap.querySelector('#btn-use-plus');
@@ -513,8 +571,11 @@ window.Views = (function () {
         : auto;
     const range = await window.Weather.dayRange(target.date, false);
     const rec = window.Weather.recommend(db, range, target.date);
-    const dayLabel = target.doneToday ? '明日' : '今日';
-    const applyLabel = target.doneToday ? '＋明日' : '＋今日';
+    // 标题/按钮按目标日期判断（与 forLabel 同源）：手动切「今日」时即使当天已打卡
+    // 也不得显示「明日」字样（A9）——doneToday 只影响自动切换的默认目标，不影响文案
+    const useToday = target.date === U.todayStr();
+    const dayLabel = useToday ? '今日' : '明日';
+    const applyLabel = useToday ? '＋今日' : '＋明日';
 
     function outfitCard(o) {
       const img = (o.images && o.images[0]) || '';
@@ -544,16 +605,20 @@ window.Views = (function () {
     const rangeText = range && range.min != null
       ? range.min + '~' + range.max + '℃'
       : '—';
-    const useToday = target.date === U.todayStr();
     const forLabel = (useToday ? '今日天气' : '明日天气') + ' · ' + target.date +
       ' <span class="seg-toggle">' +
       '<button type="button" class="seg-btn' + (useToday ? ' on' : '') + '" data-force-t="today">今日</button>' +
       '<button type="button" class="seg-btn' + (useToday ? '' : ' on') + '" data-force-t="tomorrow">明日</button></span>';
+    // 失败原因透出（甲18-③）：定位失败/网络失败分开提示，可操作
+    const failReason = (window.Weather.failReason && window.Weather.failReason()) || '';
+    const failText = failReason === 'geo' ? '定位失败，请允许定位或手动填温度'
+      : failReason === 'net' ? '网络失败，点刷新重试'
+        : '未获取到天气';
     const wLeft = '<div class="weather-now"><div class="weather-icon">' +
       UI.iconOrEmoji(range ? (range.icon || 'cloud') : 'cloud', 32) + '</div>' +
       '<div><div class="weather-for">' + forLabel + '</div>' +
       '<div class="weather-temp">' + rangeText + '</div>' +
-      '<div class="muted small">' + U.escapeHtml(range ? (range.desc || '') : '未获取到天气') + '</div>' +
+      '<div class="muted small">' + U.escapeHtml(range ? (range.desc || '') : failText) + '</div>' +
       '<div class="muted small">' +
       (range && range.fetchedAt ? '数据刷新：' + U.escapeHtml(range.fetchedAt) : '尚未获取数据') +
       '</div>' +
@@ -561,7 +626,8 @@ window.Views = (function () {
       (range ? (range.source === 'manual' ? '手动设定（仅当天有效）' : '自动获取 · 当日首次获取后锁定') : '可手动填入温度区间') +
       '</div>' +
       '<div class="rec-btns" style="justify-content:flex-start;margin-top:6px">' +
-      '<button type="button" class="btn btn-ghost btn-sm" id="w-refresh" title="重新获取">' + UI.icon('refresh-cw', 14) + ' 刷新</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="w-refresh" title="重新获取天气">' + UI.icon('refresh-cw', 14) + ' 刷新</button>' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="w-relocate" title="清除定位缓存并重新定位">' + UI.icon('map-pin', 14) + ' 重新定位</button>' +
       '<button type="button" class="btn btn-ghost btn-sm" id="w-manual">' + UI.icon('pencil-line', 14) + ' 手动填入</button>' +
       '</div></div></div>';
 
@@ -589,15 +655,47 @@ window.Views = (function () {
       });
     });
 
+    // 刷新/重新定位共用（甲18-②）：手动值当日优先——自动数据先取不落盘，
+    // 有手动设定时先 confirm「将覆盖手动设定」，确认才覆盖，杜绝静默改写
+    async function refetchWeather(relocate) {
+      if (relocate && window.Weather.clearGeo) window.Weather.clearGeo(); // 甲18-①：清定位缓存重取
+      const fresh = window.Weather.fetchAuto ? await window.Weather.fetchAuto(target.date) : null;
+      if (!fresh) {
+        const fr = (window.Weather.failReason && window.Weather.failReason()) || '';
+        // 甲18-③：失败原因透出（定位失败 / 网络失败分开提示）
+        UI.toast(fr === 'geo' ? '定位失败，请允许定位或手动填温度' : '网络失败，点刷新重试', 'error');
+        renderOutfitRec(card);
+        return;
+      }
+      if (range && range.source === 'manual') {
+        const yes = await UI.confirmDialog('覆盖手动设定', '将覆盖手动设定的温度区间，改用自动天气数据？');
+        if (!yes) { UI.toast('已保留手动设定', 'info'); renderOutfitRec(card); return; }
+      }
+      window.Weather.applyAuto(target.date, fresh);
+      UI.toast(relocate ? '已重新定位并刷新天气' : '已刷新', 'success');
+      renderOutfitRec(card);
+    }
+
     const refreshBtn = card.querySelector('#w-refresh');
     if (refreshBtn) refreshBtn.addEventListener('click', async function () {
       refreshBtn.disabled = true; refreshBtn.textContent = '刷新中…';
-      // 用数据序号判定是否真取到新数据（分钟级时间戳会同分钟误判失败）
-      const beforeSeq = range && range.seq != null ? range.seq : null;
-      const rec = await window.Weather.dayRange(target.date, true);
-      renderOutfitRec(card);
-      const ok = !!(rec && rec.seq != null && rec.seq !== beforeSeq);
-      UI.toast(ok ? '已刷新' : '刷新失败，仍为上次数据', ok ? 'success' : 'error');
+      try {
+        await refetchWeather(false);
+      } catch (e) {
+        UI.toast('刷新失败：' + ((e && e.message) || e), 'error');
+        renderOutfitRec(card);
+      }
+    });
+
+    const relocateBtn = card.querySelector('#w-relocate');
+    if (relocateBtn) relocateBtn.addEventListener('click', async function () {
+      relocateBtn.disabled = true; relocateBtn.textContent = '定位中…';
+      try {
+        await refetchWeather(true);
+      } catch (e) {
+        UI.toast('定位失败，请允许定位或手动填温度', 'error');
+        renderOutfitRec(card);
+      }
     });
 
     const manBtn = card.querySelector('#w-manual');
@@ -864,15 +962,14 @@ window.Views = (function () {
     const occasions = db.categories.occasion || [];
     const rv = prefill || rec || {};
 
+    // 甲8：Enter=保存 / Esc=关闭（UI.modal 统一绑 Esc），IME 组词不拦截
+    let outfitKeyHandler = null;
     UI.modal({
       title: (rec ? '编辑穿搭 · ' : '穿搭打卡 · ') + U.cnDate(dateStr), width: 760,
+      formGuard: true, // 带表单弹窗：误点遮罩先确认「放弃已填内容？」（甲8）
       bodyHTML:
-        (existing.length ? '<div class="existing-outfits">' + existing.map(function (o) {
-          return '<div class="mini-row"><span class="flex1">' +
-            ((o.itemIds || []).length) + ' 件衣服 · ' + ((o.cosmeticIds || []).length) + ' 件妆品' +
-            (o.occasion ? ' · ' + U.escapeHtml(o.occasion) : '') + ' ' + U.escapeHtml(o.note || '') + '</span>' +
-            '<button class="btn-icon" data-del-out="' + o.id + '" title="删除">' + UI.icon('trash-2', 14) + '</button></div>';
-        }).join('') + '</div>' : '') +
+        // existing 列表独立容器（甲21-①）：删旧记录只重绘本区，新表单已填内容不丢
+        '<div id="outfit-existing"></div>' +
         '<form id="outfit-form"><div class="form-grid">' +
         '<label><span class="f-label">场合（选填）</span><select name="occasion"><option value="">（不指定）</option>' +
         occasions.map(function (o) {
@@ -901,13 +998,39 @@ window.Views = (function () {
         '</form>',
       footerHTML: (rec ? '<button class="btn btn-danger" data-act="del">删除</button>' : '') +
         '<button class="btn btn-ghost" data-act="cancel">关闭</button><button class="btn btn-primary" data-act="save">保存打卡</button>',
+      onClose: function () {
+        if (outfitKeyHandler) { document.removeEventListener('keydown', outfitKeyHandler); outfitKeyHandler = null; }
+      },
       onMount: function (wrap, close) {
+        // Enter=保存 / Esc=关闭（甲8）：IME 组词不拦截；搜索框/按钮回车不抢；只最上层弹窗生效
+        outfitKeyHandler = function (e) {
+          if (e.isComposing || e.keyCode === 229) return;
+          if (e.key !== 'Enter') return;
+          const t = e.target || {};
+          const tag = String(t.tagName || '').toLowerCase();
+          if (tag === 'textarea' || t.isContentEditable) return;
+          if (t.closest && (t.closest('#pk-search') || t.closest('button'))) return;
+          const masks = document.querySelectorAll('.modal-mask');
+          if (!masks.length || masks[masks.length - 1] !== wrap) return;
+          e.preventDefault();
+          const sb = wrap.querySelector('[data-act=save]');
+          if (sb) sb.click();
+        };
+        document.addEventListener('keydown', outfitKeyHandler);
         const cosItems = cosmetics.map(function (i) {
           return { id: i.id, name: i.name, brand: i.brand, shade: i.shade, images: i.images, categoryName: catName(i) };
         });
         let clothPick = UI.picker(wrap.querySelector('#cloth-picker'), clothPickerItems, (rv.itemIds || []).slice(), {});
         // 妆品使用次数（v1.0.9）：勾选后可调当天使用次数（默认 1，可到 99）
         const cosQty = Object.assign({}, rv.cosmeticQty || {});
+        // 使用次数读值（A8）：显示/步进直接对 cosQty[id] 做 clamp(0..99)，0=勾了但不计（显示「0 次 · 不计」）；
+        // 未设置（勾选初值）默认 1。不得 Math.max(1,…) 钳回 1——0 档会失效（显示与落库不一致）
+        function cosQtyOf(id) {
+          const v = cosQty[id];
+          if (v == null || v === '') return 1;
+          const q = Math.floor(Number(v));
+          return isNaN(q) ? 1 : Math.min(99, Math.max(0, q));
+        }
         function renderCosQty() {
           const box = wrap.querySelector('#cos-qty');
           const sel = cosPick.getSelected();
@@ -915,7 +1038,7 @@ window.Views = (function () {
           box.innerHTML = '<div class="cos-qty-list"><div class="muted small">使用次数（一天可用多次）</div>' +
             sel.map(function (id) {
               const it = cosmetics.find(function (x) { return x.id === id; }) || {};
-              const q = Math.max(1, Number(cosQty[id]) || 1);
+              const q = cosQtyOf(id);
               return '<div class="cos-qty-row"><span class="flex1">' + U.escapeHtml(it.name || '') + '</span>' +
                 '<button type="button" class="btn-icon" data-q-dec="' + U.escapeHtml(id) + '" title="减少使用次数（0=不计）">' + UI.icon('minus', 13) + '</button>' +
                 '<span class="cos-qty-n">' + q + ' 次' + (q === 0 ? ' <span class="muted small">不计</span>' : '') + '</span>' +
@@ -924,14 +1047,14 @@ window.Views = (function () {
           box.querySelectorAll('[data-q-inc]').forEach(function (b) {
             b.addEventListener('click', function () {
               const id = b.getAttribute('data-q-inc');
-              cosQty[id] = Math.min(99, Math.max(1, Number(cosQty[id]) || 1) + 1);
+              cosQty[id] = Math.min(99, cosQtyOf(id) + 1); // 0 → 1（不是跳 2）
               renderCosQty();
             });
           });
           box.querySelectorAll('[data-q-dec]').forEach(function (b) {
             b.addEventListener('click', function () {
               const id = b.getAttribute('data-q-dec');
-              cosQty[id] = Math.max(0, Math.max(1, Number(cosQty[id]) || 1) - 1);
+              cosQty[id] = Math.max(0, cosQtyOf(id) - 1);
               renderCosQty();
             });
           });
@@ -967,13 +1090,29 @@ window.Views = (function () {
             UI.toast('已套用穿搭：' + lk.name, 'success');
           });
         });
-        wrap.querySelectorAll('[data-del-out]').forEach(function (btn) {
-          btn.addEventListener('click', async function () {
-            if (!await UI.confirmDialog('删除穿搭', '删除这条穿搭记录？妆品使用次数将同步撤销。')) return;
-            await S.removeOutfit(btn.getAttribute('data-del-out'));
-            close(); UI.toast('已删除', 'success'); openOutfitEditor(dateStr);
+        // existing 列表区（甲21-①）：删除旧记录只重绘本区——
+        // 不再整个弹窗拆了重开，正在填的新表单（已选衣服/妆品/照片）原样保留
+        const existingBox = wrap.querySelector('#outfit-existing');
+        function renderExisting() {
+          const list = rec ? [] : db.outfits.filter(function (o) { return o.date === dateStr; });
+          existingBox.innerHTML = list.length
+            ? '<div class="existing-outfits">' + list.map(function (o) {
+              return '<div class="mini-row"><span class="flex1">' +
+                ((o.itemIds || []).length) + ' 件衣服 · ' + ((o.cosmeticIds || []).length) + ' 件妆品' +
+                (o.occasion ? ' · ' + U.escapeHtml(o.occasion) : '') + ' ' + U.escapeHtml(o.note || '') + '</span>' +
+                '<button class="btn-icon" data-del-out="' + o.id + '" title="删除">' + UI.icon('trash-2', 14) + '</button></div>';
+            }).join('') + '</div>'
+            : '';
+          existingBox.querySelectorAll('[data-del-out]').forEach(function (btn) {
+            btn.addEventListener('click', async function () {
+              if (!await UI.confirmDialog('删除穿搭', '删除这条穿搭记录？妆品使用次数将同步撤销。')) return;
+              await S.removeOutfit(btn.getAttribute('data-del-out'));
+              UI.toast('已删除', 'success');
+              renderExisting(); // 只重绘 existing 列表区，新表单不丢
+            });
           });
-        });
+        }
+        renderExisting();
         const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), { paths: (rv.images || []).slice() });
         if (rec) {
           wrap.querySelector('[data-act=del]').addEventListener('click', async function () {
@@ -987,8 +1126,9 @@ window.Views = (function () {
           const fd = new FormData(wrap.querySelector('#outfit-form'));
           const itemIds = clothPick.getSelected();
           const cosmeticIds = cosPick.getSelected();
-          if (!itemIds.length && !cosmeticIds.length) {
-            UI.toast('至少勾选一件衣服或妆品', 'error'); return;
+          // 纯拍照打卡允许保存（甲23-②）：衣服/妆品/照片至少一项即可
+          if (!itemIds.length && !cosmeticIds.length && !(uploader.hasImages && uploader.hasImages())) {
+            UI.toast('至少勾选一件衣服/妆品，或添加一张照片', 'error'); return;
           }
           // 温度区间校验（与天气手填/组合区间同一标准）
           const tMinV = fd.get('tempMin'), tMaxV = fd.get('tempMax');
@@ -996,7 +1136,7 @@ window.Views = (function () {
             UI.toast('温度区间：最低不能高于最高', 'error'); return;
           }
           const btn = wrap.querySelector('[data-act=save]');
-          btn.disabled = true;
+          UI.loadingBtn(btn, true); // 丙4：保存中 loading
           try {
             const images = await uploader.finalize();
             await S.saveOutfit({
@@ -1008,17 +1148,17 @@ window.Views = (function () {
               itemIds: itemIds, cosmeticIds: cosmeticIds, images: images,
               cosmeticQty: (function () {
                 const m = {};
-                cosmeticIds.forEach(function (id) {
-                  const q = cosQty[id] != null ? Math.floor(Number(cosQty[id])) : 1;
-                  m[id] = Math.min(99, Math.max(0, isNaN(q) ? 1 : q));
-                });
+                cosmeticIds.forEach(function (id) { m[id] = cosQtyOf(id); });
                 return m;
               })()
             });
             // 妆品使用 +1 已在存储层处理
             close(); UI.toast(rec ? '已保存' : '打卡成功', 'success'); window.App.refresh();
           } catch (e) {
-            UI.toast('保存失败：' + e.message, 'error'); btn.disabled = false;
+            // 保存失败回滚（甲23-③）：打卡记录/妆品使用流水从盘重载对齐旧态，不再留半成品
+            try { await S.loadAll(); } catch (e2) {}
+            UI.toast('保存失败：' + e.message, 'error');
+            UI.loadingBtn(btn, false);
           }
         });
       }
@@ -1028,6 +1168,7 @@ window.Views = (function () {
   return {
     items: items, outfits: outfits,
     openItemEditor: openItemEditor, openItemDetail: openItemDetail,
-    openOutfitEditor: openOutfitEditor, renderOutfitRec: renderOutfitRec
+    openOutfitEditor: openOutfitEditor, renderOutfitRec: renderOutfitRec,
+    resetState: resetState
   };
 })();

@@ -26,11 +26,18 @@ window.Weather = (function () {
   const GEO_KEY = 'lovelife-geo';    // {lat, lon}
   const WX_PREFIX = 'lovelife-wx-';  // 按日期锁定的天气记录
 
+  // 缓存键加账号前缀（乙4）：天气/定位缓存不跨账号共享（与钱袋「最近分类」同口径）
+  function accKey(base) {
+    let acc = '';
+    try { acc = String((window.Storage && window.Storage.accId && window.Storage.accId()) || ''); } catch (e) {}
+    return acc ? acc + ':' + base : base;
+  }
+
   function lsGet(key) {
-    try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { return null; }
+    try { return JSON.parse(localStorage.getItem(accKey(key)) || 'null'); } catch (e) { return null; }
   }
   function lsSet(key, val) {
-    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+    try { localStorage.setItem(accKey(key), JSON.stringify(val)); } catch (e) {}
   }
 
   /* 数据时间戳：只在数据真正获取/设定成功时记录 */
@@ -98,18 +105,28 @@ window.Weather = (function () {
     return out;
   }
 
+  /* 失败原因（甲18-③）：'' / 'geo'=定位失败 / 'net'=网络失败，调用方据此给不同提示 */
+  let lastFail = '';
+  function failReason() { return lastFail; }
+
+  /* 清定位缓存（甲18-①）：「重新定位」按钮用，下次取坐标重新走浏览器定位 */
+  function clearGeo() {
+    try { localStorage.removeItem(accKey(GEO_KEY)); } catch (e) {}
+  }
+
   /**
    * 取目标日温度区间 {min,max,desc,icon,source,fetchedAt}
-   * - 当日首次获取成功后锁定，不反复请求
+   * - 当日首次获取成功后锁定，不反复请求；手动设定值当日优先（source=manual）
    * - force=true 强制重取（手动刷新）；失败保留上次数据、fetchedAt 不变
    */
   async function dayRange(dateStr, force) {
+    lastFail = '';
     const key = WX_PREFIX + dateStr;
     const hit = lsGet(key);
     const locked = hit && hit.min != null && hit.fetchedAt ? hit : null;
     if (!force && locked) return locked;
     const geo = await getCoords();
-    if (!geo) return locked;
+    if (!geo) { lastFail = 'geo'; return locked; }
     try {
       const fc = await fetchForecast(geo.lat, geo.lon);
       const rec = fc[dateStr];
@@ -118,8 +135,33 @@ window.Weather = (function () {
       return rec;
     } catch (e) {
       console.warn('天气获取失败', e);
+      lastFail = 'net';
       return locked;
     }
+  }
+
+  /* 只取不存（甲18-②）：刷新/重新定位用——拿到的自动数据先给调用方，
+     确认覆盖手动设定后才 applyAuto 落盘，杜绝"手动温度点刷新被静默覆盖" */
+  async function fetchAuto(dateStr) {
+    lastFail = '';
+    const geo = await getCoords();
+    if (!geo) { lastFail = 'geo'; return null; }
+    try {
+      const fc = await fetchForecast(geo.lat, geo.lon);
+      const rec = fc[dateStr];
+      if (!rec) { lastFail = 'net'; return null; }
+      return rec;
+    } catch (e) {
+      console.warn('天气获取失败', e);
+      lastFail = 'net';
+      return null;
+    }
+  }
+
+  function applyAuto(dateStr, rec) {
+    if (!rec) return null;
+    lsSet(WX_PREFIX + dateStr, rec);
+    return rec;
   }
 
   /* 手动填入温度区间（仅该日有效，覆盖自动；fetchedAt=填入时刻） */
@@ -199,6 +241,8 @@ window.Weather = (function () {
 
   return {
     dayRange: dayRange, setManual: setManual,
-    targetDate: targetDate, recommend: recommend
+    targetDate: targetDate, recommend: recommend,
+    fetchAuto: fetchAuto, applyAuto: applyAuto,
+    clearGeo: clearGeo, failReason: failReason
   };
 })();

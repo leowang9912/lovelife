@@ -11,6 +11,17 @@ window.WalletView = (function () {
     sortKey: 'date', sortDir: 'desc'
   };
   let bulkMode = false; // 批量删除模式：勾选框按需显示（默认隐藏）
+  let drillSource = ''; // 统计下钻来源条（A13）：「来自统计：〈周期〉 · 分类X」，可关闭/点击清除筛选
+
+  /* 账号切换重置（A3）：清筛选/搜索/排序状态回默认，防上一账号状态残留 */
+  function resetState() {
+    filters.range = 'month'; filters.catId = ''; filters.accountId = ''; filters.type = ''; filters.q = '';
+    filters.date = ''; filters.month = '';
+    filters.sortKey = 'date'; filters.sortDir = 'desc';
+    bulkMode = false;
+    drillSource = '';
+    tab = 'bills';
+  }
 
   /* ---------- 工具 ---------- */
   function money(n) {
@@ -108,14 +119,16 @@ window.WalletView = (function () {
   }
 
   // 最近使用分类（本地记忆，记账网格置顶常用项，减少翻找）
+  // 键加账号前缀（乙4）：多账号各记各的，不再跨账号共享
+  function recentCatKey() { return (S.accId() ? S.accId() + ':' : '') + 'll-recent-cats'; }
   function recentCats() {
-    try { return JSON.parse(localStorage.getItem('ll-recent-cats') || '[]'); } catch (e) { return []; }
+    try { return JSON.parse(localStorage.getItem(recentCatKey()) || '[]'); } catch (e) { return []; }
   }
   function rememberRecentCat(id) {
     if (!id) return;
     const list = recentCats().filter(function (x) { return x !== id; });
     list.unshift(id);
-    try { localStorage.setItem('ll-recent-cats', JSON.stringify(list.slice(0, 8))); } catch (e) {}
+    try { localStorage.setItem(recentCatKey(), JSON.stringify(list.slice(0, 8))); } catch (e) {}
   }
   function typeLabel(t) {
     return t === 'income' ? '收入' : t === 'transfer' ? '转账' : '支出';
@@ -127,11 +140,23 @@ window.WalletView = (function () {
   }
 
   /* ---------- 筛选 ---------- */
+  // 本周区间（周一为一周开始，与「我的统计」statPeriod 同口径）：统计下钻带周期用（A13）
+  function weekInterval() {
+    const now = new Date();
+    const dow = (now.getDay() + 6) % 7;
+    const start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
+    const end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
+    return { startStr: U.todayStr(start), endStr: U.todayStr(end) };
+  }
   function inRange(b) {
     const d = b.date || '';
     if (filters.range === 'all') return true;
     if (filters.range === 'month') return monthKey(d) === nowMonth();
     if (filters.range === 'year') return d.slice(0, 4) === today().slice(0, 4);
+    if (filters.range === 'week') {
+      const w = weekInterval();
+      return !!d && d >= w.startStr && d < w.endStr;
+    }
     return true;
   }
   function filteredBills() {
@@ -175,11 +200,10 @@ window.WalletView = (function () {
 
   function render(main) {
     main.innerHTML =
-      '<div class="page-head">' +
-      '<div><h2>我的钱袋</h2><div class="muted small">记账 · 账户 · 词条自动同步到数码/衣橱/生活（导入导出与分类管理在设置页）</div></div>' +
-      '<div class="page-actions">' +
-      '<button class="btn btn-ghost" id="btn-goto-stats">' + UI.icon('chart-column', 16) + ' 查看统计</button>' +
-      '<button class="btn btn-primary" id="btn-add-bill">' + UI.icon('plus', 16) + ' 记一笔</button>' +
+      '<div class="page-head"><h2>我的钱袋</h2><div class="page-actions">' +
+      '<button class="btn btn-ghost" id="btn-goto-io">' + UI.icon('file-up', 14) + ' 导入 / 导出</button>' +
+      '<button class="btn btn-ghost" id="btn-goto-stats">' + UI.icon('chart-column', 14) + ' 查看统计</button>' +
+      '<button class="btn btn-primary" id="btn-add-bill">' + UI.icon('plus', 14) + ' 记一笔</button>' +
       '</div></div>' +
       '<div class="settings-tabs" id="wallet-tabs">' + TABS.map(function (t) {
         return '<button type="button" class="stab-btn' + (tab === t.id ? ' on' : '') + '" data-wt="' + t.id + '">' +
@@ -188,6 +212,16 @@ window.WalletView = (function () {
       '<div id="wallet-body"></div>';
 
     main.querySelector('#btn-add-bill').addEventListener('click', function () { openBillForm(null); });
+    // 甲22 导入/导出入口：钱袋页直达设置 → 记账设置分组（账单导入导出挂在那）
+    main.querySelector('#btn-goto-io').addEventListener('click', function () {
+      window.App.go('settings');
+      setTimeout(function () {
+        const btn = document.querySelector('[data-stab-btn="bill"]');
+        if (btn) btn.click();
+        const sec = document.querySelector('.stab[data-stab="bill"]');
+        if (sec && sec.scrollIntoView) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }, 80);
+    });
     main.querySelector('#btn-goto-stats').addEventListener('click', function () {
       window.App.go('plan');
       // 锚定到收支统计栏目（钱袋相关统计集中在整体统计块）
@@ -210,6 +244,7 @@ window.WalletView = (function () {
   /* ---------- 流水账（统一风格的列表） ---------- */
   function renderBills(box) {
     const db = S.getDB();
+    if (!db) return; // 会话已停止（如删除当前账号）：防残留的防抖回调空指针
     const wallet = db.wallet;
     const list = filteredBills();
     let exp = 0, inc = 0;
@@ -260,11 +295,16 @@ window.WalletView = (function () {
       return s;
     };
 
-    // 头部汇总卡：标签跟随当前筛选范围（本月/今年/全部/精确日期），不再误导
+    // 头部汇总卡：标签跟随当前筛选范围（本周/本月/今年/全部/精确日期），不再误导
     const rangeLabel = filters.date ? filters.date
       : filters.month ? filters.month.replace('-', ' 年 ') + ' 月'
-        : filters.range === 'year' ? '今年' : filters.range === 'all' ? '全部' : '本月';
+        : filters.range === 'week' ? '本周' : filters.range === 'year' ? '今年' : filters.range === 'all' ? '全部' : '本月';
     box.innerHTML =
+      (drillSource
+        ? '<div class="filter-bar drill-src"><span class="tag tag-on">' + UI.icon('filter', 12) + ' ' + esc(drillSource) + '</span>' +
+        '<button class="btn btn-ghost btn-sm" id="f-clear-drill">清除筛选</button>' +
+        '<button class="btn-icon" id="f-close-drill" title="关闭来源条">' + UI.icon('x', 14) + '</button></div>'
+        : '') +
       ((filters.date || filters.month)
         ? '<div class="filter-bar"><span class="tag tag-on">' + UI.icon('filter', 12) + ' 已筛选 ' + esc(rangeLabel) + '</span>' +
         '<button class="btn btn-ghost btn-sm" id="f-clear-date">清除日期筛选</button></div>'
@@ -301,8 +341,16 @@ window.WalletView = (function () {
       '</div>' +
       (list.length
         ? billsGroupedHTML(list, bulkMode)
-        : '<div class="empty-state"><div class="empty-icon">' + UI.icon('receipt', 48) + '</div>' +
-        '<div>' + (filters.q || filters.catId || filters.type || filters.accountId ? '没有符合筛选的结果' : '还没有记账记录') + '</div></div>');
+        : (function () {
+          const hasFilter = !!(filters.q || filters.catId || filters.type || filters.accountId || filters.date || filters.month);
+          // 空态卡化（丙3）：.empty-state.empty-card 统一结构（图标48 + 文案 + 引导按钮）
+          return '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('receipt', 48) + '</div>' +
+            '<p>' + (hasFilter ? '没有符合筛选的结果' : '还没有记账记录') + '</p>' +
+            (hasFilter
+              ? '<button class="btn btn-ghost" id="f-clear-all">清除筛选</button>'
+              : '<button class="btn btn-ghost" id="f-empty-add">' + UI.icon('plus', 14) + ' 记一笔</button>') +
+            '</div>';
+        })());
 
     box.querySelectorAll('[data-range]').forEach(function (el) {
       el.addEventListener('click', function () {
@@ -314,6 +362,30 @@ window.WalletView = (function () {
     const clearDate = box.querySelector('#f-clear-date');
     if (clearDate) clearDate.addEventListener('click', function () {
       filters.date = ''; filters.month = '';
+      renderBills(box);
+    });
+    // 空态引导按钮（丙3）：有筛选=清除筛选回默认视图；无筛选=记一笔
+    const clearAll = box.querySelector('#f-clear-all');
+    if (clearAll) clearAll.addEventListener('click', function () {
+      filters.range = 'month'; filters.catId = ''; filters.accountId = ''; filters.type = ''; filters.q = '';
+      filters.date = ''; filters.month = '';
+      drillSource = '';
+      renderBills(box);
+    });
+    const emptyAdd = box.querySelector('#f-empty-add');
+    if (emptyAdd) emptyAdd.addEventListener('click', function () { openBillForm(null); });
+    // 统计下钻来源条（A13）：点「清除筛选」清掉下钻筛选回默认；× 只收起来源条
+    const clearDrill = box.querySelector('#f-clear-drill');
+    if (clearDrill) clearDrill.addEventListener('click', function () {
+      filters.catId = ''; filters.type = ''; filters.q = '';
+      filters.date = ''; filters.month = '';
+      filters.range = 'month';
+      drillSource = '';
+      renderBills(box);
+    });
+    const closeDrill = box.querySelector('#f-close-drill');
+    if (closeDrill) closeDrill.addEventListener('click', function () {
+      drillSource = '';
       renderBills(box);
     });
     const mnPrev = box.querySelector('#mn-prev');
@@ -480,7 +552,7 @@ window.WalletView = (function () {
       (b.note ? '<span class="yw-bill-note">' + esc(b.note) + '</span>' : '') + '</div>' +
       '<div class="yw-bill-meta muted small">' + esc(b.date) + (b.time ? ' ' + esc(b.time) : '') +
       (b.accountName || accountName(b.accountId) ? ' · ' + esc(b.accountName || accountName(b.accountId)) : '') +
-      (b.type === 'transfer' && b.toAccountId ? ' → ' + esc(accountName(b.toAccountId)) : '') +
+      (b.type === 'transfer' && (b.toAccountId || b.toAccountName) ? ' → ' + esc(b.toAccountName || accountName(b.toAccountId)) : '') +
       (linked ? ' <button class="yw-sync-tag" data-item-open="' + esc(linked.id) + '" title="点击查看词条">' + UI.icon('link', 10) + '已同步' + domainLabel(linked.kind) + '</button>' : '') +
       (foodRec ? ' <button class="yw-sync-tag" data-food-open="' + esc(foodRec.id) + '" title="点击查看美食记录">' + UI.icon('utensils', 10) + '已同步美食日历</button>' : '') +
       (b.source && b.source !== 'manual' ? ' · 导入' : '') +
@@ -677,8 +749,9 @@ window.WalletView = (function () {
         const unlinkBtn = w.querySelector('#yw-unlink');
         if (unlinkBtn) unlinkBtn.addEventListener('click', async function () {
           if (!bill) return;
-          if (await UI.confirmDialog('解除关联', '解除这笔账单与词条/美食的同步关联？（词条本身保留）')) {
-            await S.unlinkBillSync(bill.id);
+          // 文案与行为一致（A6）：解除关联只解绑不删词条
+          if (await UI.confirmDialog('解除关联', '解除后词条将保留，不再与账单同步')) {
+            await S.unlinkBillSync(bill.id, true);
             close();
             UI.toast('已解除关联', 'success');
             window.App.refresh();
@@ -735,6 +808,10 @@ window.WalletView = (function () {
             UI.toast('转出与转入账户不能相同', 'error'); return;
           }
           saving = true;
+          const saveBtnEl = w.querySelector('[data-x=s]');
+          const moreBtnEl = w.querySelector('[data-x=more]');
+          UI.loadingBtn(saveBtnEl, true); // 丙4：保存中 loading
+          if (moreBtnEl) UI.loadingBtn(moreBtnEl, true);
           try {
             await S.saveBill(rec);
             const synced = rec.itemId ? (S.getDB().items || []).find(function (i) { return i.id === rec.itemId; }) : null;
@@ -756,6 +833,8 @@ window.WalletView = (function () {
             UI.toast(e.message || '保存失败', 'error');
           } finally {
             saving = false;
+            UI.loadingBtn(saveBtnEl, false);
+            if (moreBtnEl) UI.loadingBtn(moreBtnEl, false);
           }
         }
         w.querySelector('[data-x=s]').addEventListener('click', function () { doSave(false); });
@@ -793,7 +872,8 @@ window.WalletView = (function () {
       '<div class="panel"><div class="panel-head">' + UI.icon('wallet', 16) + ' 账户' +
       '<div class="flex1"></div><button class="btn btn-ghost btn-sm" id="btn-add-acc">' + UI.icon('plus', 14) + ' 添加账户</button>' +
       '<button class="btn btn-ghost btn-sm" id="btn-transfer">' + UI.icon('arrow-left-right', 14) + ' 转账</button>' +
-      '</div><div class="panel-body"><div class="acc-grid">' + (wallet.accounts || []).map(function (a) {
+      '</div><div class="panel-body">' + ((wallet.accounts || []).length
+        ? '<div class="acc-grid">' + (wallet.accounts || []).map(function (a) {
         // 对账：最近一次余额快照 vs 当前余额，差额一眼可见（建议：主动发现错账）
         const snaps = (wallet.balances || []).filter(function (r) { return r.accountId === a.id; })
           .sort(function (x, y) { return (y.date || '').localeCompare(x.date || ''); });
@@ -804,44 +884,76 @@ window.WalletView = (function () {
           '<div class="item-meta">' + money(a.balance) + (a.note ? ' · ' + esc(a.note) : '') + '</div>' +
           (snap ? '<div class="item-meta muted small">快照 ' + esc(snap.date) + ' ' + money(snap.balance) +
             ' · 差 ' + (diff === 0 ? '0' : money(diff)) + '</div>' : '') +
+          // 该账户的余额记录历史（最近 3 条），体现"余额记录=各账户分别的余额"
+          (snaps.length
+            ? '<div class="acc-bal-hist">' + snaps.slice(0, 3).map(function (r) {
+              return '<div class="acc-bal-line"><span class="flex1">' + esc(r.date || '') + '</span>' +
+                '<span>' + money(r.balance) + '</span></div>';
+            }).join('') + (snaps.length > 3 ? '<div class="acc-bal-line muted small">共 ' + snaps.length + ' 条记录</div>' : '') + '</div>'
+            : '') +
           '</div>' +
           '<div class="detail-btn-row">' +
+          '<button class="btn btn-ghost btn-sm" data-bal-add="' + esc(a.id) + '">记余额</button>' +
           '<button class="btn btn-ghost btn-sm" data-acc-edit="' + esc(a.id) + '">编辑</button>' +
           '<button class="btn btn-ghost btn-sm" data-acc-del="' + esc(a.id) + '">删除</button>' +
           '</div></div>';
-      }).join('') + '</div></div></div>' +
+        }).join('') + '</div>'
+        // 空态卡化（丙3）：无账户时给添加引导
+        : '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('wallet', 48) + '</div>' +
+        '<p>还没有账户</p><button class="btn btn-ghost" id="f-empty-add-acc">' + UI.icon('plus', 14) + ' 添加账户</button></div>') +
+      '</div></div>' +
 
       '<div class="panel"><div class="panel-head">' + UI.icon('history', 16) + ' 余额记录' +
       '<div class="flex1"></div>' +
-      '<button class="btn btn-primary btn-sm" id="btn-add-balance">' + UI.icon('plus', 14) + ' 记余额</button></div>' +
+      '<button class="btn btn-primary btn-sm" id="btn-add-balance">' + UI.icon('plus', 14) + ' 记余额（全部账户）</button></div>' +
       '<div class="panel-body">' +
-      '<p class="muted small">记录某个时间点各账户的余额（对账快照）。资产走势统计结合账单流水自动倒推每日余额，快照用于校准——见「我的统计 → 资产走势」。</p>' +
+      '<p class="muted small">按账户分别记录某个时间点的余额（对账快照）。资产走势统计结合账单流水自动倒推每日余额，快照用于校准——见「我的统计 → 资产走势」。</p>' +
       (records.length
         ? (function () {
-          // 按日期分组：同一天多个账户的记录归一组（多账户快照）
-          const byDate = {};
+          // 按账户分组：每组=一个账户的余额历史（余额记录就是各账户分别的余额）
+          const byAcc = {};
           const order = [];
-          records.forEach(function (r) {
-            const d = r.date || '';
-            if (!byDate[d]) { byDate[d] = []; order.push(d); }
-            byDate[d].push(r);
+          (wallet.accounts || []).forEach(function (a) {
+            if (!byAcc[a.id]) { byAcc[a.id] = []; order.push(a.id); }
           });
-          return order.map(function (d) {
-            return '<div class="yw-bal-group"><div class="yw-day-label">' + esc(d) + '</div>' +
-              byDate[d].map(function (r) {
-                return '<div class="mini-row"><span class="flex1">' + esc(accountName(r.accountId) || '账户') + '</span>' +
+          records.forEach(function (r) {
+            const k = r.accountId || '_';
+            if (!byAcc[k]) { byAcc[k] = []; order.push(k); }
+            byAcc[k].push(r);
+          });
+          return order.filter(function (k) { return byAcc[k].length; }).map(function (k) {
+            const acc = (wallet.accounts || []).find(function (a) { return a.id === k; });
+            const head = acc
+              ? UI.icon(acc.icon || 'wallet', 14) + ' ' + esc(acc.name) + ' <span class="muted small">当前 ' + money(acc.balance) + '</span>'
+              : '其他记录';
+            return '<div class="yw-bal-group"><div class="yw-day-label">' + head + '</div>' +
+              byAcc[k].map(function (r) {
+                return '<div class="mini-row"><span class="flex1">' + esc(r.date || '') + '</span>' +
                   '<strong>' + money(r.balance) + '</strong>' +
                   (r.note ? '<span class="muted small">' + esc(r.note) + '</span>' : '') +
                   '<button class="btn btn-ghost btn-sm" data-bal-del="' + esc(r.id) + '">删除</button></div>';
               }).join('') + '</div>';
           }).join('');
         })()
-        : '<div class="empty-hint muted">还没有余额记录</div>') +
+        // 空态卡化（丙3）：统一 empty-state empty-card 结构 + 引导操作
+        : '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('history', 48) + '</div>' +
+        '<p>还没有余额记录</p><button class="btn btn-ghost" id="f-empty-add-bal">' + UI.icon('plus', 14) + ' 记余额</button></div>') +
       '</div></div>';
 
     box.querySelector('#btn-add-acc').addEventListener('click', function () { openAccountForm(null); });
     box.querySelector('#btn-transfer').addEventListener('click', openTransferForm);
     box.querySelector('#btn-add-balance').addEventListener('click', function () { openBalanceForm(); });
+    // 空态引导按钮（丙3）
+    const emptyAcc = box.querySelector('#f-empty-add-acc');
+    if (emptyAcc) emptyAcc.addEventListener('click', function () { openAccountForm(null); });
+    const emptyBal = box.querySelector('#f-empty-add-bal');
+    if (emptyBal) emptyBal.addEventListener('click', function () { openBalanceForm(); });
+    box.querySelectorAll('[data-bal-add]').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        openBalanceForm(el.getAttribute('data-bal-add'));
+      });
+    });
     box.querySelectorAll('[data-acc-edit]').forEach(function (el) {
       el.addEventListener('click', function (e) {
         e.stopPropagation();
@@ -873,11 +985,15 @@ window.WalletView = (function () {
   }
 
   // 记余额（v1.1.2）：一次记录多个账户的余额（留空跳过该账户），同批次同日期
-  function openBalanceForm() {
-    const accs = ((S.getDB().wallet || {}).accounts) || [];
+  // onlyAccId（v1.1.3）：从账户卡进入时只记该账户的余额
+  function openBalanceForm(onlyAccId) {
+    let accs = ((S.getDB().wallet || {}).accounts) || [];
     if (!accs.length) { UI.toast('请先添加账户', 'error'); return; }
+    if (onlyAccId) accs = accs.filter(function (a) { return a.id === onlyAccId; });
+    if (!accs.length) { UI.toast('账户不存在', 'error'); return; }
+    const single = !!onlyAccId;
     UI.modal({
-      title: '记余额（可同时记录多个账户）', width: 520,
+      title: single ? '记余额 · ' + accs[0].name : '记余额（可同时记录多个账户）', width: single ? 420 : 520,
       bodyHTML: '<div class="form-grid">' +
         '<label class="f-full"><span class="f-label">日期</span><input type="date" id="bf-date" value="' + today() + '"></label>' +
         accs.map(function (a) {
@@ -885,23 +1001,30 @@ window.WalletView = (function () {
             '<input type="number" step="0.01" data-bal-acc="' + esc(a.id) + '" placeholder="留空=不记" value="' + esc(a.balance) + '"></label>';
         }).join('') +
         '<label class="f-full"><span class="f-label">备注</span><input id="bf-note" placeholder="如：对账 / 发薪后"></label></div>' +
-        '<p class="muted small">默认填入当前余额，只改有变化的即可；留空的账户本次不记录。</p>',
+        '<p class="muted small">' + (single
+          ? '记录该账户在这个时间点的余额（对账快照）。'
+          : '分别记录各账户在这个时间点的余额（对账快照）。默认填入当前余额，只改有变化的即可；留空的账户本次不记录。') + '</p>',
       footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button><button class="btn btn-primary" data-x="s">保存</button>',
       onMount: function (w, close) {
         w.querySelector('[data-x=c]').addEventListener('click', close);
         w.querySelector('[data-x=s]').addEventListener('click', async function () {
           const date = w.querySelector('#bf-date').value;
           const note = w.querySelector('#bf-note').value.trim();
+          if (!date) { UI.toast('请选择日期', 'error'); return; }
           const recs = [];
+          let bad = false;
           w.querySelectorAll('[data-bal-acc]').forEach(function (el) {
             const raw = el.value.trim();
             if (raw === '') return; // 留空不记
+            const v = Number(raw);
+            if (!isFinite(v)) { bad = true; return; } // 非法数字不静默记 0
             recs.push({
               id: U.uid(), date: date, accountId: el.getAttribute('data-bal-acc'),
-              balance: Number(raw) || 0, note: note,
+              balance: Math.round(v * 100) / 100, note: note,
               createdAt: new Date().toISOString()
             });
           });
+          if (bad) { UI.toast('余额必须是数字', 'error'); return; }
           if (!recs.length) { UI.toast('至少填写一个账户的余额', 'error'); return; }
           await S.saveBalanceRecords(recs);
           close();
@@ -1031,24 +1154,41 @@ window.WalletView = (function () {
   }
 
   function exportBills() {
-    // 按当前筛选导出（日期/分类/类型），无筛选=全量
-    const q = ['acc=' + encodeURIComponent(S.accId())];
-    if (filters.date) { q.push('from=' + filters.date); q.push('to=' + filters.date); }
-    else if (filters.month) {
-      q.push('from=' + filters.month + '-01');
-      const d = new Date(Number(filters.month.slice(0, 4)), Number(filters.month.slice(5, 7)), 0);
-      q.push('to=' + filters.month + '-' + String(d.getDate()).padStart(2, '0'));
-    } else if (filters.range === 'year') {
-      q.push('from=' + today().slice(0, 4) + '-01-01');
-    }
-    if (filters.catId) q.push('catId=' + encodeURIComponent(filters.catId));
-    if (filters.type) q.push('type=' + filters.type);
-    fetch('/api/export/bills?' + q.join('&')).then(function (r) {
-      return r.blob();
-    }).then(function (blob) {
-      U.download(blob, 'lovelife-账单-' + today() + '.csv');
-      UI.toast('账单已导出', 'success');
-    }).catch(function () { UI.toast('导出失败', 'error'); });
+    // 按当前筛选导出（日期/分类/类型/账户/关键词），与流水列表当前视图同口径（甲7）；
+    // month 未显式翻月时按当前显示月推 from/to，不再误导全量
+    const count = filteredBills().length;
+    UI.confirmDialog('导出账单', '将导出 ' + count + ' 笔（按当前筛选条件）').then(function (yes) {
+      if (!yes) return;
+      const q = ['acc=' + encodeURIComponent(S.accId())];
+      const monthRange = function (m) {
+        q.push('from=' + m + '-01');
+        const d = new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)), 0);
+        q.push('to=' + m + '-' + String(d.getDate()).padStart(2, '0'));
+      };
+      if (filters.date) { q.push('from=' + filters.date); q.push('to=' + filters.date); }
+      else if (filters.month) monthRange(filters.month);
+      else if (filters.range === 'month') monthRange(nowMonth());
+      else if (filters.range === 'week') {
+        const wk = weekInterval();
+        q.push('from=' + wk.startStr);
+        const end = new Date(wk.endStr);
+        end.setDate(end.getDate() - 1); // weekInterval.endStr 为开区间，导出 to 含边界
+        q.push('to=' + U.todayStr(end));
+      } else if (filters.range === 'year') {
+        q.push('from=' + today().slice(0, 4) + '-01-01');
+        q.push('to=' + today().slice(0, 4) + '-12-31');
+      }
+      if (filters.catId) q.push('catId=' + encodeURIComponent(filters.catId));
+      if (filters.type) q.push('type=' + filters.type);
+      if (filters.accountId) q.push('accountId=' + encodeURIComponent(filters.accountId));
+      if (filters.q) q.push('q=' + encodeURIComponent(filters.q));
+      fetch('/api/export/bills?' + q.join('&')).then(function (r) {
+        return r.blob();
+      }).then(function (blob) {
+        U.download(blob, 'lovelife-账单-' + today() + '.csv');
+        UI.toast('账单已导出', 'success');
+      }).catch(function () { UI.toast('导出失败', 'error'); });
+    });
   }
 
   function downloadTemplate() {
@@ -1087,7 +1227,8 @@ window.WalletView = (function () {
     try {
       const r = await fetch('/api/import/parse', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ filename: filename || 'pasted.txt', text: text })
+        // acc 必传：服务端按它取已有账单去重，漏传会拿 lastAccountId（可能是别的账号）比对
+        body: JSON.stringify({ filename: filename || 'pasted.txt', text: text, acc: S.accId() })
       });
       const out = await r.json();
       if (!out.ok) throw new Error(out.error || '解析失败');
@@ -1103,46 +1244,77 @@ window.WalletView = (function () {
       app_json: '记账 App 备份', pasted_text: '粘贴文本', unknown: '未识别格式'
     }[out.format] || out.format;
     const bills = out.bills || [];
-    // 去重：服务端标记优先（build_import_plan），前端兜底再查一次已有账单
+    // 去重（甲6 收紧，与 bill_import.build_import_plan 同口径）：
+    // 服务端标记优先，前端兜底再查一次已有账单——两侧备注都为空时须「日期+金额+类型+账户名」
+    // 全同才算重复（防同价咖啡丢账）；任一侧有备注维持既有判重语义。
     const existing = ((S.getDB().wallet || {}).bills) || [];
+    function acctKeyOf(x) {
+      return String(x.accountName || (x.accountId ? accountName(x.accountId) : '') || '').trim() + '→' +
+        String(x.toAccountName || (x.toAccountId ? accountName(x.toAccountId) : '') || '').trim();
+    }
     bills.forEach(function (b) {
       if (b.dup) return;
       b.dup = existing.some(function (e) {
-        return e.date === b.date && Math.abs(Number(e.amount) - Number(b.amount)) < 0.005 &&
-          e.type === b.type && (!b.note || !e.note || e.note.trim() === String(b.note || '').trim());
+        if (e.date !== b.date || e.type !== b.type) return false;
+        if (Math.abs(Number(e.amount) - Number(b.amount)) >= 0.005) return false;
+        const bn = String(b.note || '').trim(), en = String(e.note || '').trim();
+        if (!bn && !en) return acctKeyOf(b) === acctKeyOf(e);
+        return bn === en || !bn || !en;
       });
     });
     const dups = bills.filter(function (b) { return b.dup; });
-    const noTo = bills.filter(function (b) { return b.type === 'transfer' && !b.toAccountName && !b.toAccountId; });
-    const PREVIEW_N = 100;
-    const shown = bills.slice(0, PREVIEW_N);
-    const rest = bills.length - shown.length;
+    // 非重复 = 主预览表（前 100 条逐条可勾，超出部分默认导入）；重复项集中到「查看重复」展开区逐条勾回
+    const nonDupIdx = [];
+    bills.forEach(function (b, i) { if (!b.dup) nonDupIdx.push(i); });
+    const shownIdx = nonDupIdx.slice(0, 100);
+    const tailIdx = nonDupIdx.slice(100);
+    const rest = tailIdx.length;
+    // 转账双侧账户任一缺失/未匹配/相同 → 整条跳过（P0-4），预览标注原因与「缺转入」同级
+    const trSkip = bills.filter(function (b) { return !b.dup && transferSkipReason(b); });
 
+    function rowHTML(i, checked, dupMark) {
+      const b = bills[i];
+      return '<div class="mini-row' + (dupMark ? ' imp-dup' : '') + '">' +
+        '<label class="chip-check"><input type="checkbox" class="imp-row" data-i="' + i + '"' +
+        (checked ? ' checked' : '') + '></label>' +
+        '<span class="flex1">' + esc(b.date) + ' ' + esc(b.note || b.catName || '') + '</span>' +
+        (b.subCatName || b.catName ? '<span class="tag">' + esc(b.subCatName || b.catName) + '</span>' : '') +
+        '<span>' + esc(typeLabel(b.type)) + ' ' + money(b.amount) + '</span>' +
+        (dupMark ? '<span class="tag tag-warn">重复</span>' : '') +
+        (function () {
+          const r = transferSkipReason(b);
+          return r ? '<span class="tag tag-warn">' + esc(r) + '</span>' : '';
+        })() +
+        '</div>';
+    }
     preview.innerHTML =
       '<div class="import-preview-box">' +
       '<div class="tag">格式：' + esc(fmtName) + '</div> ' +
       '<div class="tag">识别 ' + bills.length + ' 笔</div> ' +
       (dups.length ? '<div class="tag tag-warn">疑似重复 ' + dups.length + ' 笔（默认不导入）</div> ' : '') +
-      (noTo.length ? '<div class="tag tag-warn">' + noTo.length + ' 笔转账缺转入账户（将跳过）</div> ' : '') +
+      (trSkip.length ? '<div class="tag tag-warn">' + trSkip.length + ' 笔转账账户缺失/未匹配（将跳过）</div> ' : '') +
       ((out.skipped || []).length ? '<div class="tag tag-warn">解析跳过 ' + out.skipped.length + ' 笔</div>' : '') +
       ((out.warnings || []).map(function (m) { return '<div class="muted small">' + esc(m) + '</div>'; }).join('')) +
+      // 甲5：明示余额影响 + 可选「不动余额」（勾选后账单记为不区分账户，仅保留原账户名展示）
+      '<div class="import-bal-hint muted small" style="margin-top:8px">' + UI.icon('wallet', 12) +
+      ' 导入后将增减所选账户余额；勾选「本次导入不动余额」则记为不区分账户（保留原账户名展示，不改余额）。</div>' +
+      '<label class="chip-check"><input type="checkbox" id="imp-no-bal"> 本次导入不动余额</label>' +
       '<div class="btn-row" style="margin-top:8px">' +
       '<button class="btn btn-ghost btn-sm" id="imp-sel-all">全选</button>' +
       '<button class="btn btn-ghost btn-sm" id="imp-sel-none">全不选</button></div>' +
       '<div class="mini-table" style="max-height:320px;overflow:auto;margin-top:6px">' +
-      shown.map(function (b, i) {
-        return '<div class="mini-row' + (b.dup ? ' imp-dup' : '') + '">' +
-          '<label class="chip-check"><input type="checkbox" class="imp-row" data-i="' + i + '"' +
-          (b.dup ? '' : ' checked') + '></label>' +
-          '<span class="flex1">' + esc(b.date) + ' ' + esc(b.note || b.catName || '') + '</span>' +
-          (b.subCatName || b.catName ? '<span class="tag">' + esc(b.subCatName || b.catName) + '</span>' : '') +
-          '<span>' + esc(typeLabel(b.type)) + ' ' + money(b.amount) + '</span>' +
-          (b.dup ? '<span class="tag tag-warn">重复</span>' : '') +
-          (b.type === 'transfer' && !b.toAccountName ? '<span class="tag tag-warn">缺转入</span>' : '') +
-          '</div>';
-      }).join('') +
+      shownIdx.map(function (i) { return rowHTML(i, true, false); }).join('') +
       (rest > 0 ? '<div class="mini-row muted small">… 还有 ' + rest + ' 笔未逐条预览，将默认导入（可用上方按钮统一调整已预览部分）</div>' : '') +
       '</div>' +
+      // 甲6：重复项收进展开区，逐条可勾回导入（预览外的重复也能恢复）
+      (dups.length
+        ? '<div class="imp-dup-box" style="margin-top:8px">' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="imp-dup-toggle">' +
+        UI.icon('copy', 14) + ' 查看重复 ' + dups.length + ' 条（默认不导入，可勾选导入）</button>' +
+        '<div class="mini-table" id="imp-dup-list" style="display:none;max-height:240px;overflow:auto;margin-top:6px">' +
+        dups.map(function (b) { return rowHTML(bills.indexOf(b), false, true); }).join('') +
+        '</div></div>'
+        : '') +
       '<div class="btn-row" style="margin-top:12px">' +
       '<button class="btn btn-primary" id="imp-commit">导入选中账单</button>' +
       '<button class="btn btn-ghost" id="imp-cancel">取消</button></div></div>';
@@ -1154,21 +1326,33 @@ window.WalletView = (function () {
     preview.querySelector('#imp-sel-none').addEventListener('click', function () {
       preview.querySelectorAll('.imp-row').forEach(function (c) { c.checked = false; });
     });
+    // 甲6：重复展开区收/放
+    const dupToggle = preview.querySelector('#imp-dup-toggle');
+    if (dupToggle) dupToggle.addEventListener('click', function () {
+      const list = preview.querySelector('#imp-dup-list');
+      const opening = list.style.display === 'none';
+      list.style.display = opening ? '' : 'none';
+      dupToggle.textContent = (opening ? '收起重复 ' : '查看重复 ') + dups.length + ' 条（默认不导入，可勾选导入）';
+    });
     preview.querySelector('#imp-commit').addEventListener('click', async function () {
-      // 选中集合 = 已预览勾选部分 + 未预览部分默认全收（排除重复/缺转入的）
+      // 选中集合 = 已勾选部分（含勾回的重复项）+ 未预览部分默认全收（转账账户缺失的仍排除）
       const picked = [];
       preview.querySelectorAll('.imp-row').forEach(function (c) {
-        if (c.checked) picked.push(shown[Number(c.getAttribute('data-i'))]);
+        if (!c.checked) return;
+        const b = bills[Number(c.getAttribute('data-i'))];
+        if (b) picked.push(b);
       });
       if (rest > 0) {
-        bills.slice(PREVIEW_N).forEach(function (b) {
-          if (!b.dup && !(b.type === 'transfer' && !b.toAccountName && !b.toAccountId)) picked.push(b);
-        });
+        tailIdx.forEach(function (i) { picked.push(bills[i]); });
       }
       const rows = picked.filter(function (b) {
-        return b && !b.dup && !(b.type === 'transfer' && !b.toAccountName && !b.toAccountId);
+        return b && !transferSkipReason(b);
       });
       if (!rows.length) { UI.toast('没有可导入的账单（全被勾掉或都是重复）', 'error'); return; }
+      // 甲5：勾选「本次导入不动余额」→ accountId 全部置 ''（不区分账户/不动余额），
+      // 原账户名保留在 accountName/toAccountName，账单行仍可读
+      const noBalEl = preview.querySelector('#imp-no-bal');
+      const noBal = !!(noBalEl && noBalEl.checked);
 
       // 标签列 → 入个人标签库并关联
       const tagLib = (S.getDB().wallet.tags || []).slice();
@@ -1177,44 +1361,64 @@ window.WalletView = (function () {
         if (!t) { t = { id: U.uid(), name: name }; tagLib.push(t); }
         return t.id;
       }
-      const recs = rows.map(function (b) {
+      const recs = [];
+      rows.forEach(function (b) {
         const cat = matchCat(b.catName, b.subCatName, b.type) || {};
         const tagNames = (b.tagsName && b.tagsName.length ? b.tagsName : (b.tags || []))
           .map(function (t) { return String(t || '').trim(); }).filter(Boolean);
-        return {
+        // 非转账：匹配不上 = 不区分账户（不动余额），不再强行塞进某个账户
+        // 转账：双侧已由 transferSkipReason 保证都解析到真实账户且互不相同（P0-4）
+        // 甲5 勾「本次导入不动余额」：accountId/toAccountId 全部置 ''（不区分账户语义），
+        // 原账户名保留在 accountName/toAccountName 供展示
+        const t = transferAccounts(b);
+        const rec = {
           id: U.uid(), type: b.type || 'expense',
           amount: Math.abs(Number(b.amount) || 0),
           date: b.date, time: b.time || '',
           catId: cat.catId || '', subCatId: cat.subCatId || '',
-          // 匹配不上账户 = 不区分账户（不动余额），不再强行塞进某个账户
-          accountId: matchAccount(b.accountName),
-          toAccountId: b.type === 'transfer' ? matchAccount(b.toAccountName) : '',
+          accountId: noBal ? '' : (accountExists(b.accountId) ? b.accountId : matchAccount(b.accountName || '')),
+          toAccountId: (b.type === 'transfer' && !noBal) ? t.toId : '',
           note: b.note || '', tagIds: tagNames.map(tagIdOf),
           accountName: b.accountName || '',
+          toAccountName: b.toAccountName || '',
           source: 'import:' + out.format,
           createdAt: new Date().toISOString()
         };
+        // CSV 往返（乙2）：恢复词条/美食关联（走既有 itemId/foodId 字段）；
+        // id 在本账号不存在就忽略不带——不报错，也不挡既有自动词条/美食同步
+        const dbNow = S.getDB();
+        if (b.itemId && (dbNow.items || []).some(function (i) { return i.id === b.itemId; })) rec.itemId = b.itemId;
+        if (b.foodId && (dbNow.food || []).some(function (f) { return f.id === b.foodId; })) rec.foodId = b.foodId;
+        recs.push(rec);
       });
 
       const btn = preview.querySelector('#imp-commit');
       btn.disabled = true;
       btn.textContent = '导入中…';
-      const done = [];
+      // 批次先记全量 recs id（P1-1/1-6）：saveBills 失败也保留可追溯、可整批撤销
+      const batchIds = recs.map(function (r) { return r.id; });
+      let okCount = 0;
       try {
         await S.saveBills(recs); // 批量入库（统一持久化）+ 自动词条/美食同步
-        recs.forEach(function (r) { done.push(r.id); });
+        okCount = recs.length;
       } catch (e) {
-        UI.toast('导入中断：' + (e.message || '保存失败') + '，已写入批次可撤销', 'error');
+        UI.toast('导入中断：' + (e.message || '保存失败') + '，已记入批次可整批撤销', 'error');
       }
-      // 即使部分失败也记批次（可整批撤销），并把标签库落盘
-      const dbNow = S.getDB();
-      dbNow.wallet.tags = tagLib;
-      await S.persist('wallet').catch(function () {});
-      await S.saveImportBatch({
-        id: U.uid(), name: filename, format: out.format,
-        billIds: done, createdAt: new Date().toISOString()
-      });
-      UI.toast('导入完成 ' + done.length + ' 笔' + (rows.length > done.length ? '（' + (rows.length - done.length) + ' 笔失败）' : ''), 'success');
+      // 无论成败都记批次（失败的 billId 在撤销时容错跳过），并把标签库落盘
+      try {
+        const dbNow = S.getDB();
+        dbNow.wallet.tags = tagLib;
+        await S.persist('wallet');
+        await S.saveImportBatch({
+          id: U.uid(), name: filename, format: out.format,
+          billIds: batchIds, createdAt: new Date().toISOString()
+        });
+      } catch (e) {
+        UI.toast('批次记录失败：' + (e.message || '保存失败'), 'error');
+      }
+      if (okCount) {
+        UI.toast('导入完成 ' + okCount + ' 笔' + (rows.length > okCount ? '（' + (rows.length - okCount) + ' 笔失败）' : ''), 'success');
+      }
       window.App.refresh();
     });
   }
@@ -1246,20 +1450,161 @@ window.WalletView = (function () {
     return hit ? hit.id : '';
   }
 
-  /* ---------- 分类一览（挂载到设置 → 消费与统计口径，紧凑展示） ---------- */
+  function accountExists(id) {
+    return !!id && (((S.getDB().wallet || {}).accounts) || []).some(function (a) { return a && a.id === id; });
+  }
+
+  // 转账导入（P0-4）：双侧账户都必须解析到真实账户且互不相同，否则整条跳过——
+  // 单边入账 = 凭空造钱/吞钱（applyBillToBalance 已另加防御，这里在导入源头拦截）
+  function transferAccounts(b) {
+    const fromId = accountExists(b.accountId) ? b.accountId : matchAccount(b.accountName || '');
+    const toId = accountExists(b.toAccountId) ? b.toAccountId : matchAccount(b.toAccountName || '');
+    return { fromId: fromId, toId: toId };
+  }
+
+  function transferSkipReason(b) {
+    if (!b || b.type !== 'transfer') return '';
+    const t = transferAccounts(b);
+    if (!t.fromId && !t.toId) return '缺转出/转入账户';
+    if (!t.fromId) return '转出账户缺失或未匹配';
+    if (!t.toId) return '转入账户缺失或未匹配';
+    if (t.fromId === t.toId) return '转出与转入账户相同';
+    return '';
+  }
+
+  /* ---------- 分类一览（挂载到设置 → 记账设置，紧凑展示）+ 分类管理（甲20） ----------
+     添加子类/改名/删除 按钮走委托接线（本文件不改 views-settings.js）；
+     删除分类时引用它的账单自动归入「其他」（removeWalletCat 仍拦"被使用"，先归位再删）。 */
   function catTreeCompactHTML() {
+    bindCatOps();
+    return '<div id="s-cat-list">' + catListBodyHTML() + '</div>';
+  }
+  function catListBodyHTML() {
     function block(kind, title) {
       return '<h4 class="detail-sub">' + title + '</h4><div class="ycat-compact">' +
         catTree(kind).map(function (c) {
           const subs = (c.children || []).map(function (ch) {
-            return '<span class="ycat-mini">' + catIconHTML(ch.id, 18) + esc(ch.name) + '</span>';
+            return '<span class="ycat-mini">' + catIconHTML(ch.id, 18) + esc(ch.name) +
+              '<button class="btn btn-ghost btn-sm" data-wcat-ren="' + esc(ch.id) + '" data-wcat-kind="' + kind + '" title="改名">' + UI.icon('pencil', 12) + '</button>' +
+              '<button class="btn btn-ghost btn-sm" data-wcat-del="' + esc(ch.id) + '" data-wcat-kind="' + kind + '" title="删除">' + UI.icon('trash-2', 12) + '</button></span>';
           }).join('');
           return '<div class="ycat-compact-row">' +
             '<span class="ycat-compact-l1">' + catIconHTML(c.id, 20) + esc(c.name) + '</span>' +
-            '<span class="ycat-compact-subs">' + (subs || '<span class="muted small">—</span>') + '</span></div>';
+            '<span class="ycat-compact-subs">' + (subs || '<span class="muted small">—</span>') + '</span>' +
+            '<span class="ycat-compact-ops">' +
+            '<button class="btn btn-ghost btn-sm" data-wcat-add="' + esc(c.id) + '" data-wcat-kind="' + kind + '">' + UI.icon('plus', 12) + ' 添加子类</button>' +
+            '<button class="btn btn-ghost btn-sm" data-wcat-ren="' + esc(c.id) + '" data-wcat-kind="' + kind + '">改名</button>' +
+            '<button class="btn btn-ghost btn-sm" data-wcat-del="' + esc(c.id) + '" data-wcat-kind="' + kind + '">删除</button>' +
+            '</span></div>';
         }).join('') + '</div>';
     }
     return block('expense', '支出分类（主流记账复刻）') + block('income', '收入分类（主流记账复刻）');
+  }
+  function refreshCatList() {
+    const box = document.getElementById('s-cat-list');
+    if (box) box.innerHTML = catListBodyHTML();
+  }
+  function findCatNode(id, kind) {
+    const list = catTree(kind);
+    for (let i = 0; i < list.length; i++) {
+      const c = list[i];
+      if (c.id === id) return { node: c, parent: null, top: c };
+      const ch = c.children || [];
+      for (let j = 0; j < ch.length; j++) {
+        if (ch[j].id === id) return { node: ch[j], parent: c, top: c };
+      }
+    }
+    return null;
+  }
+  function openCatNameModal(title, value, onSave) {
+    UI.modal({
+      title: title, width: 420,
+      bodyHTML: '<div class="form-grid"><label class="f-full"><span class="f-label">分类名称 <span class="req-star">*</span></span>' +
+        '<input id="wcat-name" value="' + esc(value) + '" placeholder="如：早餐 / 宠物零食"></label></div>',
+      footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button><button class="btn btn-primary" data-x="s">保存</button>',
+      onMount: function (w, close) {
+        w.querySelector('[data-x=c]').addEventListener('click', close);
+        w.querySelector('[data-x=s]').addEventListener('click', function () {
+          const name = w.querySelector('#wcat-name').value.trim();
+          if (!name) { UI.toast('请填写分类名称', 'error'); return; }
+          Promise.resolve(onSave(name)).then(function () { close(); }).catch(function (e) {
+            UI.toast((e && e.message) || '保存失败', 'error');
+          });
+        });
+      }
+    });
+  }
+  // 删除分类：引用该分类（含其子类）的账单自动归入「其他」（甲20）；
+  // 树里没有「其他」时子类归回一级、一级归未分类，账单保持可读
+  function reassignBillsForCat(id, kind, hit) {
+    const db = S.getDB();
+    const ids = {};
+    ids[id] = true;
+    (hit.node.children || []).forEach(function (ch) { ids[ch.id] = true; });
+    const fallbackTop = catTree(kind).find(function (c) { return c.id !== id && /其他/.test(c.name); }) || null;
+    const newCat = fallbackTop ? fallbackTop.id : (hit.parent ? hit.parent.id : '');
+    let touched = 0;
+    (db.wallet.bills || []).forEach(function (b) {
+      if (!b || (!ids[b.catId] && !ids[b.subCatId])) return;
+      b.catId = newCat;
+      b.subCatId = '';
+      touched++;
+    });
+    return touched ? S.persist('wallet') : Promise.resolve();
+  }
+  let catOpsBound = false;
+  function bindCatOps() {
+    if (catOpsBound) return;
+    catOpsBound = true;
+    document.addEventListener('click', function (e) {
+      const target = e.target && e.target.closest ? e.target : null;
+      if (!target) return;
+      const add = target.closest('[data-wcat-add]');
+      const ren = target.closest('[data-wcat-ren]');
+      const del = target.closest('[data-wcat-del]');
+      if (!add && !ren && !del) return;
+      const kind = (add || ren || del).getAttribute('data-wcat-kind') || 'expense';
+      if (add) {
+        const hit = findCatNode(add.getAttribute('data-wcat-add'), kind);
+        if (!hit) return;
+        openCatNameModal('添加子类', '', function (name) {
+          const child = { id: U.uid(), name: name, icon: '' };
+          hit.node.children = hit.node.children || [];
+          hit.node.children.push(child);
+          return S.saveWalletCat(hit.node, kind).then(function () {
+            refreshCatList();
+            UI.toast('子类已添加，记账弹窗立即可选', 'success');
+          });
+        });
+        return;
+      }
+      if (ren) {
+        const hit = findCatNode(ren.getAttribute('data-wcat-ren'), kind);
+        if (!hit) return;
+        openCatNameModal('分类改名', hit.node.name, function (name) {
+          hit.node.name = name;
+          return S.saveWalletCat(hit.top, kind).then(function () {
+            refreshCatList();
+            UI.toast('分类已改名', 'success');
+          });
+        });
+        return;
+      }
+      const id = del.getAttribute('data-wcat-del');
+      const hit = findCatNode(id, kind);
+      if (!hit) return;
+      UI.confirmDialog('删除分类', '删除「' + hit.node.name + '」？引用该分类的账单将自动归入「其他」。').then(function (yes) {
+        if (!yes) return;
+        reassignBillsForCat(id, kind, hit).then(function () {
+          return S.removeWalletCat(id, kind);
+        }).then(function () {
+          refreshCatList();
+          UI.toast('分类已删除，相关账单已归入「其他」', 'success');
+        }).catch(function (err) {
+          UI.toast((err && err.message) || '删除失败', 'error');
+        });
+      });
+    });
   }
 
   /* 统计下钻入口（我的统计点图表 → 跳钱袋流水并带上筛选） */
@@ -1274,7 +1619,15 @@ window.WalletView = (function () {
     if (filters.date || filters.month) {
       filters.range = 'all';
     } else if (opts.range) {
+      // 周/月/年原样带上（周=本周日期区间，inRange 已支持，A13）——下钻不丢周期
       filters.range = opts.range;
+    }
+    // 统计下钻来源条（A13）：「来自统计：〈周期〉 · 分类X」，可关闭、点击清除筛选
+    if (opts.range) {
+      const periodName = { week: '本周', month: '本月', year: '今年', all: '全部' }[opts.range] || opts.range;
+      drillSource = '来自统计：' + periodName + (filters.catId ? ' · ' + catLabel(filters.catId) : '');
+    } else {
+      drillSource = '';
     }
     tab = 'bills';
     window.App.go('wallet');
@@ -1283,6 +1636,6 @@ window.WalletView = (function () {
   return {
     render: render, openBillForm: openBillForm, renderBills: renderBills,
     mountImportUI: mountImportUI, catTreeCompactHTML: catTreeCompactHTML,
-    downloadTemplate: downloadTemplate, jumpTo: jumpTo
+    downloadTemplate: downloadTemplate, jumpTo: jumpTo, resetState: resetState
   };
 })();

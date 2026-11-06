@@ -80,6 +80,19 @@ window.PlanView = (function () {
 
   /* ===== 统一风格的收支统计（周期切换 周/月/年，全栏目共享） ===== */
   let statRange = 'month';
+  const SR_ALL = ['week', 'month', 'year'];
+
+  /* 账号切换重置（A3）：会话态回默认「月」；各账号持久偏好存 db.settings.statRange，渲染时随账号恢复 */
+  function resetState() {
+    statRange = 'month';
+    editMode = false; // 甲19③：账号切换也退出栏目编辑态
+  }
+
+  /* 甲19②：统计周期记忆进 db.settings.statRange（随账号），渲染时恢复 */
+  function loadStatRange(db) {
+    const saved = db && db.settings && db.settings.statRange;
+    if (SR_ALL.indexOf(saved) >= 0) statRange = saved;
+  }
 
   function statRangeTag() {
     return '<div class="flex1"></div><div class="seg-toggle">' +
@@ -92,7 +105,19 @@ window.PlanView = (function () {
     body.querySelectorAll('[data-sr]').forEach(function (el) {
       el.addEventListener('click', function () {
         statRange = el.getAttribute('data-sr');
+        // 甲19②：周期偏好随账号持久化（db.settings.statRange）
+        const db = S.getDB();
+        if (db && db.settings) {
+          db.settings.statRange = statRange;
+          S.saveSettings();
+        }
+        // 甲19②：切周期整页重建，重建后恢复滚动位置（.main 为滚动容器），不再跳回顶部；
+        // 外壳每次重建，恢复必须查新 .main 节点（旧节点已脱树）
+        const sc = document.querySelector('.main');
+        const top = sc ? sc.scrollTop : 0;
         window.App.refresh();
+        const sc2 = document.querySelector('.main');
+        if (sc2) sc2.scrollTop = top;
       });
     });
   }
@@ -126,6 +151,39 @@ window.PlanView = (function () {
     if (window.WalletView && typeof window.WalletView.jumpTo === 'function') window.WalletView.jumpTo(filter);
   }
 
+  /* ===== 丙3 空态卡：统一结构（.empty-state.empty-card：图标 48 + 文案 + 引导按钮） ===== */
+  function emptyCard(iconName, text, btnLabel, btnAttrs) {
+    return '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon(iconName, 48) + '</div>' +
+      '<p>' + text + '</p>' +
+      (btnLabel ? '<button type="button" class="btn btn-ghost"' + (btnAttrs ? ' ' + btnAttrs : '') + '>' + btnLabel + '</button>' : '') +
+      '</div>';
+  }
+  const EMPTY_GO = {
+    digital: { icon: 'gamepad-2', label: '去添加数码' },
+    clothing: { icon: 'shirt', label: '去添加衣物' },
+    life: { icon: 'heart', label: '去添加美妆' },
+    food: { icon: 'utensils', label: '去记美食' },
+    wallet: { icon: 'wallet', label: '去记一笔' }
+  };
+  function emptyHint(text, goKey, btnLabel) {
+    const g = EMPTY_GO[goKey] || EMPTY_GO.wallet;
+    return emptyCard(g.icon, text, btnLabel || g.label, 'data-eg-go="' + goKey + '"');
+  }
+
+  /* ===== 甲19③：离开统计页即退出 editMode =====
+     外壳每次 App.render 整页重建、无法在 render 里判断上一页；用 MutationObserver 盯 #app：
+     一旦 #plan-wrap 不在 DOM（切页/回启动页）即退出编辑态。
+     本页自身重渲染是同步重建 plan-wrap，观察器回调（微任务）看到终态，不会误退。 */
+  let leaveWatch = null;
+  function watchLeave() {
+    if (leaveWatch || typeof MutationObserver === 'undefined') return;
+    const host = document.getElementById('app') || document.body;
+    leaveWatch = new MutationObserver(function () {
+      if (editMode && !document.getElementById('plan-wrap')) editMode = false;
+    });
+    leaveWatch.observe(host, { childList: true, subtree: true });
+  }
+
   /* 渲染后给图表元素补 data-drill-* 并绑定点击（body 每次渲染都会重建，故每轮重绑）：
      - svg 图表（wTrend 柱 rect / wCatPie 扇区 path|circle）由 charts.js 生成、无属性入口，
        这里按数据顺序补属性；环图图例与扇区同序同参
@@ -151,17 +209,18 @@ window.PlanView = (function () {
       });
     }
     body.querySelectorAll('[data-drill-cat]').forEach(function (el) {
-      el.addEventListener('click', function () { jumpToWallet({ catId: el.getAttribute('data-drill-cat') }); });
+      // 下钻带上当前统计周期（A13）：周/月/年不丢周期
+      el.addEventListener('click', function () { jumpToWallet({ catId: el.getAttribute('data-drill-cat'), range: statRange }); });
     });
     body.querySelectorAll('[data-drill-date]').forEach(function (el) {
-      el.addEventListener('click', function () { jumpToWallet({ date: el.getAttribute('data-drill-date') }); });
+      el.addEventListener('click', function () { jumpToWallet({ date: el.getAttribute('data-drill-date'), range: statRange }); });
     });
     body.querySelectorAll('[data-drill-month]').forEach(function (el) {
-      el.addEventListener('click', function () { jumpToWallet({ month: el.getAttribute('data-drill-month') }); });
+      el.addEventListener('click', function () { jumpToWallet({ month: el.getAttribute('data-drill-month'), range: statRange }); });
     });
   }
 
-  function walletStatSection(id, db, tagHTML, out) {
+  function walletStatSection(id, db, tagHTML, out, sum) {
     out = out || {};
     const bills = ((db.wallet || {}).bills) || [];
     const p = statPeriod();
@@ -182,12 +241,19 @@ window.PlanView = (function () {
       let summaryLine = '';
       if (statRange === 'month') {
         const mk3 = U.monthKey(U.todayStr());
-        const prevD = new Date();
-        prevD.setMonth(prevD.getMonth() - 1);
-        const pk3 = U.monthKey(U.todayStr(prevD));
+        const now3 = new Date();
+        const dayN = now3.getDate(); // 月初至今已过天数（1~N）
+        // 甲15 环比同口径：只跟「上月同期 1~N 日」比，不再拿月初至今比上月全月（月初必现假下跌）；
+        // 上月月份键用 (y, m-1, 1) 构造——不走 setMonth 日期滚动（29~31 号会溢出串月，月末 bug）
+        const prevFirst = new Date(now3.getFullYear(), now3.getMonth() - 1, 1);
+        const pk3 = U.monthKey(U.todayStr(prevFirst));
+        const prevDays = new Date(prevFirst.getFullYear(), prevFirst.getMonth() + 1, 0).getDate();
+        const prevN = Math.min(dayN, prevDays); // 上月不足 N 天（如 2 月）按其月末封顶
         let pExp = 0;
         bills.forEach(function (b) {
-          if (b.type === 'expense' && U.monthKey(b.date || '') === pk3) pExp += Math.abs(Number(b.amount) || 0);
+          if (b.type !== 'expense' || U.monthKey(b.date || '') !== pk3) return;
+          const d = U.parseDate(b.date);
+          if (d && d.getDate() <= prevN) pExp += Math.abs(Number(b.amount) || 0);
         });
         const deltaPct = pExp ? Math.round((exp - pExp) / pExp * 100) : null;
         const byTop = {};
@@ -206,11 +272,16 @@ window.PlanView = (function () {
         const top3 = Object.keys(byTop).sort(function (a, b) { return byTop[b] - byTop[a]; }).slice(0, 3)
           .map(function (k) { return k + ' ' + U.formatMoney(byTop[k]); }).join(' / ');
         const budgetTotal = Number(((db.settings || {}).budget || {}).monthlyTotal) || 0;
-        summaryLine = '<div class="yw-summary muted small" style="margin-top:8px">' + Number(mk3.slice(5, 7)) + ' 月小结：支出 ' +
-          U.formatMoney(exp) + (deltaPct === null ? '' : '（环比 ' + (deltaPct >= 0 ? '↑' : '↓') + Math.abs(deltaPct) + '%）') +
+        // 甲15 预算达成统一合并口径（与 KPI「本月花费」同源）：
+        // 账单支出 + 物品购入 + 美食 − 已关联物品/美食的账单（bill.itemId||foodId 扣重），不再纯账单口径
+        const combined = (sum && sum.combinedMonthSpend != null) ? sum.combinedMonthSpend : exp;
+        summaryLine = '<div class="yw-summary muted small" style="margin-top:8px">' + Number(mk3.slice(5, 7)) + ' 月小结（月初至今）：支出 ' +
+          U.formatMoney(exp) + (deltaPct === null
+            ? '（上月同期无支出，环比不可比）'
+            : '（环比 ' + (deltaPct >= 0 ? '↑' : '↓') + Math.abs(deltaPct) + '%，与上月同期 1~' + prevN + ' 日比）') +
           '，收入 ' + U.formatMoney(inc) + '，结余 ' + U.formatMoney(inc - exp) +
           (top3 ? '。支出 Top3：' + top3 : '') +
-          (budgetTotal > 0 ? '。预算达成 ' + Math.min(999, Math.round(exp / budgetTotal * 100)) + '%' : '') +
+          (budgetTotal > 0 ? '。预算达成（合并口径） ' + Math.min(999, Math.round(combined / budgetTotal * 100)) + '%' : '') +
           '。</div>';
       }
       return '<div class="yw-balance">' +
@@ -275,7 +346,7 @@ window.PlanView = (function () {
         };
       }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
       out.drill = data.map(function (d) { return d.catId ? { catId: d.catId } : null; });
-      return (data.length ? C.donut(data) : '<p class="empty-hint">本期还没有支出</p>') + tagHTML;
+      return (data.length ? C.donut(data) : emptyHint('本期还没有支出', 'wallet')) + tagHTML;
     }
 
     if (id === 'wDaily') {
@@ -316,11 +387,19 @@ window.PlanView = (function () {
           byMonth[mk] = (byMonth[mk] || 0) + byDay[k];
         });
         const maxV = maxOf(byMonth);
+        // 未来月份格（乙4）：置灰、无 data-drill-month 无点击行为；tooltip 金额过 toFixed(2)
+        const n0 = new Date();
+        const nowY = n0.getFullYear(), nowM = n0.getMonth() + 1;
         for (let m = 1; m <= 12; m++) {
           const mk = y + '-' + String(m).padStart(2, '0');
           const v = byMonth[mk] || 0;
+          if (y > nowY || (y === nowY && m > nowM)) {
+            cells += '<div class="yw-heat-cell" title="' + mk + '（未来月份）" style="background:#f6f6f9;opacity:.55">' +
+              '<span>' + m + '月</span></div>';
+            continue;
+          }
           cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" data-drill-month="' + mk + '"' +
-            ' title="' + mk + ' 支出 ' + v + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
+            ' title="' + mk + ' 支出 ' + v.toFixed(2) + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
             '<span>' + m + '月</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
         }
         title = y + ' 年 · 深浅=当月支出';
@@ -331,7 +410,7 @@ window.PlanView = (function () {
           const key = U.todayStr(day);
           const v = byDay[key] || 0;
           cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" data-drill-date="' + key + '"' +
-            ' title="' + key + ' 支出 ' + v + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
+            ' title="' + key + ' 支出 ' + v.toFixed(2) + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
             '<span>' + day.getDate() + '</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
         }
         title = '本周 ' + U.todayStr(p.start) + ' ~ ' +
@@ -347,7 +426,7 @@ window.PlanView = (function () {
           const key = y + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
           const v = byDay[key] || 0;
           cells += '<div class="yw-heat-cell' + (v ? ' has' : '') + '" data-drill-date="' + key + '"' +
-            ' title="' + key + ' 支出 ' + v + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
+            ' title="' + key + ' 支出 ' + v.toFixed(2) + '" style="background:' + heatBg(v, maxV) + ';cursor:pointer">' +
             '<span>' + d + '</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
         }
         title = y + ' 年 ' + (m + 1) + ' 月 · 深浅=当日支出';
@@ -404,9 +483,12 @@ window.PlanView = (function () {
       });
 
       // 本月净变动 = 收入 − 支出
+      // 口径统一（A14）：只计「区分账户」的账单（accountId 非空），与 90 天倒推曲线同源——
+      // 不区分账户的账单不动账户余额，计入会让净变动与曲线互相矛盾
       const mk2 = U.monthKey(U.todayStr());
       let mInc = 0, mExp = 0;
       allBills.forEach(function (b) {
+        if (!b.accountId) return;
         if (U.monthKey(b.date || '') !== mk2) return;
         const a = Math.abs(Number(b.amount) || 0);
         if (b.type === 'income') mInc += a;
@@ -416,7 +498,8 @@ window.PlanView = (function () {
       return '<div class="yw-balance" style="margin-bottom:10px">' +
         '<div class="yw-bal-cell"><div class="yw-bal-label">当前总资产</div><div class="yw-bal-val">' + U.formatMoney(curTotal) + '</div></div>' +
         '<div class="yw-bal-cell"><div class="yw-bal-label">本月净变动</div><div class="yw-bal-val' + (mInc - mExp < 0 ? ' out' : ' in') + '">' +
-        (mInc - mExp >= 0 ? '+' : '') + U.formatMoney(mInc - mExp) + '</div></div>' +
+        (mInc - mExp >= 0 ? '+' : '') + U.formatMoney(mInc - mExp) + '</div>' +
+        '<div class="muted small">仅统计区分账户账单</div></div>' +
         '<div class="yw-bal-cell"><div class="yw-bal-label">余额记录</div><div class="yw-bal-val">' + snaps.length + ' 条</div></div>' +
         '</div>' +
         C.line(dayKeys.map(function (k, i) {
@@ -491,6 +574,8 @@ window.PlanView = (function () {
   function render(root) {
     const db = S.getDB();
     if (!db) return;
+    watchLeave();
+    loadStatRange(db); // 甲19②：恢复本账号持久化的统计周期
     const sum = M.summary(db);
     db.settings.planSections = normalizeSections(db);
     const sections = db.settings.planSections;
@@ -525,7 +610,9 @@ window.PlanView = (function () {
       const grid = bEl.querySelector('.plan-grid');
 
       if (!visible) {
-        grid.innerHTML = '<p class="empty-hint">此板块已屏蔽（点右上角恢复）</p>';
+        // 丙3：空态卡统一结构；引导按钮复用块级屏蔽开关（bindControls 已绑 [data-block-toggle]）
+        grid.innerHTML = emptyCard('eye-off', '此板块已屏蔽（点右上角恢复）', '恢复此板块',
+          'data-block-toggle="' + block.id + '"');
         return;
       }
       gSecs.forEach(function (sec) {
@@ -572,6 +659,14 @@ window.PlanView = (function () {
       editMode = !editMode;
       render(root);
     });
+    // 空态卡引导按钮（丙3）：事件委托（每 root 只绑一次，防 render(root) 重入叠加监听）
+    if (!root.hasAttribute('data-eg-bound')) {
+      root.setAttribute('data-eg-bound', '1');
+      root.addEventListener('click', function (e) {
+        const b = e.target && e.target.closest ? e.target.closest('[data-eg-go]') : null;
+        if (b && root.contains(b)) window.App.go(b.getAttribute('data-eg-go'));
+      });
+    }
     // 块级屏蔽（随时可点）
     root.querySelectorAll('[data-block-toggle]').forEach(function (b) {
       b.addEventListener('click', function () {
@@ -628,26 +723,33 @@ window.PlanView = (function () {
     }
     function commit() {
       const p = placeholder;
-      if (p && p.parentNode) {
+      if (p && p.parentNode && dragEl) {
         const parent = p.parentNode;
         const dragId = dragEl.getAttribute('data-id');
-        // 块内 DOM 顺序 → 重排该块在数组里的相对顺序
+        // 块内 DOM 顺序 → 重排该块在数组里的相对顺序。
+        // 拖拽本体（dragEl）仍留在 DOM 里，必须排除（A12）：否则 dragId 收集两次、
+        // 挤掉别的栏目，向下拖无效
         const domIds = Array.prototype.slice.call(parent.children)
-          .filter(function (n) { return n.classList.contains('plan-sec') || n === p; })
+          .filter(function (n) { return (n.classList.contains('plan-sec') && n !== dragEl) || n === p; })
           .map(function (n) { return n === p ? dragId : n.getAttribute('data-id'); });
         const arr = db.settings.planSections;
         const block = (SECTION_META[dragId] || {}).block;
         const blockIdxs = [];
         arr.forEach(function (s, i) { if ((SECTION_META[s.id] || {}).block === block) blockIdxs.push(i); });
-        const byId = {};
-        blockIdxs.forEach(function (i) { byId[arr[i].id] = arr[i]; });
-        const reordered = [];
-        domIds.forEach(function (id) {
-          if (byId[id]) { reordered.push(byId[id]); delete byId[id]; }
-        });
-        Object.keys(byId).forEach(function (id) { reordered.push(byId[id]); });
-        blockIdxs.forEach(function (arrI, k) { arr[arrI] = reordered[k]; });
-        S.saveSettings().then(function () { UI.toast('顺序已保存', 'success'); render(root); }).catch(function () { UI.toast('保存失败，顺序未生效', 'error'); });
+        // placeholder 从未移动过 = 顺序没变：不保存、不弹「顺序已保存」（假反馈，A12）
+        const curOrder = blockIdxs.map(function (i) { return arr[i].id; });
+        const changed = domIds.join(',') !== curOrder.join(',');
+        if (changed) {
+          const byId = {};
+          blockIdxs.forEach(function (i) { byId[arr[i].id] = arr[i]; });
+          const reordered = [];
+          domIds.forEach(function (id) {
+            if (byId[id]) { reordered.push(byId[id]); delete byId[id]; }
+          });
+          Object.keys(byId).forEach(function (id) { reordered.push(byId[id]); });
+          blockIdxs.forEach(function (arrI, k) { arr[arrI] = reordered[k]; });
+          S.saveSettings().then(function () { UI.toast('顺序已保存', 'success'); render(root); }).catch(function () { UI.toast('保存失败，顺序未生效', 'error'); });
+        }
       }
       if (placeholder && placeholder.parentNode) placeholder.parentNode.removeChild(placeholder);
       if (dragEl) dragEl.classList.remove('dragging');
@@ -762,7 +864,8 @@ window.PlanView = (function () {
         hero('总投入', U.formatMoney(sum.totalInvest), '全部历史购入') +
         hero('在手估值', U.formatMoney(sum.bookValue), '折旧现值 · 投入的 ' + (sum.totalInvest ? Math.round(sum.bookValue / sum.totalInvest * 100) : 0) + '%') +
         hero('本月花费', U.formatMoney(monthTotal), sum.monthNewCount + ' 件新物 ' + deltaBadge) +
-        hero('预算剩余', budgetTotal > 0 ? U.formatMoney(budgetLeft) : '—', budgetSub, budgetLeft < 0 ? 'bad' : '') +
+        // 未设预算（—）走中性色，仅设了预算且超支才标红（乙4）
+        hero('预算剩余', budgetTotal > 0 ? U.formatMoney(budgetLeft) : '—', budgetSub, budgetTotal > 0 && budgetLeft < 0 ? 'bad' : '') +
         '</div>' +
         '<div class="kpi-domain">' +
         '<div class="kpi-domain-title">分域速览</div>' +
@@ -824,7 +927,9 @@ window.PlanView = (function () {
     /* ===== 统一风格的收支统计（复刻主流记账统计模块） ===== */
     if (id === 'wBalance' || id === 'wTrend' || id === 'wCatPie' || id === 'wDaily' || id === 'wHeat' || id === 'wAssets') {
       const wout = {};
-      body.innerHTML = walletStatSection(id, db, statRangeTag(), wout);
+      // 甲19①：资产走势固定 90 天曲线（设计口径），隐藏周期切换器（点了也不换内容=误导）
+      const tag = id === 'wAssets' ? '' : statRangeTag();
+      body.innerHTML = walletStatSection(id, db, tag, wout, sum);
       bindStatRange(body);
       bindWalletDrill(body, wout.drill); // 点图下钻流水（body 每次渲染重建，绑定放渲染后逐次执行）
       return;
@@ -903,7 +1008,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (Number(b.purchasePrice) || 0) - (Number(a.purchasePrice) || 0); }).slice(0, 8);
       body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
         return { label: i.name, value: Number(i.purchasePrice) || 0, valueText: U.formatMoney(i.purchasePrice) };
-      })) : '<p class="empty-hint">暂无数码设备</p>';
+      })) : emptyHint('暂无数码设备', 'digital');
       return;
     }
     if (id === 'dCostRank') {
@@ -913,7 +1018,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return b.cost.dailyCost - a.cost.dailyCost; }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.cost.dailyCost, valueText: U.formatCost(i.cost.dailyCost) + '/天' };
-      })) : '<p class="empty-hint">暂无在手设备</p>';
+      })) : emptyHint('暂无在手设备', 'digital');
       return;
     }
     if (id === 'dHoldRank') {
@@ -922,7 +1027,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return b.cost.heldDays - a.cost.heldDays; }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.cost.heldDays, valueText: '已购 ' + i.cost.heldDays + ' 天' };
-      })) : '<p class="empty-hint">暂无在手设备</p>';
+      })) : emptyHint('暂无在手设备', 'digital');
       return;
     }
     if (id === 'dBuyTrend') {
@@ -954,7 +1059,7 @@ window.PlanView = (function () {
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
         return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#0071e3', '#5ac8fa', '#34c759', '#ff9500', '#ff2d55', '#af52de', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '数码总投入' })
-        : '<p class="empty-hint">暂无数码设备</p>';
+        : emptyHint('暂无数码设备', 'digital');
       return;
     }
     if (id === 'dUseRank') {
@@ -962,12 +1067,12 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (b.useCount || 0) - (a.useCount || 0); }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.useCount, valueText: i.useCount + ' 次使用' };
-      })) : '<p class="empty-hint">暂无使用记录（编辑物品可填使用次数）</p>';
+      })) : emptyHint('暂无使用记录（编辑物品可填使用次数）', 'digital');
       return;
     }
     if (id === 'dWarranty') {
       const list = sum.expiry.filter(function (x) { return x.kind === 'warranty'; }).slice(0, 8);
-      body.innerHTML = list.length ? miniExpiry(list) : '<p class="empty-hint">暂无保修临期设备</p>';
+      body.innerHTML = list.length ? miniExpiry(list) : emptyHint('暂无保修临期设备', 'digital');
       return;
     }
     if (id === 'resale') {
@@ -975,7 +1080,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return b.estimatedResalePrice - a.estimatedResalePrice; }).slice(0, 6);
       body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
         return { label: i.name, value: i.estimatedResalePrice, valueText: U.formatMoney(i.estimatedResalePrice) };
-      })) : '<p class="empty-hint">填写预估二手价后显示</p>';
+      })) : emptyHint('填写预估二手价后显示', 'digital');
       return;
     }
     if (id === 'dIdle' || id === 'cIdle') {
@@ -984,7 +1089,7 @@ window.PlanView = (function () {
       const idle = sum.idleList.filter(function (x) { return kindFilter(x.item) && x.idle >= warn; }).slice(0, 8);
       body.innerHTML = idle.length ? C.rankBars(idle.map(function (x) {
         return { label: x.item.name, value: x.idle, valueText: x.idle + ' 天' };
-      })) : '<p class="empty-hint">没有吃灰物品，状态很好</p>';
+      })) : emptyHint('没有吃灰物品，状态很好', id === 'dIdle' ? 'digital' : 'clothing', '去看看');
       return;
     }
     if (id === 'cPrice') {
@@ -992,7 +1097,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (Number(b.purchasePrice) || 0) - (Number(a.purchasePrice) || 0); }).slice(0, 8);
       body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
         return { label: i.name, value: Number(i.purchasePrice) || 0, valueText: U.formatMoney(i.purchasePrice) };
-      })) : '<p class="empty-hint">暂无衣物</p>';
+      })) : emptyHint('暂无衣物', 'clothing');
       return;
     }
     if (id === 'cWearRank') {
@@ -1001,14 +1106,14 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (b.wearCount || 0) - (a.wearCount || 0); }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.wearCount, valueText: i.wearCount + ' 次' };
-      })) : '<p class="empty-hint">还没有穿着记录</p>';
+      })) : emptyHint('还没有穿着记录', 'clothing');
       return;
     }
     if (id === 'cpw') {
       const good = sum.cpwList.filter(function (c) { return c.wear > 0 && c.cpw != null; }).slice(0, 8);
       body.innerHTML = good.length ? C.rankBars(good.map(function (c) {
         return { label: c.item.name, value: c.cpw, valueText: U.formatCost(c.cpw) + '/次（穿 ' + c.wear + ' 次）' };
-      })) : '<p class="empty-hint">还没有穿着记录</p>';
+      })) : emptyHint('还没有穿着记录', 'clothing');
       return;
     }
     if (id === 'cOutfitRank') {
@@ -1016,7 +1121,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (b.autoWear || 0) - (a.autoWear || 0); }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.autoWear, valueText: i.autoWear + ' 次搭配' };
-      })) : '<p class="empty-hint">穿搭打卡勾选衣物后自动统计</p>';
+      })) : emptyHint('穿搭打卡勾选衣物后自动统计', 'clothing');
       return;
     }
     if (id === 'cNoWear') {
@@ -1027,7 +1132,7 @@ window.PlanView = (function () {
         return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(i.name) + '</span>' +
           (i.keepTag ? '<span class="tag">吊牌在</span>' : '') +
           '<span class="muted">' + U.formatMoney(i.purchasePrice) + '</span></div>';
-      }).join('') + '</div>' : '<p class="empty-hint">每件都穿过，没有闲置新衣</p>';
+      }).join('') + '</div>' : emptyHint('每件都穿过，没有闲置新衣', 'clothing', '去衣橱看看');
       return;
     }
     if (id === 'cBuyTrend') {
@@ -1081,7 +1186,7 @@ window.PlanView = (function () {
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
         return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#ff2d55', '#0071e3', '#af52de', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '衣橱总投入' })
-        : '<p class="empty-hint">暂无衣物</p>';
+        : emptyHint('暂无衣物', 'clothing');
       return;
     }
     if (id === 'outfitStats') {
@@ -1112,14 +1217,14 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (Number(b.purchasePrice) || 0) - (Number(a.purchasePrice) || 0); }).slice(0, 8);
       body.innerHTML = top.length ? C.rankBars(top.map(function (i) {
         return { label: i.name, value: Number(i.purchasePrice) || 0, valueText: U.formatMoney(i.purchasePrice) };
-      })) : '<p class="empty-hint">暂无妆品</p>';
+      })) : emptyHint('暂无妆品', 'life');
       return;
     }
     if (id === 'lCpw') {
       const lifes = sum.lifeUseList.filter(function (c) { return c.uses > 0 && c.cpw != null; }).slice(0, 8);
       body.innerHTML = lifes.length ? C.rankBars(lifes.map(function (c) {
         return { label: c.item.name, value: c.cpw, valueText: U.formatCost(c.cpw) + '/次（用 ' + c.uses + ' 次）' };
-      })) : '<p class="empty-hint">还没有使用记录</p>';
+      })) : emptyHint('还没有使用记录', 'life');
       return;
     }
     if (id === 'lUseRank') {
@@ -1128,7 +1233,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (b.useCount || 0) - (a.useCount || 0); }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.useCount, valueText: i.useCount + ' 次' };
-      })) : '<p class="empty-hint">暂无使用记录</p>';
+      })) : emptyHint('暂无使用记录', 'life');
       return;
     }
     if (id === 'lOutfitRank') {
@@ -1136,7 +1241,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return (b.autoWear || 0) - (a.autoWear || 0); }).slice(0, 8);
       body.innerHTML = ranked.length ? C.rankBars(ranked.map(function (i) {
         return { label: i.name, value: i.autoWear, valueText: i.autoWear + ' 次搭配' };
-      })) : '<p class="empty-hint">穿搭打卡勾选妆品后自动统计</p>';
+      })) : emptyHint('穿搭打卡勾选妆品后自动统计', 'life');
       return;
     }
     if (id === 'lFresh') {
@@ -1147,7 +1252,7 @@ window.PlanView = (function () {
         .sort(function (a, b) { return b.days - a.days; }).slice(0, 8);
       body.innerHTML = opened.length ? C.rankBars(opened.map(function (x) {
         return { label: x.item.name, value: x.days, valueText: '已开封 ' + x.days + ' 天' };
-      })) : '<p class="empty-hint">还没有填写开封日期</p>';
+      })) : emptyHint('还没有填写开封日期', 'life');
       return;
     }
     if (id === 'lStock') {
@@ -1180,12 +1285,12 @@ window.PlanView = (function () {
       body.innerHTML = keys.length ? C.donut(keys.map(function (k, n) {
         return { label: k, value: Math.round(byCat[k]), valueText: U.formatMoney(Math.round(byCat[k])), color: ['#af52de', '#ff2d55', '#0071e3', '#ff9500', '#34c759', '#5ac8fa', '#ffcc00', '#aeaeb2'][n % 8] };
       }), { centerText: U.formatMoney(keys.reduce(function (a, k) { return a + byCat[k]; }, 0)), centerSub: '生活总投入' })
-        : '<p class="empty-hint">暂无妆品</p>';
+        : emptyHint('暂无妆品', 'life');
       return;
     }
     if (id === 'lExpiry') {
       const list = sum.expiry.filter(function (x) { return x.kind === 'pao'; }).slice(0, 8);
-      body.innerHTML = list.length ? miniExpiry(list) : '<p class="empty-hint">暂无 PAO 临期妆品</p>';
+      body.innerHTML = list.length ? miniExpiry(list) : emptyHint('暂无 PAO 临期妆品', 'life');
       return;
     }
     if (id === 'empty') {
@@ -1194,7 +1299,7 @@ window.PlanView = (function () {
         return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(i.name) + '</span>' +
           '<span class="tag">' + (i.repurchase ? '待回购' : '已空瓶') + '</span>' +
           '<span class="muted">' + U.escapeHtml(i.emptyDate || '') + '</span></div>';
-      }).join('') + '</div>' : '<p class="empty-hint">暂无空瓶记录</p>';
+      }).join('') + '</div>' : emptyHint('暂无空瓶记录', 'life');
       return;
     }
     if (id === 'foodStats') {
@@ -1222,10 +1327,5 @@ window.PlanView = (function () {
     }).join('') + '</div>';
   }
 
-  function kpi(label, value, sub) {
-    return '<div class="kpi"><div class="kpi-label">' + label + '</div>' +
-      '<div class="kpi-value">' + value + '</div><div class="kpi-sub">' + U.escapeHtml(sub) + '</div></div>';
-  }
-
-  return { render: render, BLOCKS: BLOCKS, SECTION_META: SECTION_META, normalizeSections: normalizeSections, blockState: blockState };
+  return { render: render, BLOCKS: BLOCKS, SECTION_META: SECTION_META, normalizeSections: normalizeSections, blockState: blockState, resetState: resetState };
 })();

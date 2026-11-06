@@ -7,6 +7,14 @@ window.LifeView = (function () {
 
   const state = { filterCat: '', filterSub: '', filterStatus: '', filterTag: '', search: '', sort: { key: 'date', dir: -1 } };
 
+  /* 账号切换重置（A3）：清筛选/搜索，排序记忆改从新账号 listSort 重读 */
+  function resetState() {
+    state.filterCat = ''; state.filterSub = ''; state.filterStatus = ''; state.filterTag = '';
+    state.search = '';
+    state.sort = { key: 'date', dir: -1 };
+    state.sortLoaded = false;
+  }
+
   function render(root) {
     const db = S.getDB();
     if (!db) return;
@@ -14,10 +22,10 @@ window.LifeView = (function () {
     const all = M.itemsWithComputed(db).filter(function (i) { return i.kind === 'life'; });
     let list = all;
     if (state.filterCat) {
+      // 精确匹配（A11）：一级=categoryId、二级=subCategoryId；
+      // 不得按父类模糊匹配（选子分类会列出同父类所有物品）
       list = list.filter(function (i) {
-        if (i.categoryId === state.filterCat) return true;
-        const l1 = cats.find(function (c) { return c.id === i.categoryId; });
-        return l1 && l1.children && l1.children.some(function (c) { return c.id === state.filterCat; });
+        return i.categoryId === state.filterCat || i.subCategoryId === state.filterCat;
       });
     }
     if (state.filterStatus) list = list.filter(function (i) { return (i.status || 'in_use') === state.filterStatus; });
@@ -43,7 +51,9 @@ window.LifeView = (function () {
     });
     tagOptions.sort();
 
+    // 「N 件临期」与 models.js expiryList 同口径：已售出/转赠/报废的物品不再计临期（乙4）
     const expiring = all.filter(function (i) {
+      if (i.status === 'sold' || i.status === 'gifted' || i.status === 'broken') return false;
       const s = M.lifeStatus(i);
       return s.paoState === 'near' || s.paoState === 'expired';
     }).length;
@@ -82,27 +92,43 @@ window.LifeView = (function () {
           return UI.itemCard(i, { icon: 'heart', quickAdd: true, sortKey: state.sort.key });
         }).join('') + '</div>'
         : (all.length
-          ? '<div class="empty-state"><div class="empty-icon">' + UI.icon('heart', 48) + '</div>' +
+          // 空态卡化（丙3）：有筛选保留「清除筛选」
+          ? '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('heart', 48) + '</div>' +
             '<p>没有符合筛选的结果</p><button class="btn btn-ghost" id="btn-clear-filter">清除筛选</button></div>'
-          : '<div class="empty-state"><div class="empty-icon">' + UI.icon('heart', 48) + '</div><p>还没有记录</p></div>'));
+          : '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('heart', 48) + '</div>' +
+            '<p>还没有记录，先记一件美妆吧</p>' +
+            '<button class="btn btn-ghost" id="btn-empty-add">＋ 记美妆</button></div>'));
 
     root.querySelector('#btn-add-life').addEventListener('click', function () {
       window.Views.openItemEditor(null, 'life');
     });
+    const emptyAdd = root.querySelector('#btn-empty-add');
+    if (emptyAdd) emptyAdd.addEventListener('click', function () {
+      window.Views.openItemEditor(null, 'life');
+    });
     root.querySelector('#btn-looks').addEventListener('click', function () { openLooks(root); });
-    // 中文输入法组词期间不重绘（v1.0.9）
+    // 中文输入法组词期间不重绘（v1.0.9）；重绘后恢复光标 offset，不再一律跳末尾（甲9）
     const searchEl = root.querySelector('#life-search');
     let composing = false;
-    const refreshSearch = function (val) {
+    const refreshSearch = function (val, selStart, selEnd) {
       state.search = val; render(root);
       const inp = root.querySelector('#life-search');
-      if (inp) { inp.focus(); inp.setSelectionRange(inp.value.length, inp.value.length); }
+      if (inp) {
+        inp.focus();
+        try {
+          const pos = selStart == null ? inp.value.length : selStart;
+          inp.setSelectionRange(pos, selEnd == null ? pos : selEnd);
+        } catch (e) { /* 忽略不支持 selection 的输入 */ }
+      }
     };
     searchEl.addEventListener('compositionstart', function () { composing = true; });
-    searchEl.addEventListener('compositionend', function (e) { composing = false; refreshSearch(e.target.value); });
+    searchEl.addEventListener('compositionend', function (e) {
+      composing = false;
+      refreshSearch(e.target.value, e.target.selectionStart, e.target.selectionEnd);
+    });
     searchEl.addEventListener('input', U.debounce(function (e) {
       if (composing) return;
-      refreshSearch(e.target.value);
+      refreshSearch(e.target.value, e.target.selectionStart, e.target.selectionEnd);
     }, 280));
     root.querySelector('#life-cat').addEventListener('change', function (e) {
       state.filterCat = e.target.value; render(root);
@@ -180,5 +206,5 @@ window.LifeView = (function () {
     });
   }
 
-  return { render: render };
+  return { render: render, resetState: resetState };
 })();

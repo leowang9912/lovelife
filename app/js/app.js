@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.1.2";
+  const FRONTEND_VERSION = "1.1.3";
 
   let current = 'home'; // 默认首屏=我的主页（v1.1.2）
   let booted = false;
@@ -41,6 +41,17 @@ window.App = (function () {
   }
 
   function refresh() { render(); }
+
+  /* 账号切换后统一重置各模块状态（A3）：清 filter/search/排序缓存（排序记忆按新账号
+     listSort 重读）、统计周期 statRange 回默认——防上一账号的筛选/搜索/排序状态残留 */
+  function resetModuleStates() {
+    if (window.Views && window.Views.resetState) window.Views.resetState();
+    if (window.LifeView && window.LifeView.resetState) window.LifeView.resetState();
+    if (window.WalletView && window.WalletView.resetState) window.WalletView.resetState();
+    if (window.PlanView && window.PlanView.resetState) window.PlanView.resetState();
+    if (window.FoodView && window.FoodView.resetState) window.FoodView.resetState();
+  }
+  S.onAccountChange(resetModuleStates);
 
   /* ---------- 启动页 / 账号选择（横向一排） ---------- */
   function avatarPickerHTML(current) {
@@ -258,11 +269,21 @@ window.App = (function () {
           results.push({ type: '美食', name: (f.name || f.foodType) + ' · ' + f.date, go: 'food' });
         }
       });
-      // 钱袋账单：备注/分类名/金额可搜，命中直达流水（v1.2.0）
+      // 钱袋账单：备注/分类名/金额可搜，命中直达流水（v1.2.0；分类名按 cats 树解析补齐，乙4）
       const wb = (db.wallet || {}).bills || [];
+      const billCatName = (function () {
+        const cats = (db.wallet || {}).cats || {};
+        const map = {};
+        ['expense', 'income'].forEach(function (k) {
+          (cats[k] || []).forEach(function (c) {
+            if (c && c.id) map[c.id] = c.name || '';
+            (c.children || []).forEach(function (ch) { if (ch && ch.id) map[ch.id] = ch.name || ''; });
+          });
+        });
+        return function (b) { return (map[b.catId] || '') + ' ' + (map[b.subCatId] || ''); };
+      })();
       wb.forEach(function (b) {
-        const catName = window.WalletView ? '' : ''; // 分类名走备注/金额匹配，避免重依赖
-        const hay = ((b.note || '') + ' ' + (b.accountName || '') + ' ' + String(b.amount || '')).toLowerCase();
+        const hay = ((b.note || '') + ' ' + (b.accountName || '') + ' ' + String(b.amount || '') + ' ' + billCatName(b)).toLowerCase();
         if (hay.indexOf(q) >= 0) {
           results.push({ type: '账单', name: (b.note || '账单') + ' · ' + b.date + ' · ¥' + (b.amount || 0), go: 'wallet', billDate: b.date });
         }

@@ -5,6 +5,32 @@ window.SettingsView = (function () {
   const S = window.Storage;
   const UI = window.UI;
 
+  /* 甲14：会话级页面态——当前分标签（任何 refresh 后恢复原标签，不再跳回「账号」）
+     + 数据体检结果（存在模块态里渲染，refresh 后仍在，直到下次数据操作） */
+  let curStab = 'account';
+  let repairResult = '';
+
+  /* 甲12：分类预算输入行按钱包分类树自动生成（10 大类全齐、名称=分类树名称）；
+     保存键沿用 budget.walletCats[大类id]（与「我的统计 · 预算进度」读取口径一致，兼容既有数据） */
+  function walletBudgetInputs(db, budget) {
+    let list = ((((db || {}).wallet || {}).cats) || {}).expense || [];
+    if (!list.length && M.defaultWalletCats) list = M.defaultWalletCats().expense || [];
+    const wc = (budget && budget.walletCats) || {};
+    return list.map(function (c) {
+      return '<label><span class="f-label">' + U.escapeHtml(c.name) + '</span>' +
+        '<input type="number" data-wcat-budget="' + U.escapeHtml(c.id) + '" value="' + (Number(wc[c.id]) || 0) + '"></label>';
+    }).join('');
+  }
+
+  /* 甲17：危险操作前自动备份——服务端把账号数据快照到 backups/（/api/backup?snapshot=1 钩子）；
+     快照失败则取消本次操作（确认框承诺「操作前将自动备份」，做不到就不做） */
+  async function autoBackup() {
+    try {
+      const r = await fetch('/api/backup?acc=' + encodeURIComponent(S.accId()) + '&snapshot=1');
+      return !!(r && r.ok);
+    } catch (e) { return false; }
+  }
+
   function render(root) {
     const db = S.getDB();
     const session = S.getSession() || {};
@@ -47,7 +73,7 @@ window.SettingsView = (function () {
         '<h4 class="detail-sub">数据体检</h4>' +
         '<p class="muted small">检查并修复：账单与词条/美食的悬空关联、自动同步的孤儿记录、余额快照的失效账户。安全可重复执行。</p>' +
         '<div class="btn-row"><button class="btn btn-ghost btn-sm" id="btn-repair">' + UI.icon('stethoscope', 14) + ' 开始体检</button>' +
-        '<span id="repair-result" class="muted small"></span></div>') +
+        '<span id="repair-result" class="muted small">' + U.escapeHtml(repairResult) + '</span></div>') +
 
       /* 3️⃣ 记账设置：账单导入导出 / 分类一览 / 分类预算 */
       section('bill', '记账设置',
@@ -56,12 +82,9 @@ window.SettingsView = (function () {
         '<h4 class="detail-sub">记账分类一览</h4>' +
         (window.WalletView ? window.WalletView.catTreeCompactHTML() : '<p class="muted small">钱袋模块未加载</p>') +
         '<h4 class="detail-sub">记账分类预算（可选，0=不设）</h4>' +
+        '<p class="muted small">按记账分类树自动生成全部大类，名称随分类树（如「送礼人情」）；与「预算与成本」的物品分域预算互不覆盖。</p>' +
         '<div class="form-grid">' +
-        [['w_food', '食品餐饮'], ['w_shop', '购物消费'], ['w_traffic', '出行交通'],
-        ['w_home', '居家生活'], ['w_fun', '休闲娱乐'], ['w_gift', '人情往来']].map(function (c) {
-          return '<label><span class="f-label">' + c[1] + '</span><input type="number" data-wcat-budget="' + c[0] +
-            '" value="' + ((budget.walletCats || {})[c[0]] || 0) + '"></label>';
-        }).join('') +
+        walletBudgetInputs(db, budget) +
         '</div>' +
         '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-wcat-budget">' + UI.icon('save', 14) + ' 保存记账分类预算</button></div>') +
 
@@ -83,7 +106,8 @@ window.SettingsView = (function () {
         catTable('digital', '数码（含游戏）', cats.digital) +
         catTable('clothing', '服饰（寿命参考）', cats.clothing) +
         catTable('life', '美妆（寿命参考）', cats.life) +
-        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">' + UI.icon('save', 14) + ' 保存成本模型</button></div>') +
+        '<div class="btn-row"><button class="btn btn-primary btn-sm" id="btn-save-cats">' + UI.icon('save', 14) + ' 保存成本模型</button></div>' +
+        '<div id="cost-err" class="small"></div>') +
 
       /* 5️⃣ 界面与偏好：导航排序 / 板块显示 / 吃灰预警 / 标签管理（两库并列） */
       section('pref', '界面与偏好',
@@ -127,7 +151,7 @@ window.SettingsView = (function () {
 
       /* 7️⃣ 危险操作 */
       '<div class="panel panel-danger stab" data-stab="danger"><div class="panel-head"><h3>危险操作</h3></div><div class="panel-body">' +
-      '<p class="muted">清空当前账号的全部数据（物品、穿搭、美食、记账账单/账户/余额记录、流水记录），不可恢复。建议先导出备份。</p>' +
+      '<p class="muted">清空当前账号的全部数据：全部记录（物品/穿搭/美食/打卡/账单/账户/余额/导入记录/模板）+ 全部设置（预算/标签库/导航排序/成本模型/界面偏好/穿搭组合与妆容组合），不可恢复。操作前将自动备份一份到 backups/。</p>' +
       '<div class="btn-row"><button class="btn btn-danger" id="btn-reset">' + UI.icon('trash-2', 14) + ' 清空当前账号数据</button></div></div></div>' +
 
       '</div>';
@@ -187,7 +211,9 @@ window.SettingsView = (function () {
         return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(t) + '</span>' +
           '<button class="btn-icon" data-del-taglib="' + U.escapeHtml(t) + '" title="从物品标签库删除">' +
           UI.icon('trash-2', 14) + '</button></div>';
-      }).join('') : '<div class="mini-row"><span class="muted">标签库为空，可在录入表单输入自定义标签后自动入</span></div>');
+      }).join('') : '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('tags', 48) + '</div>' +
+        '<p>物品标签库为空，可在录入表单输入自定义标签后自动入库</p>' +
+        '<button type="button" class="btn btn-ghost" data-eg-go="clothing">去添加物品</button></div>');
     box.querySelectorAll('[data-del-taglib]').forEach(function (b) {
       b.addEventListener('click', async function () {
         const v = b.getAttribute('data-del-taglib');
@@ -209,7 +235,9 @@ window.SettingsView = (function () {
       return '<div class="mini-row"><span class="flex1">' + U.escapeHtml(t.name) + '</span>' +
         '<button class="btn-icon" data-del-wtag="' + U.escapeHtml(t.id) + '" title="从钱袋标签库删除">' +
         UI.icon('trash-2', 14) + '</button></div>';
-    }).join('') : '<div class="mini-row"><span class="muted">钱袋标签库为空，记账时输入的标签会自动入库</span></div>';
+    }).join('') : '<div class="empty-state empty-card"><div class="empty-icon">' + UI.icon('wallet', 48) + '</div>' +
+      '<p>钱袋标签库为空，记账时输入的标签会自动入库</p>' +
+      '<button type="button" class="btn btn-ghost" data-eg-go="wallet">去记一笔</button></div>';
     box.querySelectorAll('[data-del-wtag]').forEach(function (b) {
       b.addEventListener('click', async function () {
         const id = b.getAttribute('data-del-wtag');
@@ -234,13 +262,13 @@ window.SettingsView = (function () {
     { id: 'danger', label: '危险操作', icon: 'triangle-alert' }
   ];
   function section(stab, title, body) {
-    return '<div class="panel stab' + (stab === 'account' ? ' stab-on' : '') + '" data-stab="' + stab + '">' +
+    return '<div class="panel stab' + (stab === curStab ? ' stab-on' : '') + '" data-stab="' + stab + '">' +
       '<div class="panel-head"><h3>' + title + '</h3></div>' +
       '<div class="panel-body">' + body + '</div></div>';
   }
   function stabBar() {
-    return '<div class="settings-tabs">' + STABS.map(function (t, i) {
-      return '<button type="button" class="stab-btn' + (i === 0 ? ' on' : '') + '" data-stab-btn="' + t.id + '">' +
+    return '<div class="settings-tabs">' + STABS.map(function (t) {
+      return '<button type="button" class="stab-btn' + (t.id === curStab ? ' on' : '') + '" data-stab-btn="' + t.id + '">' +
         UI.icon(t.icon, 16) + '<span>' + t.label + '</span></button>';
     }).join('') + '</div>';
   }
@@ -251,12 +279,21 @@ window.SettingsView = (function () {
     root.querySelectorAll('[data-stab-btn]').forEach(function (b) {
       b.addEventListener('click', function () {
         const id = b.getAttribute('data-stab-btn');
+        curStab = id; // 甲14：记住当前分标签，refresh 后恢复（不跳回「账号」）
         root.querySelectorAll('[data-stab-btn]').forEach(function (x) { x.classList.toggle('on', x === b); });
         root.querySelectorAll('.stab').forEach(function (p) {
           p.classList.toggle('stab-on', p.getAttribute('data-stab') === id);
         });
       });
     });
+    // 空态卡引导按钮（丙3）：事件委托（每 root 只绑一次）
+    if (!root.hasAttribute('data-eg-bound')) {
+      root.setAttribute('data-eg-bound', '1');
+      root.addEventListener('click', function (e) {
+        const b = e.target && e.target.closest ? e.target.closest('[data-eg-go]') : null;
+        if (b && root.contains(b)) window.App.go(b.getAttribute('data-eg-go'));
+      });
+    }
     // 版本信息（三方校验：version.json / exe / 前端资源，不一致 = 上次更新只换了一半）
     fetch('/api/version').then(function (r) { return r.json(); }).then(function (v) {
       const el = root.querySelector('#cur-ver');
@@ -306,13 +343,43 @@ window.SettingsView = (function () {
       });
     });
     root.querySelectorAll('[data-del-acc]').forEach(function (b) {
-      b.addEventListener('click', async function () {
+      b.addEventListener('click', function () {
         const id = b.getAttribute('data-del-acc');
-        if (await UI.confirmDialog('删除账号', '删除账号将移除其全部数据，确定？')) {
-          await S.deleteAccount(id, true);
-          UI.toast('账号已删除', 'success');
-          window.App.refresh();
+        const isCur = !!(cur && cur.id === id);
+        const accName = (accounts.find(function (x) { return x.id === id; }) || {}).name || '';
+        const headMsg = isCur
+          ? '将删除当前登录账号「' + accName + '」。删除后回到启动页重新选择账号。'
+          : '将删除账号「' + accName + '」。';
+        async function doDel(purge) {
+          try {
+            await S.deleteAccount(id, purge);
+            UI.toast(purge ? '账号及其数据已彻底删除' : '账号已移除（数据保留在磁盘）', 'success');
+            if (isCur) {
+              // 删的是当前登录账号：会话已停止（内存 db 已清、已重载 /api/session），
+              // 回到账号选择屏——旧会话不得继续保存把已删数据目录写活（A1）
+              window.App.showAccountPicker();
+            } else {
+              window.App.refresh();
+            }
+          } catch (e) { UI.toast(e.message || '删除失败', 'error'); }
         }
+        // 甲17 两档删除：彻底删除（purge=true）/ 仅移除账号（purge=false，数据保留在磁盘）
+        UI.modal({
+          title: '删除账号', width: 440,
+          bodyHTML: '<p class="confirm-text">' + U.escapeHtml(headMsg) + '请选择删除方式：</p>' +
+            '<div class="del-acc-opts">' +
+            '<p class="muted small"><strong>彻底删除（含数据）</strong>：账号及其全部数据从磁盘删除，不可恢复。</p>' +
+            '<p class="muted small"><strong>仅移除账号（数据保留在磁盘）</strong>：账号从列表移除，数据目录保留在磁盘，可先手动备份再清理。</p>' +
+            '</div>',
+          footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +
+            '<button class="btn btn-ghost" data-act="keep">仅移除账号（数据保留在磁盘）</button>' +
+            '<button class="btn btn-danger" data-act="yes">彻底删除（含数据）</button>',
+          onMount: function (w, close) {
+            w.querySelector('[data-x=c]').addEventListener('click', close);
+            w.querySelector('[data-act=keep]').addEventListener('click', function () { close(); doDel(false); });
+            w.querySelector('[data-act=yes]').addEventListener('click', function () { close(); doDel(true); });
+          }
+        });
       });
     });
     root.querySelector('#btn-add-acc').addEventListener('click', function () {
@@ -363,24 +430,38 @@ window.SettingsView = (function () {
     root.querySelector('#import-file').addEventListener('change', async function (e) {
       const f = e.target.files[0];
       if (!f) return;
-      if (!await UI.confirmDialog('恢复备份', '将覆盖当前账号数据，确定？')) return;
+      // 文案与实际一致（A16）：恢复是与当前数据合并（备份里缺的文件保留现状），不是整体覆盖
+      // 甲17：确认框提示自动备份；服务端恢复前本身也会留快照（恢复前快照已有，这里补自动导出）
+      if (!await UI.confirmDialog('恢复备份', '将与当前账号数据合并（备份中缺的文件保留现状）。操作前将自动备份一份到 backups/，确定？')) return;
+      if (!await autoBackup()) {
+        UI.toast('自动备份失败，已取消恢复', 'error');
+        return;
+      }
       try {
+        repairResult = '';
         await S.importBackup(f);
         UI.toast('已恢复', 'success'); window.App.refresh();
       } catch (err) { UI.toast(err.message, 'error'); }
     });
     // 数据体检（v1.2.0）：修复悬空关联/孤儿同步记录
+    // 甲14：结果存模块态再渲染——refresh 重渲染不再抹掉结果，直到下次数据操作
     const repairBtn = root.querySelector('#btn-repair');
     if (repairBtn) repairBtn.addEventListener('click', async function () {
       repairBtn.disabled = true;
+      repairResult = '体检中…';
+      const out = root.querySelector('#repair-result');
+      if (out) out.textContent = repairResult;
       try {
         const r = await S.repairData();
-        root.querySelector('#repair-result').textContent = r.fixed
-          ? '已修复 ' + r.fixed + ' 处数据问题' : '数据健康，无需修复';
+        repairResult = r.fixed ? '已修复 ' + r.fixed + ' 处数据问题' : '数据健康，无需修复';
+        const el = root.querySelector('#repair-result');
+        if (el) el.textContent = repairResult;
         UI.toast(r.fixed ? '体检完成，修复 ' + r.fixed + ' 处' : '数据健康', 'success');
         window.App.refresh();
       } catch (e) {
-        root.querySelector('#repair-result').textContent = '体检失败：' + e.message;
+        repairResult = '体检失败：' + (e && e.message || e);
+        const el = root.querySelector('#repair-result');
+        if (el) el.textContent = repairResult;
       } finally {
         repairBtn.disabled = false;
       }
@@ -418,30 +499,89 @@ window.SettingsView = (function () {
       UI.toast('预算已保存', 'success');
     });
     root.querySelector('#btn-save-cats').addEventListener('click', async function () {
-      // 改动存 settings.costModelOverrides（服务端 load_db 会合并回分类树），
-      // 同步改内存里的分类树供本次会话即时生效
-      db.settings.costModelOverrides = db.settings.costModelOverrides || {};
+      // 甲13 校验：寿命 > 0、残值率 0~1（如 0.3）——越界红字拦截，不静默忽略；
+      // 留空 = 不覆盖（防 Number('')=0 把 0 写进覆盖）；回默认走每行「恢复默认」按钮
+      const errBox = root.querySelector('#cost-err');
+      const errs = [];
+      const edits = [];
       root.querySelectorAll('[data-cat-kind]').forEach(function (tbl) {
         const kind = tbl.getAttribute('data-cat-kind');
         tbl.querySelectorAll('tr[data-cid]').forEach(function (tr) {
           const cat = (db.categories[kind] || []).find(function (c) { return c.id === tr.getAttribute('data-cid'); });
           if (!cat) return;
-          const ly = Number(tr.querySelector('[data-f=life]').value);
-          if (ly > 0) cat.lifeYears = ly;
-          // 残值率留空 = 不覆盖（防 Number('')=0 把 0 写进覆盖）
-          const rvInput = tr.querySelector('[data-f=res]').value;
-          if (rvInput !== '') {
-            const rv = Number(rvInput);
-            if (!isNaN(rv)) cat.residualRate = rv;
+          const lifeEl = tr.querySelector('[data-f=life]');
+          const resEl = tr.querySelector('[data-f=res]');
+          lifeEl.classList.remove('input-err');
+          resEl.classList.remove('input-err');
+          const name = cat.name || tr.getAttribute('data-cid');
+          let ly = null, rv = null;
+          const lifeStr = (lifeEl.value || '').trim();
+          const resStr = (resEl.value || '').trim();
+          if (lifeStr !== '') {
+            ly = Number(lifeStr);
+            if (isNaN(ly) || ly <= 0) {
+              errs.push('「' + name + '」寿命需大于 0');
+              lifeEl.classList.add('input-err');
+              ly = null;
+            }
           }
-          // 键带 kind 前缀：digital「配件」与 clothing「配饰」同 id 'acc'，裸 id 会互相覆盖（v1.0.9 修复）
-          db.settings.costModelOverrides[kind + ':' + cat.id] = {
-            lifeYears: cat.lifeYears, residualRate: cat.residualRate
-          };
+          if (resStr !== '') {
+            rv = Number(resStr);
+            if (isNaN(rv) || rv < 0 || rv > 1) {
+              errs.push('「' + name + '」残值率需在 0~1 之间（如 0.3）');
+              resEl.classList.add('input-err');
+              rv = null;
+            }
+          }
+          edits.push({ kind: kind, cat: cat, ly: ly, rv: rv });
         });
+      });
+      if (errs.length) {
+        if (errBox) errBox.innerHTML = '<span class="field-err">' + U.escapeHtml(errs.join('；')) + '。已阻止保存，请修正后重试。</span>';
+        UI.toast('成本模型有 ' + errs.length + ' 处校验未通过', 'error');
+        return;
+      }
+      if (errBox) errBox.innerHTML = '';
+      // 改动存 settings.costModelOverrides（服务端 load_db 会合并回分类树），
+      // 同步改内存里的分类树供本次会话即时生效
+      db.settings.costModelOverrides = db.settings.costModelOverrides || {};
+      edits.forEach(function (e) {
+        const cat = e.cat;
+        if (e.ly !== null) cat.lifeYears = e.ly;
+        // 残值率留空 = 不覆盖（防 Number('')=0 把 0 写进覆盖）
+        if (e.rv !== null) cat.residualRate = e.rv;
+        // 键带 kind 前缀：digital「配件」与 clothing「配饰」同 id 'acc'，裸 id 会互相覆盖（v1.0.9 修复）
+        db.settings.costModelOverrides[e.kind + ':' + cat.id] = {
+          lifeYears: cat.lifeYears, residualRate: cat.residualRate
+        };
       });
       await S.saveSettings();
       UI.toast('成本模型已保存', 'success');
+    });
+    /* 甲13 恢复默认：每行一键重置为默认寿命 5 年 / 残值率 0.1（models.js 成本模型缺省值）并立即落库 */
+    root.querySelectorAll('[data-cost-default]').forEach(function (b) {
+      b.addEventListener('click', async function () {
+        const tr = b.closest('tr');
+        const tbl = tr && tr.closest('[data-cat-kind]');
+        if (!tr || !tbl) return;
+        const kind = tbl.getAttribute('data-cat-kind');
+        const cat = (db.categories[kind] || []).find(function (c) { return c.id === tr.getAttribute('data-cid'); });
+        if (!cat) return;
+        const lifeEl = tr.querySelector('[data-f=life]');
+        const resEl = tr.querySelector('[data-f=res]');
+        lifeEl.value = '5';
+        resEl.value = '0.1';
+        lifeEl.classList.remove('input-err');
+        resEl.classList.remove('input-err');
+        cat.lifeYears = 5;
+        cat.residualRate = 0.1;
+        db.settings.costModelOverrides = db.settings.costModelOverrides || {};
+        db.settings.costModelOverrides[kind + ':' + cat.id] = { lifeYears: 5, residualRate: 0.1 };
+        await S.saveSettings();
+        const errBox = root.querySelector('#cost-err');
+        if (errBox) errBox.innerHTML = '';
+        UI.toast('「' + (cat.name || '') + '」已恢复默认（寿命 5 年 / 残值率 0.1）', 'success');
+      });
     });
 
     /* 界面与偏好 */
@@ -543,9 +683,16 @@ window.SettingsView = (function () {
 
     /* 危险操作 */
     root.querySelector('#btn-reset').addEventListener('click', async function () {
-      if (await UI.confirmDialog('清空确认', '将删除当前账号全部记录，无法恢复。确定？')) {
+      // 文案=实际范围（A15）：不拆档、一次彻底清空；模板与穿搭/妆容组合也在清空范围内，明示
+      // 甲17：确认框提示「操作前将自动备份」，确认后先快照到 backups/ 再清空（快照失败则取消）
+      if (await UI.confirmDialog('清空确认', '将清空当前账号的全部记录（物品/穿搭/美食/打卡/账单/账户/余额/导入记录/模板）和全部设置（预算/标签库/导航排序/成本模型/界面偏好/穿搭组合与妆容组合），无法恢复。操作前将自动备份一份到 backups/，确定？')) {
+        if (!await autoBackup()) {
+          UI.toast('自动备份失败，已取消清空', 'error');
+          return;
+        }
+        repairResult = '';
         await S.resetAll();
-        UI.toast('已清空', 'success'); window.App.refresh();
+        UI.toast('已清空（清空前已自动备份到 backups/）', 'success'); window.App.refresh();
       }
     });
   }
@@ -555,13 +702,15 @@ window.SettingsView = (function () {
       return '<tr data-cid="' + c.id + '"><td>' + UI.iconOrEmoji(c.icon, 16) + ' ' + U.escapeHtml(c.name) +
         (c.children && c.children.length ? '<span class="muted small">（' + c.children.length + ' 个子类）</span>' : '') +
         '</td>' +
-        '<td><input type="number" step="0.5" data-f="life" value="' + (c.lifeYears || '') + '" placeholder="—"></td>' +
+        '<td><input type="number" step="0.5" data-f="life" value="' + (c.lifeYears || '') + '" placeholder="默认 5"></td>' +
         '<td><input type="number" step="0.01" data-f="res" value="' +
-        (c.residualRate !== undefined && c.residualRate !== null ? c.residualRate : '') + '" placeholder="—"></td></tr>';
+        (c.residualRate !== undefined && c.residualRate !== null ? c.residualRate : '') + '" placeholder="0~1，如 0.3"></td>' +
+        '<td class="cat-act"><button type="button" class="btn btn-ghost btn-sm" data-cost-default' +
+        ' title="恢复默认（寿命 5 年 / 残值率 0.1）">恢复默认</button></td></tr>';
     }).join('');
     return '<div class="table-scroll"><table class="cat-table" data-cat-kind="' + kind + '">' +
-      '<thead><tr><th>' + title + '</th><th>寿命(年)</th><th>残值率</th></tr></thead><tbody>' +
-      (rows || '<tr><td colspan="3" class="muted">暂无分类</td></tr>') +
+      '<thead><tr><th>' + title + '</th><th>寿命(年)（大于 0）</th><th>残值率（0~1，如 0.3）</th><th></th></tr></thead><tbody>' +
+      (rows || '<tr><td colspan="4" class="muted">暂无分类</td></tr>') +
       '</tbody></table></div>';
   }
 

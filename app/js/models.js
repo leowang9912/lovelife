@@ -184,10 +184,13 @@ window.Models = (function () {
     else if (useCount > 0) costPerUse = invested / useCount;
 
     const costPerHour = playHours > 0 ? invested / playHours : null;
+    // 售出回血（甲4）：只要填了售出价就算净成本/回血率（售出日期缺失也不挡展示）；
+    // ''/null/undefined 视为未填
     let netCost = null, recoveryRate = null;
-    if (soldDate && item.soldPrice !== null && item.soldPrice !== undefined) {
-      netCost = invested - (Number(item.soldPrice) || 0);
-      recoveryRate = invested > 0 ? (Number(item.soldPrice) || 0) / invested : null;
+    const sp = item.soldPrice;
+    if (sp !== null && sp !== undefined && sp !== '' && !isNaN(Number(sp))) {
+      netCost = invested - (Number(sp) || 0);
+      recoveryRate = invested > 0 ? (Number(sp) || 0) / invested : null;
     }
     return {
       heldDays: heldDays, invested: invested, dailyCost: dailyCost,
@@ -497,9 +500,27 @@ window.Models = (function () {
 
   function validateFood(rec) {
     const errs = [];
-    if (!rec.foodCuisine) errs.push('菜系必填');
+    // 菜系必填：手动新建必须填；账单同步来源（fromBill）豁免——
+    // 自动建档菜系预填「其他」，这里兜底保证补评分/图片永远能存上（甲1）
+    if (!rec.foodCuisine && !rec.fromBill) errs.push('菜系必填');
     if (!rec.meal) errs.push('餐别必填');
-    if (rec.price === '' || rec.price === null || rec.price === undefined || isNaN(Number(rec.price))) errs.push('价格必填');
+    if (rec.price === '' || rec.price === null || rec.price === undefined || isNaN(Number(rec.price))) {
+      errs.push('价格必填');
+    } else if (Number(rec.price) < 0) {
+      errs.push('价格不能为负'); // 甲10 范围校验：价格 ≥ 0
+    }
+    // 甲10 范围校验：评分/饱腹感 0~5、热量 ≥ 0；空值=未填不拦
+    function inRange(val, min, max, label) {
+      if (val === '' || val === null || val === undefined) return;
+      const n = Number(val);
+      if (isNaN(n) || n < min || n > max) errs.push(label + '需在 ' + min + '~' + max + ' 之间');
+    }
+    inRange(rec.rating, 0, 5, '评分');
+    inRange(rec.fullness, 0, 5, '饱腹感');
+    if (rec.calories !== '' && rec.calories !== null && rec.calories !== undefined) {
+      const cal = Number(rec.calories);
+      if (isNaN(cal) || cal < 0) errs.push('热量不能为负');
+    }
     return errs;
   }
 

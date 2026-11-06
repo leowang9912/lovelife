@@ -33,51 +33,6 @@ window.HomeView = (function () {
     const outfitDone = (db.outfits || []).filter(function (o) { return o.date === t; });
     const foodDone = (db.food || []).filter(function (f) { return f.date === t; });
 
-    // 本月速览
-    const mk = U.monthKey(t);
-    const wstat = M.walletStats(db);
-    const budgetTotal = Number((db.settings.budget || {}).monthlyTotal) || 0;
-
-    // 提醒中心：临期（PAO/保修）+ 长期吃灰
-    const expiring = M.expiryList(db).slice(0, 4);
-    const idleWarn = Number(db.settings.idleWarnDays) || 60;
-    const idleList = (M.summary(db).idleList || []).filter(function (x) { return x.idle >= idleWarn; }).slice(0, 4);
-
-    // 最近动态（跨模块 5 条）
-    const feed = [];
-    ((db.wallet || {}).bills || []).slice(-3).forEach(function (b) {
-      feed.push({
-        at: (b.date || '') + ' ' + (b.time || ''), icon: 'receipt',
-        text: '记账 · ' + (b.note || '账单') + ' · ' + U.formatMoney(b.amount),
-        go: function () {
-          if (window.WalletView && window.WalletView.jumpTo) window.WalletView.jumpTo({ date: b.date });
-          else window.App.go('wallet');
-        }
-      });
-    });
-    (db.outfits || []).slice(-1).forEach(function (o) {
-      feed.push({
-        at: o.date, icon: 'shirt',
-        text: '穿搭打卡 · ' + U.cnDate(o.date),
-        go: function () { window.Views.openOutfitEditor(o.date, o); }
-      });
-    });
-    (db.food || []).slice(-1).forEach(function (f) {
-      feed.push({
-        at: f.date, icon: 'utensils',
-        text: '美食 · ' + (f.name || f.meal || '记录'),
-        go: function () { window.FoodView.openFoodEditor(f.date, f); }
-      });
-    });
-    (db.items || []).slice(-2).forEach(function (i) {
-      feed.push({
-        at: (i.createdAt || '').slice(0, 10), icon: 'package',
-        text: '建档 · ' + (i.name || '物品'),
-        go: function () { window.Views.openItemDetail(i.id); }
-      });
-    });
-    feed.sort(function (a, b) { return String(b.at).localeCompare(String(a.at)); });
-
     root.innerHTML =
       '<div class="home-hero">' +
       '<div class="home-greet">' + greet() + ' 👋</div>' +
@@ -111,7 +66,7 @@ window.HomeView = (function () {
       '</div></div></div>' +
       '</div>';
 
-    bind(root, feed, outfitDone, foodDone);
+    bind(root, outfitDone, foodDone);
   }
 
   function esc(t) { return U.escapeHtml(t == null ? '' : t); }
@@ -128,7 +83,7 @@ window.HomeView = (function () {
       '<span class="home-check-state">' + (done ? '今日已打 ✓' : '去打卡') + '</span></button>';
   }
 
-  function bind(root, feed, outfitDone, foodDone) {
+  function bind(root, outfitDone, foodDone) {
     root.querySelector('#hq-digital').addEventListener('click', function () {
       window.Views.openItemEditor(null, 'digital');
     });
@@ -155,12 +110,6 @@ window.HomeView = (function () {
     if (weatherCard && window.Views && window.Views.renderOutfitRec) {
       window.Views.renderOutfitRec(weatherCard);
     }
-    root.querySelectorAll('[data-feed]').forEach(function (el) {
-      el.addEventListener('click', function () {
-        const f = feed[Number(el.getAttribute('data-feed'))];
-        if (f && f.go) f.go();
-      });
-    });
   }
 
   return { render: render };

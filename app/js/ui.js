@@ -18,41 +18,87 @@ window.UI = (function () {
     setTimeout(function () {
       el.classList.remove('show');
       setTimeout(function () { el.remove(); }, 300);
-    }, 2600);
+    }, type === 'error' ? 5000 : 2600); // 错误信息多看几秒（乙3），成功保持 2.6s
   }
 
   /* ---------- Modal ---------- */
+  // 弹窗栈：Esc 只响应最上层弹窗（嵌套 confirmDialog 时不连锁关闭底层）
+  const modalStack = [];
+
   function modal(opts) {
     const wrap = document.createElement('div');
     wrap.className = 'modal-mask';
     wrap.innerHTML =
-      '<div class="modal" style="' + (opts.width ? 'max-width:' + opts.width + 'px' : '') + '">' +
+      '<div class="modal' + (opts.width ? (Number(opts.width) <= 460 ? ' modal-sm' : Number(opts.width) >= 680 ? ' modal-lg' : '') : '') + '">' +
       '<div class="modal-head"><h3>' + U.escapeHtml(opts.title || '') + '</h3>' +
       '<button class="modal-close" title="关闭">' + icon('x', 16) + '</button></div>' +
       '<div class="modal-body">' + (opts.bodyHTML || '') + '</div>' +
       (opts.footerHTML ? '<div class="modal-foot">' + opts.footerHTML + '</div>' : '') +
       '</div>';
     document.body.appendChild(wrap);
+    modalStack.push(wrap);
     requestAnimationFrame(function () { wrap.classList.add('show'); });
     let closed = false;
+    let keyHandler = null;
     function close() {
       if (closed) return;
       closed = true;
+      const si = modalStack.indexOf(wrap);
+      if (si >= 0) modalStack.splice(si, 1);
+      if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
       wrap.classList.remove('show');
       setTimeout(function () { wrap.remove(); }, 220);
       if (opts.onClose) { try { opts.onClose(); } catch (e) {} }
     }
     wrap.querySelector('.modal-close').addEventListener('click', close);
     wrap.addEventListener('click', function (e) {
-      if (e.target === wrap && opts.closable !== false) close();
+      if (e.target === wrap && opts.closable !== false) {
+        // 带表单的弹窗（formGuard）误点遮罩先确认，防填一半全丢（甲8）
+        if (opts.formGuard) {
+          confirmDialog('放弃已填内容？', '弹窗里已填写的内容将丢失，确定关闭吗？').then(function (yes) {
+            if (yes) close();
+          });
+        } else {
+          close();
+        }
+      }
     });
+    // Esc 统一关闭（甲8）：IME 组词中不拦截；只最上层弹窗响应
+    keyHandler = function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (modalStack[modalStack.length - 1] !== wrap) return;
+      e.preventDefault();
+      close();
+    };
+    document.addEventListener('keydown', keyHandler);
     if (opts.onMount) opts.onMount(wrap, close);
     return { close: close, el: wrap };
+  }
+
+  /* 保存按钮 loading 挂点（丙4）：保存中加 .is-loading + 文案「保存中…」，完成/失败还原。
+     样式（透明度/spinner）由 app\css 定义，这里只接线状态。 */
+  function loadingBtn(btn, on) {
+    if (!btn) return;
+    if (on) {
+      if (!btn.hasAttribute('data-label')) btn.setAttribute('data-label', btn.innerHTML);
+      btn.classList.add('is-loading');
+      btn.innerHTML = '保存中…';
+      btn.disabled = true;
+    } else {
+      btn.classList.remove('is-loading');
+      if (btn.hasAttribute('data-label')) {
+        btn.innerHTML = btn.getAttribute('data-label');
+        btn.removeAttribute('data-label');
+      }
+      btn.disabled = false;
+    }
   }
 
   function confirmDialog(title, text) {
     return new Promise(function (resolve) {
       let settled = false;
+      let keyHandler = null;
       const done = function (v) { if (!settled) { settled = true; resolve(v); } };
       modal({
         title: title,
@@ -62,14 +108,47 @@ window.UI = (function () {
           // 先结算再 close：close 会触发 onClose 的 done(false)，done 幂等保证按钮结果优先
           wrap.querySelector('[data-act=no]').addEventListener('click', function () { done(false); close(); });
           wrap.querySelector('[data-act=yes]').addEventListener('click', function () { done(true); close(); });
+          // 键盘（乙3）：Enter=确认、Esc=取消。IME 组词中不拦截；焦点在 textarea/多行输入时
+          // 不抢 Enter（让换行进原文）；弹窗有输入框时仅按钮聚焦才确认，无输入框直接确认（保守）
+          keyHandler = function (e) {
+            if (e.isComposing || e.keyCode === 229) return;
+            if (e.key === 'Escape' || e.key === 'Esc') {
+              e.preventDefault();
+              done(false); close();
+              return;
+            }
+            if (e.key !== 'Enter') return;
+            const t = e.target || {};
+            const tag = String(t.tagName || '').toLowerCase();
+            if (tag === 'textarea' || t.isContentEditable) return;
+            const onButton = !!(t.closest && t.closest('button'));
+            if (wrap.querySelector('input, textarea, select') && !onButton) return;
+            e.preventDefault();
+            done(true); close();
+          };
+          document.addEventListener('keydown', keyHandler);
         },
         // 点遮罩/× 关闭同样结算（否则调用方 await 永久挂起、重复点击叠加确认框）
-        onClose: function () { done(false); }
+        onClose: function () {
+          if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
+          done(false);
+        }
       });
     });
   }
 
   /* ---------- 图片裁切弹窗（1:1）+ 一键抠图 ---------- */
+  /* 回退扩展名按实际类型取（甲2-④）：image/jpeg→.jpg 等，默认 .png——
+     不再无脑 .webp（内容与后缀不符会让服务端/看图工具误判） */
+  function extOf(fileOrBlob) {
+    const t = String((fileOrBlob && fileOrBlob.type) || '').toLowerCase();
+    if (t === 'image/jpeg' || t === 'image/jpg') return '.jpg';
+    if (t === 'image/webp') return '.webp';
+    if (t === 'image/gif') return '.gif';
+    if (t === 'image/bmp') return '.bmp';
+    return '.png';
+  }
+
   function cropImage(file) {
     return new Promise(function (resolve, reject) {
       let settled = false;
@@ -171,18 +250,32 @@ window.UI = (function () {
             });
 
             wrap.querySelector('[data-act=origin]').addEventListener('click', async function () {
-              done({ blob: file, isCutout: false });
+              // 「使用原图」也过 Storage.compressImage 统一压缩（甲2-③），
+              // 不再把原图直塞入库（大图撑爆存储）；压缩失败才回退原文件并按 file.type 取扩展名
+              let blob = file, ext = extOf(file);
+              try {
+                const c = window.Storage && window.Storage.compressImage ? await window.Storage.compressImage(file) : null;
+                if (c) { blob = c; ext = extOf(c) || '.webp'; }
+              } catch (e) { /* 压缩失败保留原图 */ }
+              done({ blob: blob, isCutout: false, ext: ext });
               close();
             });
             wrap.querySelector('[data-act=ok]').addEventListener('click', async function () {
-              const out = cutoutCanvas || canvas;
-              let blob;
-              if (cutoutCanvas) {
-                blob = await new Promise(function (res) { cutoutCanvas.toBlob(res, 'image/png'); });
-              } else {
-                blob = await new Promise(function (res) { canvas.toBlob(res, 'image/webp', 0.88); });
-              }
-              done({ blob: blob, isCutout: !!cutoutCanvas });
+              // 输出 ≥1024px（甲2-②）：按预览同款构图（等比缩放 + 白底补边）放大输出，
+              // 不再固定 320×320（放大糊）
+              const OUT = 1024;
+              const outCanvas = document.createElement('canvas');
+              outCanvas.width = OUT; outCanvas.height = OUT;
+              const octx = outCanvas.getContext('2d');
+              octx.fillStyle = '#ffffff';
+              octx.fillRect(0, 0, OUT, OUT);
+              const k = OUT / frame;
+              const w = img.width * scale, h = img.height * scale;
+              octx.drawImage(cutoutCanvas || img, ((frame - w) / 2 + offsetX) * k, ((frame - h) / 2 + offsetY) * k, w * k, h * k);
+              const blob = await new Promise(function (res) {
+                outCanvas.toBlob(res, cutoutCanvas ? 'image/png' : 'image/webp', 0.88);
+              });
+              done({ blob: blob, isCutout: !!cutoutCanvas, ext: extOf(blob) });
               close();
             });
           }
@@ -233,16 +326,20 @@ window.UI = (function () {
 
       container.querySelector('input[type=file]').addEventListener('change', async function (e) {
         const files = Array.from(e.target.files || []);
+        let skipped = 0;
         for (const f of files) {
           if (!f.type.startsWith('image/')) continue;
           try {
             const result = await cropImage(f);
-            if (!result) continue; // 用户取消：跳过该图，不拖累整批
-            pendingBlobs.push({ blob: result.blob, ext: result.isCutout ? '.png' : '.webp' });
+            if (!result) { skipped++; continue; } // 用户取消：跳过该图，不拖累整批
+            pendingBlobs.push({ blob: result.blob, ext: result.ext || (result.isCutout ? '.png' : '.webp') });
           } catch (err) {
-            pendingBlobs.push({ blob: f, ext: '.webp' });
+            // 裁切链路失败回退原图：扩展名按 file.type 取（甲2-④），不再硬编码 .webp
+            pendingBlobs.push({ blob: f, ext: extOf(f) });
           }
         }
+        // 取消不再无声消失（甲2-①）：整批处理完统一提示跳过张数
+        if (skipped > 0) toast('已跳过 ' + skipped + ' 张图片', 'info');
         render();
       });
 
@@ -262,12 +359,14 @@ window.UI = (function () {
         const saved = paths.slice();
         for (const p of pendingBlobs) {
           const blob = p.blob || p;
-          const ext = p.ext || '.webp';
+          const ext = p.ext || '.png';
           saved.push(await Storage.uploadBlob(blob, 'img' + ext));
         }
         return saved;
       },
-      getPaths: function () { return paths.slice(); }
+      getPaths: function () { return paths.slice(); },
+      // 有没有图（已保存 + 待上传）：纯拍照打卡校验用（甲23-②）
+      hasImages: function () { return paths.length > 0 || pendingBlobs.length > 0; }
     };
   }
 
@@ -539,6 +638,13 @@ window.UI = (function () {
       '<label id="f-retired-row"' + ((item.status || 'in_use') === 'in_use' ? ' style="display:none"' : '') + '>' +
       '<span class="f-label">停用时间</span><input type="date" name="retiredAt" value="' +
       U.escapeHtml(item.retiredAt || U.todayStr()) + '"></label>' +
+      // 售出回血（甲4）：状态=已售出 时展开售出价/售出日期（默认今天）；
+      // 二手回血自动回填的值原样可见可改
+      '<label id="f-sold-row"' + ((item.status || 'in_use') === 'sold' ? '' : ' style="display:none"') + '>' +
+      '<span class="f-label">售出价 / 售出日期</span><div class="tag-add-row">' +
+      '<input type="number" step="0.01" name="soldPrice" placeholder="售出价" style="width:110px" value="' +
+      (item.soldPrice !== null && item.soldPrice !== undefined ? U.escapeHtml(String(item.soldPrice)) : '') + '">' +
+      '<input type="date" name="soldDate" value="' + U.escapeHtml(item.soldDate || '') + '"></div></label>' +
       '<label><span class="f-label">品牌</span><input name="brand" value="' + U.escapeHtml(item.brand || '') + '"></label>' +
       '<label class="f-full"><span class="f-label">备注</span><input name="notes" value="' + U.escapeHtml(item.notes || '') + '"></label>' +
       '<div class="f-full"><span class="f-label">标签（可多选）</span><div class="chip-row" id="tag-chips">' +
@@ -659,6 +765,18 @@ window.UI = (function () {
       statusSel.addEventListener('change', syncRetired);
       syncRetired();
     }
+    // 售出联动（甲4）：选「已售出」展开售出价/售出日期，日期默认今天
+    const soldRow = formEl.querySelector('#f-sold-row');
+    if (statusSel && soldRow) {
+      const soldDateInput = soldRow.querySelector('[name=soldDate]');
+      const syncSold = function () {
+        const on = statusSel.value === 'sold';
+        soldRow.style.display = on ? '' : 'none';
+        if (on && soldDateInput && !soldDateInput.value) soldDateInput.value = U.todayStr();
+      };
+      statusSel.addEventListener('change', syncSold);
+      syncSold();
+    }
     update();
   }
 
@@ -679,6 +797,13 @@ window.UI = (function () {
     item.purchaseDate = fd.get('purchaseDate') || '';
     const pp = fd.get('purchasePrice');
     item.purchasePrice = pp === '' || pp === null ? null : Number(pp);
+    // 售出回血（甲4）：状态=已售出 读取售出价/售出日期（空价记 ''=未填）；
+    // 其他状态保留原值不动（二手回血自动回填的数据不被表单抹掉）
+    if (item.status === 'sold') {
+      const sp = fd.get('soldPrice');
+      item.soldPrice = sp === '' || sp === null ? '' : Number(sp);
+      item.soldDate = fd.get('soldDate') || U.todayStr();
+    }
     item.brand = (fd.get('brand') || '').trim();
     item.notes = (fd.get('notes') || '').trim();
     item.channel = (fd.get('channel') || '').trim();
@@ -697,7 +822,9 @@ window.UI = (function () {
         window.Storage.saveSettings();
       }
     }
-    item.kind = kind === 'digital'
+    // kind 跟随分类重算（甲21-②）：数码域入口（digital/device/game）都要重算——
+    // 编辑 device 物品把分类改到「游戏」侧时 kind 必须变 game，游戏字段才存得上
+    item.kind = (kind === 'digital' || kind === 'device' || kind === 'game')
       ? (kindOfCategory(db, 'digital', item.categoryId, item.subCategoryId) || 'device')
       : kind;
 
@@ -783,16 +910,13 @@ window.UI = (function () {
       if (!jobs.length) return;
       Promise.all(jobs).then(function () {
         if (container.isConnected === false) return; // 弹窗已关，不再重绘
-        render();
+        renderResults();
       });
     }
 
-    function render() {
-      const cats = [];
-      items.forEach(function (i) {
-        const c = i.categoryName || '其他';
-        if (cats.indexOf(c) < 0) cats.push(c);
-      });
+    /* 结果区独立重绘（甲9）：搜索输入不再整格重建——input 本身不动，
+       中文输入法候选词/光标不被打断；选中/切 tab 也只刷结果区 */
+    function filtered() {
       let list = items;
       if (activeCat) list = list.filter(function (i) { return (i.categoryName || '其他') === activeCat; });
       if (keyword) {
@@ -802,6 +926,40 @@ window.UI = (function () {
             ((i.brand || '') + (i.shade || '')).toLowerCase().indexOf(q) >= 0;
         });
       }
+      return list;
+    }
+
+    function renderResults() {
+      const grid = container.querySelector('#pk-results');
+      if (!grid) return;
+      const list = filtered();
+      grid.innerHTML = list.length ? list.map(function (i) {
+        const on = selected.has(i.id);
+        return '<div class="pick-card' + (on ? ' on' : '') + '" data-pid="' + i.id + '">' +
+          (thumbOf(i)
+            ? '<img src="' + U.escapeHtml(thumbOf(i)) + '"/>'
+            : '<div class="pick-noimg">' + iconOrEmoji(opts.icon || 'package', 32) + '</div>') +
+          '<div class="pick-name">' + U.escapeHtml(i.name) + '</div>' +
+          (on ? '<div class="pick-check">' + icon('check', 16) + '</div>' : '') +
+          '</div>';
+      }).join('') : '<p class="empty-hint">没有匹配的物品</p>';
+      grid.querySelectorAll('.pick-card').forEach(function (card) {
+        card.addEventListener('click', function () {
+          const id = card.getAttribute('data-pid');
+          if (selected.has(id)) selected.delete(id);
+          else selected.add(id);
+          renderResults();
+          if (opts.onChange) opts.onChange(Array.from(selected));
+        });
+      });
+    }
+
+    function render() {
+      const cats = [];
+      items.forEach(function (i) {
+        const c = i.categoryName || '其他';
+        if (cats.indexOf(c) < 0) cats.push(c);
+      });
       container.innerHTML =
         '<div class="picker-search"><input type="search" id="pk-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(keyword) + '"></div>' +
         '<div class="picker-tabs">' +
@@ -809,41 +967,32 @@ window.UI = (function () {
         cats.map(function (c) {
           return '<button class="ptab' + (activeCat === c ? ' on' : '') + '" data-cat="' + U.escapeHtml(c) + '">' + U.escapeHtml(c) + '</button>';
         }).join('') + '</div>' +
-        '<div class="picker-grid">' +
-        (list.length ? list.map(function (i) {
-          const on = selected.has(i.id);
-          return '<div class="pick-card' + (on ? ' on' : '') + '" data-pid="' + i.id + '">' +
-            (thumbOf(i)
-              ? '<img src="' + U.escapeHtml(thumbOf(i)) + '"/>'
-              : '<div class="pick-noimg">' + iconOrEmoji(opts.icon || 'package', 32) + '</div>') +
-            '<div class="pick-name">' + U.escapeHtml(i.name) + '</div>' +
-            (on ? '<div class="pick-check">' + icon('check', 16) + '</div>' : '') +
-            '</div>';
-        }).join('') : '<p class="empty-hint">没有匹配的物品</p>') +
-        '</div>';
+        '<div class="picker-grid" id="pk-results"></div>';
 
       const searchEl = container.querySelector('#pk-search');
-      searchEl.addEventListener('input', U.debounce(function (e) {
+      // IME 组词期间挂起重绘，组词完成才刷新结果（甲9）
+      let composing = false;
+      searchEl.addEventListener('compositionstart', function () { composing = true; });
+      searchEl.addEventListener('compositionend', function (e) {
+        composing = false;
         keyword = e.target.value;
-        render();
-        const s = container.querySelector('#pk-search');
-        if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
+        renderResults();
+      });
+      searchEl.addEventListener('input', U.debounce(function (e) {
+        if (composing) return;
+        keyword = e.target.value;
+        renderResults();
       }, 250));
       container.querySelectorAll('.ptab').forEach(function (b) {
         b.addEventListener('click', function () {
           activeCat = b.getAttribute('data-cat');
-          render();
+          container.querySelectorAll('.ptab').forEach(function (x) {
+            x.classList.toggle('on', x.getAttribute('data-cat') === activeCat);
+          });
+          renderResults();
         });
       });
-      container.querySelectorAll('.pick-card').forEach(function (card) {
-        card.addEventListener('click', function () {
-          const id = card.getAttribute('data-pid');
-          if (selected.has(id)) selected.delete(id);
-          else selected.add(id);
-          render();
-          if (opts.onChange) opts.onChange(Array.from(selected));
-        });
-      });
+      renderResults();
     }
     render();
     resolveThumbs();
@@ -1059,6 +1208,7 @@ window.UI = (function () {
           '<h4 class="detail-sub">范例图（可多张，便于打卡时对照参考）</h4><div id="combo-imgs"></div>',
         footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +
           '<button class="btn btn-primary" data-x="s">' + (ed ? '保存修改' : '保存组合') + '</button>',
+        formGuard: true, // 带表单弹窗：误点遮罩先确认（甲8）
         // × / 遮罩关闭也回列表（列表是这棵流程的根）
         onClose: function () { if (!navigated) openList(); },
         onMount: function (wrap, close) {
@@ -1107,7 +1257,7 @@ window.UI = (function () {
             if (!name) { toast('请填写组合名称', 'error'); return; }
             if (!ids.length) { toast('至少选择一件物品', 'error'); return; }
             const btn = wrap.querySelector('[data-x=s]');
-            btn.disabled = true;
+            loadingBtn(btn, true); // 丙4：保存中 loading
             try {
               const images = await uploader.finalize();
               const rec = {
@@ -1120,7 +1270,7 @@ window.UI = (function () {
               toast(ed ? '已保存' : '组合已保存', 'success');
               navigated = true; close(); openList();
             } catch (e) {
-              toast('保存失败：' + e.message, 'error'); btn.disabled = false;
+              toast('保存失败：' + e.message, 'error'); loadingBtn(btn, false);
             }
           });
         }
@@ -1165,7 +1315,7 @@ window.UI = (function () {
   }
 
   return {
-    toast: toast, modal: modal, confirmDialog: confirmDialog,
+    toast: toast, modal: modal, confirmDialog: confirmDialog, loadingBtn: loadingBtn,
     cropImage: cropImage, imageUploader: imageUploader, picker: picker,
     itemFormHTML: itemFormHTML, bindFormToggles: bindFormToggles, readItemForm: readItemForm,
     calAddMini: calAddMini, calHint: calHint, calNav: calNav,

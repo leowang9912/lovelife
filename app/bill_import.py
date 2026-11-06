@@ -19,8 +19,10 @@ _WECHAT_OK_STATUS = {
 }
 
 # 通用表头关键词 → 内部角色；按关键词长度降序匹配，避免「二级分类」被「分类」截胡
+# 「时间」是独立 time 列（导出往返用，落到 b.time）；「交易时间」等组合日期列仍归 date
 _HEADER_KEYWORDS = [
-    ("date", "交易时间"), ("date", "交易日期"), ("date", "记账日期"), ("date", "日期"), ("date", "时间"),
+    ("date", "交易时间"), ("date", "交易日期"), ("date", "记账日期"), ("date", "日期"),
+    ("time", "时间"),
     ("type", "收支类型"), ("type", "收/支"), ("type", "收支"), ("type", "类型"),
     ("subcat", "二级分类"), ("subcat", "子分类"), ("subcat", "subcategory"),
     ("cat", "一级分类"), ("cat", "分类"), ("cat", "类别"), ("cat", "category"),
@@ -30,6 +32,8 @@ _HEADER_KEYWORDS = [
     ("note", "备注"), ("note", "说明"), ("note", "摘要"), ("note", "remark"), ("note", "note"),
     ("tagsname", "标签名称"), ("tagsname", "tagnames"),
     ("tags", "标签"), ("tags", "tag"),
+    ("itemid", "关联词条id"), ("itemid", "itemid"), ("itemid", "词条id"),
+    ("foodid", "关联美食id"), ("foodid", "foodid"), ("foodid", "美食id"),
     ("date", "date"), ("type", "type"),
 ]
 _HEADER_KEYWORDS.sort(key=lambda x: len(x[1]), reverse=True)
@@ -91,7 +95,7 @@ def _norm_header(h):
 
 
 def _header_role(h):
-    """表头单元格 → 列角色（date/type/amount/cat/subcat/account/note/tags）。"""
+    """表头单元格 → 列角色（date/time/type/amount/cat/subcat/account/note/tags/itemid/foodid）。"""
     s = _norm_header(h)
     if not s:
         return None
@@ -129,7 +133,10 @@ def _norm_dt(value):
     time_part = ""
     m = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", s)
     if m:
-        time_part = "%02d:%02d" % (int(m.group(1)), int(m.group(2)))
+        hh, mm = int(m.group(1)), int(m.group(2))
+        # 时间范围校验（P2-3）：hh<24 且 mm<60 才收，越界（如 99:99）置空不让脏时间入库
+        if hh < 24 and mm < 60:
+            time_part = "%02d:%02d" % (hh, mm)
         s = s[: m.start()] + s[m.end():]
     s = s.strip().strip(",")
     m = re.match(r"^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$", s)
@@ -145,6 +152,22 @@ def _norm_dt(value):
     except ValueError:
         return None
     return dt.strftime("%Y-%m-%d"), time_part
+
+
+def _norm_time(value):
+    """时间列取 'HH:MM'；组合串（带秒/带日期）也能抽出时刻，非法/越界返回 ''。
+
+    与 _norm_dt 的时刻校验同口径（P2-3）：hh<24 且 mm<60 才收，脏时间不入库。
+    """
+    if value is None:
+        return ""
+    m = re.search(r"(\d{1,2}):(\d{2})(?::(\d{2}))?", str(value).strip())
+    if not m:
+        return ""
+    hh, mm = int(m.group(1)), int(m.group(2))
+    if hh < 24 and mm < 60:
+        return "%02d:%02d" % (hh, mm)
+    return ""
 
 
 def _norm_amount(value):
@@ -563,6 +586,18 @@ def _parse_generic(text):
             "note": _at(cells_r, cols.get("note")),
             "raw": raw,
         }
+        # 独立时间列（导出往返，乙2）：合法时刻覆盖 b.time，组合日期里的时刻兜底
+        if "time" in cols and cols["time"] != cols["date"]:
+            tval = _norm_time(_at(cells_r, cols["time"]))
+            if tval:
+                bill["time"] = tval
+        # 关联词条/美食 id 列（导出往返，乙2）：恢复 itemId/foodId；列缺失/空值静默忽略
+        iid = _at(cells_r, cols.get("itemid"))
+        if iid:
+            bill["itemId"] = iid
+        fid = _at(cells_r, cols.get("foodid"))
+        if fid:
+            bill["foodId"] = fid
         to_name = ""
         if "toaccount" in cols:
             to_name = _at(cells_r, cols["toaccount"])
@@ -633,7 +668,9 @@ def _parse_pasted_line(line, warnings):
         if time_s is None and _PASTED_TIME_RE.match(tk):
             try:
                 hh, mm = tk.split(":")
-                time_s = "%02d:%02d" % (int(hh), int(mm))
+                # 与 _norm_dt 同口径（P2-3）：越界时间置空，脏时间不入库
+                if int(hh) < 24 and int(mm) < 60:
+                    time_s = "%02d:%02d" % (int(hh), int(mm))
                 continue
             except ValueError:
                 pass
@@ -973,8 +1010,21 @@ def _apply_cat_guess(bill):
 
 
 # ---------------- 导入计划（去重） ----------------
+def _acct_key(bill):
+    """账户名比较键（v1.1.6 去重收紧）：取不到名称退空串；含转入侧，保证转账「账户名全同」。"""
+    return (
+        str(bill.get("accountName") or "").strip(),
+        str(bill.get("toAccountName") or "").strip(),
+    )
+
+
 def _match_bill(item, pool):
-    """pool 中找重复：同 date + 同 amount + 同 type，且 note 归一后相同或一侧为空。"""
+    """pool 中找重复：同 date + 同 amount + 同 type，且备注判定命中。
+
+    备注判定（v1.1.6 收紧，防同日同额空备注误吞——同价咖啡丢账）：
+    - 两侧备注都为空：还须「日期+金额+类型+账户名」全同才算重复；
+    - 任一侧有备注：维持既有判重语义（备注归一后相同或一侧为空即算重复）。
+    """
     try:
         ba = round(float(item.get("amount")), 2)
         if not math.isfinite(ba):
@@ -992,6 +1042,11 @@ def _match_bill(item, pool):
         if ba is None or not math.isfinite(ea) or ea != ba:
             continue
         en = _norm_note(e.get("note"))
+        if not bn and not en:
+            # 双方备注都为空：账户名也要全同才算重复（不同账户的同价消费不再被吞）
+            if _acct_key(item) == _acct_key(e):
+                return e
+            continue
         if bn == en or not bn or not en:
             return e
     return None
@@ -1000,8 +1055,9 @@ def _match_bill(item, pool):
 def build_import_plan(bills: list, existing: list) -> dict:
     """与已有账单去重 + 文件内互查后生成导入计划。
 
-    重复判定：同 date + 同 amount + 同 type，且 note 去空白后相同或其中一侧为空；
-    文件内互重（后出现者判重）matchNote 固定为「文件内重复」。
+    重复判定：同 date + 同 amount + 同 type，且备注判定命中——
+    两侧备注都为空时还须账户名全同（v1.1.6 收紧），任一侧有备注维持既有语义
+    （note 去空白后相同或其中一侧为空）；文件内互重（后出现者判重）matchNote 固定为「文件内重复」。
     返回：
       rows        非重复账单（带 dup=False、matchNote=""）
       duplicates  重复账单（带 dup=True、matchNote）
