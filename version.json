@@ -1,15 +1,14 @@
 {
-  "version": "1.1.1",
+  "version": "1.1.2",
   "minSchema": 3,
   "publishedAt": "2026-11-05",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "修复正餐账单在统计中被算两遍、编辑账单丢失词条补充数据等 16 项问题（详见更新日志）",
-    "导入增强：GBK 编码识别、重复账单拦截、备注自动归类、粘贴文本导入、批量入库提速",
-    "记账效率：最近分类置顶、记一笔并继续、Enter 快捷保存、模板账单、月份导航与批量删除",
-    "词条联动：已同步标签直达词条、解除关联、二手闲置收入自动回填售出价",
-    "统计下钻：点分类/柱/热力格直达流水；新增月度小结；记账分类预算",
-    "数据体检一键修复；人民币大写精度修正；账户对账差额显示"
+    "新增「我的主页」：四大快捷记账按钮、穿搭/美食打卡、温度穿搭推荐、今日概览",
+    "编辑物品可一键生成购入账单（词条与账单双向同步）；二手闲置自动回填售出价",
+    "余额记录支持一次记录多个账户；设置页重组为六分组（标签两库分区）",
+    "全局 UI 质感升级：渐变按钮、灰底输入环、字阶统一、侧栏浮岛重构（渐变辉光选中）",
+    "修复字阶调整引起的文字遮挡；主页/统计/日历快捷入口整理"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -17,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.1/lovelife-v1.1.1-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.2/lovelife-v1.1.2-win64.zip"
   }
 }
