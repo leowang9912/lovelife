@@ -1,0 +1,15 @@
+{
+  "name": "lovelife",
+  "version": "1.1.3",
+  "private": true,
+  "description": "人生管家 — 测试依赖（jsdom）。应用本体是 Python + 原生 JS，无需构建。",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node tests/run_all.js",
+    "test:js": "node tests/run_all.js --js",
+    "test:py": "node tests/run_all.js --py"
+  },
+  "devDependencies": {
+    "jsdom": "^30.1.3"
+  }
+}

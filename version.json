@@ -1,14 +1,14 @@
 {
-  "version": "1.1.2",
+  "version": "1.1.3",
   "minSchema": 3,
-  "publishedAt": "2026-11-05",
+  "publishedAt": "2026-11-06",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "新增「我的主页」：四大快捷记账按钮、穿搭/美食打卡、温度穿搭推荐、今日概览",
-    "编辑物品可一键生成购入账单（词条与账单双向同步）；二手闲置自动回填售出价",
-    "余额记录支持一次记录多个账户；设置页重组为六分组（标签两库分区）",
-    "全局 UI 质感升级：渐变按钮、灰底输入环、字阶统一、侧栏浮岛重构（渐变辉光选中）",
-    "修复字阶调整引起的文字遮挡；主页/统计/日历快捷入口整理"
+    "钱袋升级：账户卡直接记余额+余额历史、导入明示余额影响可选不动余额、重复项可逐条勾回、分类管理可用、按筛选导出",
+    "数据安全加固：修复模板账单丢失、坏文件自动隔离、转账双侧校验、恢复前自动快照、删账号两档选择",
+    "词条同步修复：解除关联保留词条、同步美食可补图评分、售出价/回血率可见",
+    "体验升级：弹窗 Esc/遮罩防护、中文输入法保护、天气重新定位、统计环比口径、化妆品 0 次档、60+ 回归测试",
+    "UI：侧栏低调选中态、弹窗宽度三档、空态引导卡、修复大金额输入字号"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -16,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.2/lovelife-v1.1.2-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.3/lovelife-v1.1.3-win64.zip"
   }
 }
