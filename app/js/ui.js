@@ -37,6 +37,11 @@ window.UI = (function () {
       '</div>';
     document.body.appendChild(wrap);
     modalStack.push(wrap);
+    // 表单内的 <button> 默认 type=submit，点击会触发表单提交→整页导航（用户看到"软件重启"）。
+    // 弹窗内所有 form 一律拦截提交：本应用全部走 JS 保存，从不原生提交（v1.1.4 修复）
+    wrap.querySelectorAll('form').forEach(function (fm) {
+      fm.addEventListener('submit', function (e) { e.preventDefault(); });
+    });
     requestAnimationFrame(function () { wrap.classList.add('show'); });
     let closed = false;
     let keyHandler = null;
@@ -149,7 +154,12 @@ window.UI = (function () {
     return '.png';
   }
 
-  function cropImage(file) {
+  function cropImage(file, opts) {
+    opts = opts || {};
+    // 比例档（v1.1.4）：'9:16' 竖图（穿搭日历照片），默认 1:1。框与输出同比例
+    const portrait = opts.ratio === '9:16';
+    const frameW = portrait ? 270 : 320;
+    const frameH = portrait ? 480 : 320;
     return new Promise(function (resolve, reject) {
       let settled = false;
       // 任何关闭方式（取消/×/遮罩/确认）都会结算，杜绝上传循环挂死丢图（v1.0.9）
@@ -158,13 +168,13 @@ window.UI = (function () {
       const img = new Image();
       img.onload = function () {
         let scale = 1, offsetX = 0, offsetY = 0;
-        const frame = 320;
+        const frame = frameW; // 输出换算基准（框与输出等比）
         modal({
-          title: '裁切图片（1:1）',
+          title: '裁切图片（' + (portrait ? '9:16 竖图' : '1:1') + '）',
           width: 420,
           bodyHTML:
             '<div class="crop-frame" id="crop-frame">' +
-            '<canvas id="crop-canvas" width="' + frame + '" height="' + frame + '"></canvas>' +
+            '<canvas id="crop-canvas" width="' + frameW + '" height="' + frameH + '"></canvas>' +
             '<div class="crop-grid"></div></div>' +
             '<div class="crop-controls">' +
             '<label class="f-label">缩放（可缩小，四周自动补白）</label>' +
@@ -187,22 +197,22 @@ window.UI = (function () {
             let cutoutCanvas = null;
 
             function fit() {
-              const base = Math.max(frame / img.width, frame / img.height);
+              const base = Math.max(frameW / img.width, frameH / img.height);
               scale = base * (Number(wrap.querySelector('#crop-zoom').value) / 100);
             }
             function draw() {
-              ctx.clearRect(0, 0, frame, frame);
+              ctx.clearRect(0, 0, frameW, frameH);
               ctx.fillStyle = '#ffffff'; // 白底补齐：缩小时四周就是输出的白边
-              ctx.fillRect(0, 0, frame, frame);
+              ctx.fillRect(0, 0, frameW, frameH);
               const w = img.width * scale, h = img.height * scale;
               // 缩小时也允许在白边范围内拖动构图（v1.0.8）
-              const maxX = Math.abs(w - frame) / 2, maxY = Math.abs(h - frame) / 2;
+              const maxX = Math.abs(w - frameW) / 2, maxY = Math.abs(h - frameH) / 2;
               offsetX = Math.min(maxX, Math.max(-maxX, offsetX));
               offsetY = Math.min(maxY, Math.max(-maxY, offsetY));
               if (cutoutCanvas) {
-                ctx.drawImage(cutoutCanvas, (frame - w) / 2 + offsetX, (frame - h) / 2 + offsetY, w, h);
+                ctx.drawImage(cutoutCanvas, (frameW - w) / 2 + offsetX, (frameH - h) / 2 + offsetY, w, h);
               } else {
-                ctx.drawImage(img, (frame - w) / 2 + offsetX, (frame - h) / 2 + offsetY, w, h);
+                ctx.drawImage(img, (frameW - w) / 2 + offsetX, (frameH - h) / 2 + offsetY, w, h);
               }
             }
             fit(); draw();
@@ -261,17 +271,18 @@ window.UI = (function () {
               close();
             });
             wrap.querySelector('[data-act=ok]').addEventListener('click', async function () {
-              // 输出 ≥1024px（甲2-②）：按预览同款构图（等比缩放 + 白底补边）放大输出，
-              // 不再固定 320×320（放大糊）
-              const OUT = 1024;
+              // 输出 ≥1024px（甲2-②）：按预览同款构图（等比缩放 + 白底补边）放大输出。
+              // 9:16 竖图输出 576×1024，1:1 输出 1024×1024（v1.1.4 比例档）
+              const OUT_W = portrait ? 576 : 1024;
+              const OUT_H = 1024;
               const outCanvas = document.createElement('canvas');
-              outCanvas.width = OUT; outCanvas.height = OUT;
+              outCanvas.width = OUT_W; outCanvas.height = OUT_H;
               const octx = outCanvas.getContext('2d');
               octx.fillStyle = '#ffffff';
-              octx.fillRect(0, 0, OUT, OUT);
-              const k = OUT / frame;
+              octx.fillRect(0, 0, OUT_W, OUT_H);
+              const k = OUT_W / frame;
               const w = img.width * scale, h = img.height * scale;
-              octx.drawImage(cutoutCanvas || img, ((frame - w) / 2 + offsetX) * k, ((frame - h) / 2 + offsetY) * k, w * k, h * k);
+              octx.drawImage(cutoutCanvas || img, ((frameW - w) / 2 + offsetX) * k, ((frameH - h) / 2 + offsetY) * k, w * k, h * k);
               const blob = await new Promise(function (res) {
                 outCanvas.toBlob(res, cutoutCanvas ? 'image/png' : 'image/webp', 0.88);
               });
@@ -330,7 +341,7 @@ window.UI = (function () {
         for (const f of files) {
           if (!f.type.startsWith('image/')) continue;
           try {
-            const result = await cropImage(f);
+            const result = await cropImage(f, { ratio: options.ratio });
             if (!result) { skipped++; continue; } // 用户取消：跳过该图，不拖累整批
             pendingBlobs.push({ blob: result.blob, ext: result.ext || (result.isCutout ? '.png' : '.webp') });
           } catch (err) {
@@ -963,9 +974,9 @@ window.UI = (function () {
       container.innerHTML =
         '<div class="picker-search"><input type="search" id="pk-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(keyword) + '"></div>' +
         '<div class="picker-tabs">' +
-        '<button class="ptab' + (activeCat === '' ? ' on' : '') + '" data-cat="">全部</button>' +
+        '<button type="button" class="ptab' + (activeCat === '' ? ' on' : '') + '" data-cat="">全部</button>' +
         cats.map(function (c) {
-          return '<button class="ptab' + (activeCat === c ? ' on' : '') + '" data-cat="' + U.escapeHtml(c) + '">' + U.escapeHtml(c) + '</button>';
+          return '<button type="button" class="ptab' + (activeCat === c ? ' on' : '') + '" data-cat="' + U.escapeHtml(c) + '">' + U.escapeHtml(c) + '</button>';
         }).join('') + '</div>' +
         '<div class="picker-grid" id="pk-results"></div>';
 
@@ -1084,7 +1095,7 @@ window.UI = (function () {
         ? '<img data-path="' + U.escapeHtml(img) + '" alt=""/>'
         : '<div class="item-noimg">' + catIcon(db, item, 48) + '</div>') +
       '<div class="item-badges">' + badges + '</div>' +
-      (opts.quickAdd ? '<button class="quick-add" data-quick="' + item.id + '" title="' + (item.kind === 'clothing' ? '穿着 +1' : '使用 +1') + '">' + icon('plus', 12) + '1</button>' : '') +
+      (opts.quickAdd ? '<button type="button" class="quick-add" data-quick="' + item.id + '" title="' + (item.kind === 'clothing' ? '穿着 +1' : '使用 +1') + '">' + icon('plus', 12) + '1</button>' : '') +
       '</div>' +
       '<div class="item-info">' +
       '<div class="item-name" title="' + U.escapeHtml(item.name) + '">' + U.escapeHtml(item.name) + '</div>' +

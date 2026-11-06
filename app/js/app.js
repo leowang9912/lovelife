@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.1.3";
+  const FRONTEND_VERSION = "1.1.4";
 
   let current = 'home'; // 默认首屏=我的主页（v1.1.2）
   let booted = false;
@@ -409,6 +409,38 @@ window.App = (function () {
         const input = document.getElementById('global-search');
         if (input) { input.focus(); input.select(); }
       }
+    });
+    // 窗口尺寸记忆（v1.1.4）：调整窗口后记录大小，下次启动脚本按此开窗。
+    // 小于 1024x700 的尺寸不记（防畸形窗口被记住）；失败静默不影响使用
+    const WIN_MIN_W = 1024, WIN_MIN_H = 700;
+    let winSizeTimer = null;
+    window.addEventListener('resize', function () {
+      // 最小窗口硬限制：拖过界立即拉回（--app 软件窗口生效，普通浏览器标签忽略降级）
+      if (window.outerWidth < WIN_MIN_W || window.outerHeight < WIN_MIN_H) {
+        try {
+          window.resizeTo(Math.max(WIN_MIN_W, window.outerWidth || WIN_MIN_W), Math.max(WIN_MIN_H, window.outerHeight || WIN_MIN_H));
+        } catch (e) { /* 浏览器拒绝时降级：内容层 min-width 保证不畸形 */ }
+      }
+      clearTimeout(winSizeTimer);
+      winSizeTimer = setTimeout(function () {
+        const w = window.outerWidth, h = window.outerHeight;
+        if (!w || !h || w < WIN_MIN_W || h < WIN_MIN_H) return;
+        try {
+          fetch('/api/window-size', { method: 'POST', body: JSON.stringify({ width: w, height: h }) }).catch(function () {});
+        } catch (e) { /* 忽略 */ }
+      }, 600);
+    });
+    // 关闭前最后记一次（resize 防抖未到就关窗口也不丢）
+    window.addEventListener('beforeunload', function () {
+      const w = window.outerWidth, h = window.outerHeight;
+      if (!w || !h || w < WIN_MIN_W || h < WIN_MIN_H) return;
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon('/api/window-size', JSON.stringify({ width: w, height: h }));
+        } else {
+          fetch('/api/window-size', { method: 'POST', body: JSON.stringify({ width: w, height: h }), keepalive: true }).catch(function () {});
+        }
+      } catch (e) { /* 忽略 */ }
     });
   });
 

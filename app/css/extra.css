@@ -145,7 +145,8 @@
 
 /* ---------- 裁切 ---------- */
 .crop-frame {
-  width: 320px; height: 320px; margin: 8px auto 14px; position: relative;
+  /* 尺寸跟随画布（1:1 为 320×320、9:16 为 270×480）：预览=输出构图，不再截掉竖图下半截 */
+  width: fit-content; height: fit-content; margin: 8px auto 14px; position: relative;
   border-radius: 13px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line);
   cursor: grab; touch-action: none;
 }
@@ -252,6 +253,20 @@
 .cal-cover img {
   width: 100%; height: 100%; object-fit: cover;
   transition: opacity .18s;
+}
+
+/* 穿搭日历：每日照片窗口固定 9:16 竖长条（v1.1.4）
+   照片按 9:16 上传（裁切器 9:16 档）→ contain 恰好满框；
+   旧照片（1:1 等任意比例）contain 白底完整显示——兼容不裁切；
+   aspect-ratio 锁定比例，窗口缩放格子宽度变化时不再"有时显示不完整" */
+.cal-grid-outfit .cal-cell { height: auto; }
+.cal-grid-outfit .cal-cover,
+.cal-grid-outfit .cal-outfits,
+.cal-grid-outfit .cal-hint {
+  aspect-ratio: 9 / 16; width: 100%; flex: none;
+}
+.cal-grid-outfit .cal-cover img {
+  object-fit: contain; background: #fff;
 }
 .cal-nav {
   position: absolute; top: 50%; transform: translateY(-50%);
@@ -1244,6 +1259,8 @@ input[type="number"], input[inputmode="numeric"], input[inputmode="decimal"] {
 .app, #app {
   display: flex; gap: 6px; padding: 12px; height: 100%; min-height: 100vh;
   background: var(--bg);
+  /* 最小窗口限制（v1.1.4）：内容宽不小于 1024px，窗口再小走横向滚动，布局不畸形不丢内容 */
+  min-width: 1024px;
 }
 .sidebar {
   width: var(--sidebar-w); flex-shrink: 0;

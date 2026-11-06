@@ -819,7 +819,7 @@ window.Views = (function () {
       '<button class="btn btn-ghost" id="btn-today">今天</button>' +
       '<button class="btn btn-primary" id="btn-add-outfit">' + UI.icon('calendar-check', 14) + ' 穿搭打卡</button></div></div>' +
       // 天气穿搭推荐已移至「我的主页」（v1.1.2），此处不再重复展示
-      '<div class="cal-grid">' +
+      '<div class="cal-grid cal-grid-outfit">' +
       ['日', '一', '二', '三', '四', '五', '六'].map(function (d) { return '<div class="cal-dow">' + d + '</div>'; }).join('') +
       cells + '</div>';
 
@@ -1113,7 +1113,7 @@ window.Views = (function () {
           });
         }
         renderExisting();
-        const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), { paths: (rv.images || []).slice() });
+        const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), { paths: (rv.images || []).slice(), ratio: '9:16' });
         if (rec) {
           wrap.querySelector('[data-act=del]').addEventListener('click', async function () {
             if (!await UI.confirmDialog('删除穿搭', '删除这条穿搭记录？妆品使用次数将同步撤销。')) return;

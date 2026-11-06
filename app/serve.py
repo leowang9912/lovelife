@@ -50,7 +50,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.1.3"
+SERVER_BUILD = "1.1.4"
 
 _lock = threading.Lock()
 
@@ -1268,6 +1268,41 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(length) if length else b""
 
+    def _handle_window_size(self):
+        """窗口尺寸记忆（v1.1.4）：--app 窗口关闭前的大小存 window-size.txt（与 exe 同目录），
+        启动脚本读取后传给 --window-size。格式 "宽x高"。最小 1024x700 钳制防窗口畸形。"""
+        fpath = os.path.join(ROOT, "window-size.txt")
+        if self.command == "GET":
+            try:
+                with open(fpath, encoding="ascii") as f:
+                    v = f.read().strip()
+                m = re.match(r"^(\d{3,5})x(\d{3,5})$", v)
+                if m:
+                    return self._json({"ok": True, "width": int(m.group(1)), "height": int(m.group(2))})
+            except OSError:
+                pass
+            return self._json({"ok": True, "width": 1480, "height": 940})
+        # POST：保存当前窗口大小（钳制到合法范围，低于下限=窗口畸形，强制抬高）
+        try:
+            data = json.loads(self._read_body().decode("utf-8") or "{}")
+        except (ValueError, UnicodeDecodeError):
+            return self._json({"error": "bad json"}, 400)
+        try:
+            w = int(data.get("width") or 0)
+            h = int(data.get("height") or 0)
+        except (TypeError, ValueError):
+            return self._json({"error": "bad size"}, 400)
+        if w < 1024 or h < 700:
+            return self._json({"error": "size below minimum 1024x700"}, 400)
+        if w > 10000 or h > 10000:
+            w, h = min(w, 10000), min(h, 10000)
+        try:
+            with open(fpath, "w", encoding="ascii") as f:
+                f.write("%dx%d" % (w, h))
+        except OSError:
+            return self._json({"error": "cannot persist window size"}, 500)
+        return self._json({"ok": True})
+
     def _acc(self, parsed):
         return urllib.parse.parse_qs(parsed.query).get("acc", [""])[0]
 
@@ -1298,6 +1333,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(load_db(self._acc(parsed)))
         if path == "/api/health":
             return self._handle_health(self._acc(parsed))
+        if path == "/api/window-size":
+            return self._handle_window_size()
         if path == "/api/backup":
             # 自动备份钩子（甲17）：?snapshot=1 → 只做服务端快照到 backups/ 并回 JSON，不触发下载
             qs = urllib.parse.parse_qs(parsed.query)
@@ -1375,6 +1412,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_update_clear_done()
             if path == "/api/desktop-shortcut":
                 return self._handle_desktop_shortcut()
+            if path == "/api/window-size":
+                return self._handle_window_size()
             if path == "/api/import/parse":
                 if bill_import is None:
                     return self._json({"error": "import module unavailable"}, 500)
