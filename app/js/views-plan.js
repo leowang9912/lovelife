@@ -25,6 +25,7 @@ window.PlanView = (function () {
     wCatPie: { name: '分类统计', block: 'overall', size: 'm' },
     wDaily: { name: '日均', block: 'overall', size: 'm' },
     wHeat: { name: '收支热力', block: 'overall', size: 'm' },
+    habitHeat: { name: '热力打卡', block: 'overall', size: 'l' },
     wAssets: { name: '资产走势', block: 'overall', size: 'l' },
     game: { name: '游戏通关状态', block: 'digital', size: 's' },
     dPrice: { name: '数码价格排行', block: 'digital', size: 'm' },
@@ -79,45 +80,66 @@ window.PlanView = (function () {
   }
 
   /* ===== 统一风格的收支统计（周期切换 周/月/年，全栏目共享） ===== */
-  let statRange = 'month';
+  /* v1.1.5：周期每模块独立控制——statRanges 记录各栏目的周期，渲染上下文 _curSec 定位当前栏目 */
+  let statRanges = {};
+  let _curSec = '';
+  function curRange() { return statRanges[_curSec] || 'month'; }
   const SR_ALL = ['week', 'month', 'year'];
 
-  /* 账号切换重置（A3）：会话态回默认「月」；各账号持久偏好存 db.settings.statRange，渲染时随账号恢复 */
+  /* 账号切换重置（A3）：各模块周期会话态回默认「月」；持久偏好存 db.settings.statRanges（随账号） */
   function resetState() {
-    statRange = 'month';
+    statRanges = {};
+    habitYear = 0; // 热力打卡年份切换回默认今年
     editMode = false; // 甲19③：账号切换也退出栏目编辑态
   }
 
   /* 甲19②：统计周期记忆进 db.settings.statRange（随账号），渲染时恢复 */
   function loadStatRange(db) {
-    const saved = db && db.settings && db.settings.statRange;
-    if (SR_ALL.indexOf(saved) >= 0) statRange = saved;
+    // 兼容旧单值 statRange（v1.1.4 前）：读到字符串则作为所有栏目的初值
+    const s = db && db.settings || {};
+    statRanges = {};
+    if (s.statRanges && typeof s.statRanges === 'object') {
+      Object.keys(s.statRanges).forEach(function (k) {
+        if (SR_ALL.indexOf(s.statRanges[k]) >= 0) statRanges[k] = s.statRanges[k];
+      });
+    } else if (SR_ALL.indexOf(s.statRange) >= 0) {
+      ['wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat'].forEach(function (id) { statRanges[id] = s.statRange; });
+    }
   }
 
-  function statRangeTag() {
-    return '<div class="flex1"></div><div class="seg-toggle">' +
+  function statRangeTag(id) {
+    // v1.1.5：紧凑切换器，panel-head 右上角；每模块独立周期（data-sr-id 区分）
+    const cur = statRanges[id] || 'month';
+    return '<div class="seg-toggle seg-toggle-head">' +
       [['week', '周'], ['month', '月'], ['year', '年']].map(function (r) {
-        return '<button type="button" class="seg-btn' + (statRange === r[0] ? ' on' : '') + '" data-sr="' + r[0] + '">' + r[1] + '</button>';
+        return '<button type="button" class="seg-btn' + (cur === r[0] ? ' on' : '') +
+          '" data-sr="' + r[0] + '" data-sr-id="' + id + '">' + r[1] + '</button>';
       }).join('') + '</div>';
   }
 
   function bindStatRange(body) {
-    body.querySelectorAll('[data-sr]').forEach(function (el) {
+    // 切换器在 panel-head（v1.1.5 右上角）：搜索根扩到整个栏目容器（head+body）
+    const root = (body.closest && body.closest('.panel')) || body;
+    root.querySelectorAll('[data-sr]').forEach(function (el) {
       el.addEventListener('click', function () {
-        statRange = el.getAttribute('data-sr');
-        // 甲19②：周期偏好随账号持久化（db.settings.statRange）
+        const secId = el.getAttribute('data-sr-id') || '';
+        statRanges[secId] = el.getAttribute('data-sr');
+        // 周期偏好随账号持久化（每模块独立记忆）
         const db = S.getDB();
         if (db && db.settings) {
-          db.settings.statRange = statRange;
+          db.settings.statRanges = statRanges;
+          delete db.settings.statRange; // 清旧单值字段
           S.saveSettings();
         }
-        // 甲19②：切周期整页重建，重建后恢复滚动位置（.main 为滚动容器），不再跳回顶部；
-        // 外壳每次重建，恢复必须查新 .main 节点（旧节点已脱树）
-        const sc = document.querySelector('.main');
-        const top = sc ? sc.scrollTop : 0;
-        window.App.refresh();
-        const sc2 = document.querySelector('.main');
-        if (sc2) sc2.scrollTop = top;
+        // 只重渲染本模块（其余模块不动），滚动位置天然保持
+        try {
+          const sum2 = M.summary(db); // 与整页渲染同源（walletStats 缺 .wallet 嵌套会抛）
+          renderSection(body, secId, db, sum2);
+        } catch (e) { console.error('周期切换重渲染失败:', e); }
+        // head 里的切换器不随 body 重绘：手动同步本模块按钮组的选中态
+        root.querySelectorAll('.seg-toggle-head [data-sr]').forEach(function (b2) {
+          b2.classList.toggle('on', b2 === el);
+        });
       });
     });
   }
@@ -125,11 +147,11 @@ window.PlanView = (function () {
   function statPeriod() {
     const now = new Date();
     let start, end;
-    if (statRange === 'week') {
+    if (curRange() === 'week') {
       const dow = (now.getDay() + 6) % 7; // 周一为一周开始
       start = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dow);
       end = new Date(start.getFullYear(), start.getMonth(), start.getDate() + 7);
-    } else if (statRange === 'year') {
+    } else if (curRange() === 'year') {
       start = new Date(now.getFullYear(), 0, 1);
       end = new Date(now.getFullYear() + 1, 0, 1);
     } else {
@@ -210,13 +232,13 @@ window.PlanView = (function () {
     }
     body.querySelectorAll('[data-drill-cat]').forEach(function (el) {
       // 下钻带上当前统计周期（A13）：周/月/年不丢周期
-      el.addEventListener('click', function () { jumpToWallet({ catId: el.getAttribute('data-drill-cat'), range: statRange }); });
+      el.addEventListener('click', function () { jumpToWallet({ catId: el.getAttribute('data-drill-cat'), range: curRange() }); });
     });
     body.querySelectorAll('[data-drill-date]').forEach(function (el) {
-      el.addEventListener('click', function () { jumpToWallet({ date: el.getAttribute('data-drill-date'), range: statRange }); });
+      el.addEventListener('click', function () { jumpToWallet({ date: el.getAttribute('data-drill-date'), range: curRange() }); });
     });
     body.querySelectorAll('[data-drill-month]').forEach(function (el) {
-      el.addEventListener('click', function () { jumpToWallet({ month: el.getAttribute('data-drill-month'), range: statRange }); });
+      el.addEventListener('click', function () { jumpToWallet({ month: el.getAttribute('data-drill-month'), range: curRange() }); });
     });
   }
 
@@ -239,7 +261,7 @@ window.PlanView = (function () {
     if (id === 'wBalance') {
       /* 主流记账「收支统计」：收入 / 支出 / 结余 三大数字 + 月度小结（自动生成，可复制存档） */
       let summaryLine = '';
-      if (statRange === 'month') {
+      if (curRange() === 'month') {
         const mk3 = U.monthKey(U.todayStr());
         const now3 = new Date();
         const dayN = now3.getDate(); // 月初至今已过天数（1~N）
@@ -295,7 +317,7 @@ window.PlanView = (function () {
       /* 主流记账「收支走势」：柱状图（周/月按日、年按月）
          口径（统计修复）：只画「已过」的天/月（含今天/当月），未来日不进图，与日均的已过天数口径一致 */
       let data = [];
-      if (statRange === 'year') {
+      if (curRange() === 'year') {
         const y = p.start.getFullYear();
         const curM = new Date().getMonth(); // 只画到当月（已过月份）
         for (let m = 0; m <= curM; m++) {
@@ -324,7 +346,7 @@ window.PlanView = (function () {
       }
       out.drill = data.map(function (d) { return d.drill; });
       return C.bar(data) + '<div class="muted small" style="margin-top:6px">红柱=支出　本期收入 ' + U.formatMoney(inc) +
-        (statRange === 'year' ? '（按已过月份：1 月至今）' : '（按已过天数：' + data.length + ' 天）') + '</div>' + tagHTML;
+        (curRange() === 'year' ? '（按已过月份：1 月至今）' : '（按已过天数：' + data.length + ' 天）') + '</div>' + tagHTML;
     }
 
     if (id === 'wCatPie') {
@@ -379,7 +401,7 @@ window.PlanView = (function () {
         return Math.max.apply(null, Object.keys(obj).map(function (k) { return obj[k]; }).concat([1]));
       };
       let cells = '', title = '';
-      if (statRange === 'year') {
+      if (curRange() === 'year') {
         const y = p.start.getFullYear();
         const byMonth = {};
         Object.keys(byDay).forEach(function (k) {
@@ -403,7 +425,7 @@ window.PlanView = (function () {
             '<span>' + m + '月</span>' + (v ? '<small>' + Math.round(v) + '</small>' : '') + '</div>';
         }
         title = y + ' 年 · 深浅=当月支出';
-      } else if (statRange === 'week') {
+      } else if (curRange() === 'week') {
         const maxV = maxOf(byDay);
         for (let d = 0; d < 7; d++) {
           const day = new Date(p.start.getFullYear(), p.start.getMonth(), p.start.getDate() + d);
@@ -519,6 +541,130 @@ window.PlanView = (function () {
     return '';
   }
 
+  /* ===== 热力打卡（habitHeat，v1.1.7）：整年 GitHub 式年热力格（只读展示） =====
+     共用约定（与主页热力卡一致）：色板 Storage.HABIT_COLORS；日期键 'YYYY-MM-DD'；
+     打卡数=当年天数（Storage.habitYearCount），最长连续=历史峰值（Storage.habitLongestStreak）。
+     打卡/补打/管理习惯入口在主页热力卡；本栏目只读 +「管理习惯」按钮跳主页。 */
+  let habitYear = 0; // 0=默认今年（视图态，不持久）
+
+  // 习惯色：def.color 仅接受合法 hex（用户数据不得直接进 style 属性），否则回落 8 色池
+  function habitColorOf(def, idx) {
+    const pool = S.HABIT_COLORS || ['#aecbfa', '#d7aefb', '#b7e1c1', '#fbd2a7', '#f6b8d0', '#a8e0e8', '#f7e6a1', '#f2b3b3'];
+    const c = String((def && def.color) || '');
+    return /^#[0-9a-fA-F]{3,8}$/.test(c) ? c : pool[idx % pool.length];
+  }
+
+  /* 月块式年热力图（v1.1.5 定稿）：每月一个**独立小月历块**（7 列=周一~周日、行=周），
+     块间彻底断开——每个月真正独立、无共享列（周列式天然横跨两月会粘连，弃用）；
+     格 11px + 2px 间隙；打过=习惯色、未打=浅灰；未来日不画；今天描边 */
+  function habitYearGrid(logMap, color, year, def) {
+    const CELL = 11, GAP = 2, STEP = CELL + GAP;
+    const BLOCK_W = 7 * STEP;  // 每月块宽（7 天列）
+    const BLOCK_GAP = 18;      // 块间大间隔 = 月份彻底独立
+    const X0 = 20, Y0 = 20;
+    const todayKey = U.todayStr();
+    const isCount = def && def.type === 'count'; // 计数习惯：梯度色 + 可选数字（v1.1.5）
+    const max = Math.max(1, Number(def && def.max) || 5);
+    const showNum = def && def.showNum !== false;
+    const countOf = function (v) { return typeof v === 'number' ? v : (v ? 1 : 0); };
+    let cells = '', labels = '';
+    for (let m = 0; m < 12; m++) {
+      const bx = X0 + m * (BLOCK_W + BLOCK_GAP);
+      labels += '<text x="' + bx + '" y="11" font-size="8" fill="#8e8e93">' + (m + 1) + '月</text>';
+      const daysInMonth = new Date(year, m + 1, 0).getDate();
+      const startDow = (new Date(year, m, 1).getDay() + 6) % 7; // 周一=0
+      for (let d = 1; d <= daysInMonth; d++) {
+        const key = year + '-' + String(m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        if (key > todayKey) continue; // 未来日不画
+        const idx = startDow + d - 1;
+        const col = idx % 7, row = Math.floor(idx / 7); // 列=周一~周日，行=第几周
+        const v = countOf(logMap[key]);
+        const on = v > 0;
+        const isToday = key === todayKey;
+        const fill = on ? (isCount ? S.habitColorScale(color, v, max) : color) : '#f2f2f4';
+        cells += '<rect x="' + (bx + col * STEP) + '" y="' + (Y0 + row * STEP) +
+          '" width="' + CELL + '" height="' + CELL + '" rx="2"' +
+          (isToday ? ' stroke="#0071e3" stroke-width="1.5"' : '') +
+          ' fill="' + fill + '" data-hdate="' + key + '" data-on="' + (on ? 1 : 0) + '">' +
+          '<title>' + key + (on ? (isCount ? ' · ' + v + ' 次' : ' 已打卡') : '') + '</title></rect>';
+        if (isCount && on && showNum) {
+          // 格心次数：深色格白字、浅格深字（按填充亮度）
+          const lum = parseInt(fill.slice(1, 3), 16) * 0.299 + parseInt(fill.slice(3, 5), 16) * 0.587 + parseInt(fill.slice(5, 7), 16) * 0.114;
+          cells += '<text x="' + (bx + col * STEP + CELL / 2) + '" y="' + (Y0 + row * STEP + CELL / 2 + 2.5) +
+            '" text-anchor="middle" font-size="7" font-weight="600" fill="' + (lum < 150 ? '#fff' : '#555') +
+            '" pointer-events="none">' + v + '</text>';
+        }
+      }
+    }
+    const W = X0 + 12 * BLOCK_W + 11 * BLOCK_GAP + 1, H = Y0 + 6 * STEP + 1;
+    return '<div style="overflow-x:auto">' +
+      '<svg viewBox="0 0 ' + W + ' ' + H + '" style="display:block;width:100%;max-width:' + W + 'px;height:auto"' +
+      ' data-habit-grid="1" data-year="' + year + '" data-months="12">' +
+      labels + cells + '</svg></div>';
+  }
+
+  function renderHabitHeat(body, db) {
+    const thisYear = new Date().getFullYear();
+    const defs = (db.habits && db.habits.defs) || [];
+    const log = (db.habits && db.habits.log) || {};
+    // 年份下限：至少今年/去年两档（用户拍板），有更早打卡数据再往前放开
+    let minYear = thisYear - 1;
+    Object.keys(log).forEach(function (hid) {
+      Object.keys(log[hid] || {}).forEach(function (k) {
+        const y = parseInt(k.slice(0, 4), 10);
+        if (!isNaN(y) && y && y < minYear) minYear = y;
+      });
+    });
+    if (!habitYear || habitYear > thisYear || habitYear < minYear) habitYear = thisYear;
+
+    if (!defs.length) {
+      // 丙3 空态卡统一结构；「管理习惯」跳主页热力卡区（添加入口在主页）
+      body.innerHTML = emptyCard('flame', '还没有习惯项，去「我的主页」添加习惯后开始打卡', '管理习惯', 'data-eg-go="home"');
+      return;
+    }
+
+    const yearTag = habitYear === thisYear ? '<span class="tag">今年</span>'
+      : habitYear === thisYear - 1 ? '<span class="tag">去年</span>' : '';
+    let html =
+      '<div style="display:flex;align-items:center;gap:6px;margin:0 0 10px">' +
+      '<button class="btn-icon" data-hy="prev" title="上一年"' +
+      (habitYear <= minYear ? ' style="opacity:.35"' : '') + '>' + UI.icon('chevron-left', 14) + '</button>' +
+      '<strong>' + habitYear + ' 年</strong>' + yearTag +
+      '<button class="btn-icon" data-hy="next" title="下一年"' +
+      (habitYear >= thisYear ? ' style="opacity:.35"' : '') + '>' + UI.icon('chevron-right', 14) + '</button>' +
+      '<div class="flex1"></div>' +
+      '<span class="muted small">列=周 · 行=周一至周日</span></div>';
+
+    defs.forEach(function (def, i) {
+      const color = habitColorOf(def, i);
+      const name = U.escapeHtml(def.name || '未命名');
+      const count = S.habitYearCount(def.id, habitYear);
+      const best = S.habitLongestStreak(def.id);
+      html +=
+        '<div style="margin:0 0 14px">' +
+        '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 6px">' +
+        '<span style="width:10px;height:10px;border-radius:50%;background:' + color + ';flex:none"></span>' +
+        '<strong style="font-size:13px">' + name + '</strong>' +
+        '<span class="muted small">打卡 ' + count + ' 天</span>' +
+        '<span class="muted small">最长连续 ' + best + ' 天</span>' +
+        '</div>' +
+        habitYearGrid(log[def.id] || {}, color, habitYear, def) +
+        '</div>';
+    });
+    body.innerHTML = html;
+
+    // 年份切换只重建本栏目 body（不整页刷新，保持滚动/其他栏目不动）
+    body.querySelectorAll('[data-hy]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        const dir = b.getAttribute('data-hy');
+        if (dir === 'prev' && habitYear > minYear) habitYear--;
+        else if (dir === 'next' && habitYear < thisYear) habitYear++;
+        else return;
+        renderHabitHeat(body, db);
+      });
+    });
+  }
+
   let editMode = false;
 
   /* 旧栏目 → 新栏目迁移映射 */
@@ -532,7 +678,7 @@ window.PlanView = (function () {
     'dPrice', 'dCostRank', 'dHoldRank', 'dBuyTrend', 'dCatPie',
     'cPrice', 'cWearRank', 'cOutfitRank', 'cNoWear', 'cBuyTrend', 'cStreak', 'cCatPie',
     'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie',
-    'wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat', 'wAssets'];
+    'wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat', 'wAssets', 'habitHeat'];
 
   /* 补齐/迁移栏目，保留用户已有顺序（块内相对顺序不变） */
   function normalizeSections(db) {
@@ -627,6 +773,8 @@ window.PlanView = (function () {
           '<div class="panel-head">' +
           (editMode && !meta.fixed ? '<span class="sec-drag-handle" title="拖动排序">' + UI.icon('grip-vertical', 14) + '</span>' : '') +
           '<h3>' + meta.name + '</h3>' +
+          // 周期切换器放标题右侧（右上角），紧凑尺寸（v1.1.5）；资产走势固定 90 天无切换器
+          (editMode ? '' : (['wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat'].indexOf(sec.id) >= 0 ? statRangeTag(sec.id) : '')) +
           (editMode
             ? '<div class="sec-ctrl">' +
             (meta.fixed ? '<span class="tag">固定</span>' : '') +
@@ -790,6 +938,7 @@ window.PlanView = (function () {
 
   /* ================= 各栏目内容 ================= */
   function renderSection(body, id, db, sum) {
+    _curSec = id; // 渲染上下文：curRange() 返回本栏目的独立周期（v1.1.5）
     const now = new Date();
     const wstat = sum.wallet || { monthlyExpense: {}, monthlyIncome: {}, monthlyLinkedExpense: {}, byCat: {} };
     // 合并口径（每月一致）：账单支出 + 物品购入 + 美食 − 已关联物品的账单
@@ -927,9 +1076,8 @@ window.PlanView = (function () {
     /* ===== 统一风格的收支统计（复刻主流记账统计模块） ===== */
     if (id === 'wBalance' || id === 'wTrend' || id === 'wCatPie' || id === 'wDaily' || id === 'wHeat' || id === 'wAssets') {
       const wout = {};
-      // 甲19①：资产走势固定 90 天曲线（设计口径），隐藏周期切换器（点了也不换内容=误导）
-      const tag = id === 'wAssets' ? '' : statRangeTag();
-      body.innerHTML = walletStatSection(id, db, tag, wout, sum);
+      // 周期切换器已移入 panel-head 右上角（v1.1.5），内容尾部不再拼
+      body.innerHTML = walletStatSection(id, db, '', wout, sum);
       bindStatRange(body);
       bindWalletDrill(body, wout.drill); // 点图下钻流水（body 每次渲染重建，绑定放渲染后逐次执行）
       return;
@@ -1314,6 +1462,10 @@ window.PlanView = (function () {
         (byMeal.length ? '<h4 class="detail-sub">餐别分布</h4>' + C.rankBars(byMeal.map(function (m) {
           return { label: m, value: f.byMeal[m], valueText: f.byMeal[m] + ' 顿' };
         })) : '');
+      return;
+    }
+    if (id === 'habitHeat') {
+      renderHabitHeat(body, db);
       return;
     }
     body.innerHTML = '<p class="empty-hint">—</p>';

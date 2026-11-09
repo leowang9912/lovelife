@@ -28,6 +28,69 @@ window.Views = (function () {
     itemState.sorts = {};
   }
 
+  /* ---------- 分类树序排序（sortKey='cat'：按录入时的一级二级种类顺序）----------
+     主序 = 一级大类在 categories[kind] 数组中的序号；次序 = 二级子类在 children 数组中的序号；
+     同一大类内「无子类」物品排在各子类之前（树深度优先，父节点在前）；再次 = 名称（localeCompare 'zh'，同名保持原序）。
+     分类归属与筛选同口径精确匹配（i.categoryId === catId || i.subCategoryId === catId，不做父子模糊匹配）：
+     先按 categoryId 落到一级/二级节点（categoryId 本身就是二级 id 时落该二级），
+     再按 subCategoryId 兜底；两级都对不上树的跨域物品恒排末尾（方向不影响，与空值恒末位同口径）。
+     倒序 = 树序整体反转（跨域仍恒末位）。
+     三页共用一处实现：数码/衣橱走 items()，生活页 LifeView 走 UI.sortItems——
+     这里包装 UI.sortItems 统一生效，其余排序键原样透传、既有口径不动。 */
+  function catTreeRank(item, cats) {
+    let p, k, kids;
+    // ① categoryId 命中一级：二级位置由 subCategoryId 在该大类 children 中的序号定（无子类 = -1）
+    for (p = 0; p < cats.length; p++) {
+      if (cats[p].id === item.categoryId) {
+        kids = cats[p].children || [];
+        for (k = 0; k < kids.length; k++) {
+          if (kids[k].id === item.subCategoryId) return { l1: p, l2: k };
+        }
+        return { l1: p, l2: -1 };
+      }
+    }
+    // ② categoryId 本身是二级 id（录入错位/迁移数据）：落该二级的树位
+    for (p = 0; p < cats.length; p++) {
+      kids = cats[p].children || [];
+      for (k = 0; k < kids.length; k++) {
+        if (kids[k].id === item.categoryId) return { l1: p, l2: k };
+      }
+    }
+    // ③ 按 subCategoryId 兜底（与筛选 i.subCategoryId === catId 同口径）
+    for (p = 0; p < cats.length; p++) {
+      if (cats[p].id === item.subCategoryId) return { l1: p, l2: -1 };
+      kids = cats[p].children || [];
+      for (k = 0; k < kids.length; k++) {
+        if (kids[k].id === item.subCategoryId) return { l1: p, l2: k };
+      }
+    }
+    return null; // 跨域：categoryId / subCategoryId 都不在本域分类树中
+  }
+  function sortByCatTree(list, dir, db) {
+    const d = dir === 1 ? 1 : -1;
+    const cmpName = function (a, b) {
+      return String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+    };
+    const ranked = list.map(function (item) {
+      return { item: item, rank: catTreeRank(item, UI.catsFor(db, item.kind) || []) };
+    });
+    ranked.sort(function (x, y) {
+      const rx = x.rank, ry = y.rank;
+      if (!rx && !ry) return d * cmpName(x.item, y.item); // 双跨域：组内按名称
+      if (!rx) return 1;   // 跨域恒末位，方向不影响
+      if (!ry) return -1;
+      return d * ((rx.l1 - ry.l1) || (rx.l2 - ry.l2) || cmpName(x.item, y.item));
+    });
+    return ranked.map(function (r) { return r.item; });
+  }
+  (function wrapSortItemsForCatTree() {
+    const origSortItems = UI.sortItems;
+    UI.sortItems = function (list, key, dir, db) {
+      if (key === 'cat') return sortByCatTree(list, dir, db);
+      return origSortItems(list, key, dir, db);
+    };
+  })();
+
   function items(root, kind) {
     const fs = filterStateOf(kind);
     itemState.kind = kind;
@@ -159,7 +222,11 @@ window.Views = (function () {
     }
     root.querySelector('#filter-sort').addEventListener('change', function (e) {
       const def = UI.sortOptionsFor(sortKinds).find(function (d) { return d.key === e.target.value; });
-      itemState.sorts[kind] = { key: e.target.value, dir: (def && def.defDir) || 1 };
+      // 就地更新 sortState（勿整体换对象）：persistSort 闭包引用的是本渲染的 sortState，
+      // 换对象会把旧键写进排序记忆（选择落盘记忆存不到新键，v1.1.7 修复）
+      sortState.key = e.target.value;
+      sortState.dir = (def && def.defDir) || 1;
+      itemState.sorts[kind] = sortState;
       persistSort();
       items(root, kind);
     });
@@ -369,11 +436,26 @@ window.Views = (function () {
     const lifeS = item.kind === 'life' ? M.lifeStatus(item) : null;
 
     const stopped = item.retiredAt || item.soldDate;
+    // 总投入构成明细（v1.1.5）：每一分钱可复核（购入 + 维修 + 挂靠配件），不再"不知道为什么"
+    const bd = cost && cost.breakdown;
+    const investParts = [];
+    if (bd) {
+      if (bd.purchase) investParts.push('购入 ' + U.formatMoney(bd.purchase));
+      if (bd.repairCost) investParts.push('维修 ' + U.formatMoney(bd.repairCost));
+      if (bd.accessoriesTotal) investParts.push('配件 ' + U.formatMoney(bd.accessoriesTotal));
+    }
     let costRows =
       row('购买价格', U.formatMoney(item.purchasePrice)) +
       row(stopped ? '共使用' : '已使用', cost.heldDays + ' 天') +
-      row('总投入', U.formatMoney(cost.invested)) +
+      row('总投入', U.formatMoney(cost.invested) +
+        (investParts.length > 1 ? '（' + investParts.join(' + ') + '）' : '')) +
       row('日均成本', U.formatCost(cost.dailyCost) + ' / 天' + (stopped ? '（已停用 · 固定值）' : ''));
+    if (bd && (bd.accessories || []).length) {
+      bd.accessories.forEach(function (a) {
+        costRows += row('· 挂靠配件「' + U.escapeHtml(a.name) + '」', U.formatMoney(a.amount) +
+          ' <span class="muted small">（在该配件表单「所属主机」处解除）</span>');
+      });
+    }
     // 使用周期（v1.1.0）：非在用物品显示截止日，成本类指标已冻结
     if (item.retiredAt || item.soldDate) {
       costRows += row('使用周期', U.cnDate(item.purchaseDate) + ' ~ ' + U.cnDate(item.retiredAt || item.soldDate)) +
@@ -948,6 +1030,26 @@ window.Views = (function () {
     const cosmetics = M.itemsWithComputed(db).filter(function (i) {
       return i.kind === 'life' && i.status !== 'sold' && i.status !== 'gifted';
     });
+    // 选衣/妆品 picker「全部」按种类排序（v1.1.5）：一级种类树序 → 二级子类树序 → 名称
+    const catRankOf = function (kind) {
+      const rank = {};
+      (db.categories[kind] || []).forEach(function (c, i) {
+        rank[c.id] = i * 1000;
+        (c.children || []).forEach(function (ch, j) { rank[ch.id] = i * 1000 + j + 1; });
+      });
+      return function (it) {
+        return rank[it.subCategoryId] != null ? rank[it.subCategoryId]
+          : (rank[it.categoryId] != null ? rank[it.categoryId] : 999999);
+      };
+    };
+    const rkCloth = catRankOf('clothing');
+    const rkLife = catRankOf('life');
+    clothes.sort(function (a, b) {
+      return rkCloth(a) - rkCloth(b) || String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+    });
+    cosmetics.sort(function (a, b) {
+      return rkLife(a) - rkLife(b) || String(a.name || '').localeCompare(String(b.name || ''), 'zh');
+    });
     const catName = function (i) {
       const c = (db.categories[i.kind] || []).find(function (x) { return x.id === i.categoryId; });
       return c ? c.name : '其他';
@@ -1113,7 +1215,7 @@ window.Views = (function () {
           });
         }
         renderExisting();
-        const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), { paths: (rv.images || []).slice(), ratio: '9:16' });
+        const uploader = UI.imageUploader(wrap.querySelector('#outfit-imgs'), { paths: (rv.images || []).slice(), ratio: '3:4' });
         if (rec) {
           wrap.querySelector('[data-act=del]').addEventListener('click', async function () {
             if (!await UI.confirmDialog('删除穿搭', '删除这条穿搭记录？妆品使用次数将同步撤销。')) return;

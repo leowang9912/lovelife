@@ -6,6 +6,7 @@
   <dataRoot>/accounts.json     账号列表
   <dataRoot>/<accountId>/      各账号独立数据
       items.json outfits.json food.json events.json settings.json
+      wallet.json habits.json
       images/
 """
 import json
@@ -50,7 +51,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.1.4"
+SERVER_BUILD = "1.1.5"
 
 _lock = threading.Lock()
 
@@ -181,6 +182,7 @@ DEFAULT_CATEGORIES = {
         {"id": "tool", "name": "工具", "icon": "brush", "children": [
             {"id": "tl_brush", "name": "化妆刷"}, {"id": "tl_puff", "name": "粉扑"},
             {"id": "tl_sponge", "name": "美妆蛋"}, {"id": "tl_curler", "name": "睫毛夹"},
+            {"id": "tl_hairacc", "name": "发饰"},
             {"id": "tl_other", "name": "其他"},
         ]},
         {"id": "fragrance", "name": "香氛", "icon": "flower-2", "children": [
@@ -810,7 +812,7 @@ def _log_change(d, target, action, count):
 def _backup_counts(d):
     """备份 manifest 的 totals：各主集合记录数（坏文件按 0 计，不阻断打包）。"""
     totals = {"items": 0, "outfits": 0, "food": 0, "events": 0,
-              "bills": 0, "balances": 0, "templates": 0, "accounts": 0}
+              "bills": 0, "balances": 0, "templates": 0, "accounts": 0, "habits": 0}
     wallet = None
 
     def _len_of(obj, key):
@@ -833,6 +835,7 @@ def _backup_counts(d):
     totals["balances"] = _len_of(wallet, "balances")
     totals["templates"] = _len_of(wallet, "templates")
     totals["accounts"] = _len_of(wallet, "accounts")
+    totals["habits"] = _len_of(_load("habits.json"), "defs")
     return totals
 
 
@@ -840,7 +843,7 @@ def _backup_count_of(rel, counts):
     """manifest.files[*].count：数据文件记主集合记录数；其他文件不记。"""
     return {"items.json": counts.get("items"), "outfits.json": counts.get("outfits"),
             "food.json": counts.get("food"), "events.json": counts.get("events"),
-            "wallet.json": counts.get("bills")}.get(rel)
+            "wallet.json": counts.get("bills"), "habits.json": counts.get("habits")}.get(rel)
 
 
 def _rotate_snapshots(root, acc_id, keep=5):
@@ -1070,6 +1073,51 @@ def _sanitize_list(value, label, warnings):
     return good
 
 
+def _sanitize_habits(raw, warnings):
+    """热力打卡域（habits.json）类型防御（与 _sanitize_list 同级）+ 主键归一。
+
+    - defs 必须 list 且元素 dict，元素 id 必须非空字符串（脏元素剔除计 warnings）
+    - log 必须 dict，且每个习惯的打卡映射必须 dict（键=YYYY-MM-DD → true）
+    - 顶层非 dict 按空数据 {defs:[], log:{}} 加载（读侧内存兜底，不覆盖原盘）
+    """
+    if not isinstance(raw, dict):
+        if raw is not None:
+            warnings.append("habits.json 数据结构异常，已按空数据加载")
+        return {"defs": [], "log": {}}
+    defs = _sanitize_list(raw.get("defs"), "habits.defs", warnings)
+    defs, _ = normalize_records(defs, "habits.defs", warnings)  # id 主键剔除脏条目
+    log = raw.get("log")
+    if log is None:
+        log = {}
+    elif not isinstance(log, dict):
+        warnings.append("habits.log 数据结构异常（不是对象），已按空对象加载")
+        log = {}
+    else:
+        clean = {}
+        dropped = 0
+        for hid, days in log.items():
+            if not isinstance(hid, str) or not hid or not isinstance(days, dict):
+                dropped += 1
+                continue
+            # 值清洗（v1.1.5 计数习惯）：true（二值打卡）与 ≥1 整数（次数）保留原值、非法剔除
+            daymap = {}
+            for k, v in days.items():
+                if not isinstance(k, str):
+                    continue
+                if v is True:
+                    daymap[k] = True
+                elif isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 1:
+                    daymap[k] = int(v)
+            clean[hid] = daymap
+        if dropped:
+            warnings.append("habits.log 含 %d 条非法记录，已剔除" % dropped)
+        log = clean
+    out = dict(raw)
+    out["defs"] = defs
+    out["log"] = log
+    return out
+
+
 def load_db(acc_id):
     warnings = []
     root = data_root()
@@ -1091,6 +1139,8 @@ def load_db(acc_id):
     events = _read_json(os.path.join(d, "events.json"), {"schemaVersion": SCHEMA_VERSION, "events": []}, warnings)
     settings = _read_json(os.path.join(d, "settings.json"), {}, warnings)
     wallet_raw = _read_json(os.path.join(d, "wallet.json"), {}, warnings)
+    habits_raw = _read_json(os.path.join(d, "habits.json"),
+                            {"schemaVersion": SCHEMA_VERSION, "defs": [], "log": {}}, warnings)
     # 读取侧类型防御（P0-3 元素级过滤）+ 出盘前边界归一化（戊2）：
     # 脏元素剔除 + 金额/日期/时间/枚举/主键归一；归一化结果回写（一次归一永久生效）
     items_list = _sanitize_list(items.get("items"), "items.json", warnings)
@@ -1109,6 +1159,8 @@ def load_db(acc_id):
         _write_back_normalized(os.path.join(d, "food.json"),
                                {"schemaVersion": SCHEMA_VERSION, "records": food_list}, warnings)
     events["events"] = _sanitize_list(events.get("events"), "events.json", warnings)
+    # 热力打卡（habits 域，v1.1.7）：defs 元素级过滤 + id 主键剔除 + log 结构防御（P0-3 同款）
+    habits = _sanitize_habits(habits_raw, warnings)
     # 分类迁移只在内存做（与既有口径一致：不主动改写磁盘上的分类字段）
     items["items"] = migrate_taxonomy(items_list)
     outfits["outfits"] = outfits_list
@@ -1200,7 +1252,8 @@ def load_db(acc_id):
     # 变更日志（戊6）：每次加载按数据域各记一行（只记元数据，不记内容本体）
     for _t, _n in (("items", len(items.get("items", []))), ("outfits", len(outfits.get("outfits", []))),
                    ("food", len(food.get("records", []))), ("events", len(events.get("events", []))),
-                   ("settings", 1), ("wallet", len(wallet.get("bills", [])))):
+                   ("settings", 1), ("wallet", len(wallet.get("bills", []))),
+                   ("habits", len(habits.get("defs", [])))):
         _log_change(d, _t, "load", _n)
 
     return {
@@ -1214,6 +1267,8 @@ def load_db(acc_id):
         "settings": merged_settings,
         "categories": merged_cats,
         "wallet": wallet,
+        # 热力打卡（habits 域）：{defs: [{id,name,color}], log: {habitId: {date: true}}}
+        "habits": {"defs": habits.get("defs", []), "log": habits.get("log", {})},
         "dataRoot": root,
         # 读取侧数据体检提示（P0-2/P0-3）：坏文件隔离/脏元素剔除等，前端 toast 提醒
         "warnings": warnings,
@@ -1475,7 +1530,7 @@ class Handler(BaseHTTPRequestHandler):
         # 类型防御：脏数据不让进盘（否则下次加载 /api/db 直接 500 全站不可用）
         if target in ("items", "outfits", "food", "events") and not isinstance(data, list):
             return self._json({"error": "data must be a list"}, 400)
-        if target in ("settings", "wallet") and not isinstance(data, dict):
+        if target in ("settings", "wallet", "habits") and not isinstance(data, dict):
             return self._json({"error": "data must be an object"}, 400)
         root = data_root()
         accounts = migrate_old_layout(root)
@@ -1507,6 +1562,11 @@ class Handler(BaseHTTPRequestHandler):
                     data["balances"], _ = normalize_records(data["balances"], "wallet.balances", norm_warnings)
                 _write_json(os.path.join(d, "wallet.json"), {**data, "schemaVersion": SCHEMA_VERSION})
                 count = len(data.get("bills") or [])
+            elif target == "habits":
+                # 热力打卡（habits 域）：defs 元素级过滤 + id 主键归一 + log 结构防御（进盘前，与读侧同语义）
+                data = _sanitize_habits(data, norm_warnings)
+                _write_json(os.path.join(d, "habits.json"), {**data, "schemaVersion": SCHEMA_VERSION})
+                count = len(data.get("defs") or [])
             else:
                 return self._json({"error": "bad target"}, 400)
             _log_change(d, target, "save", count)
@@ -1756,6 +1816,7 @@ class Handler(BaseHTTPRequestHandler):
         data_files = [
             ("items.json", "items"), ("outfits.json", "outfits"), ("food.json", "records"),
             ("events.json", "events"), ("settings.json", None), ("wallet.json", "bills"),
+            ("habits.json", "defs"),
         ]
         files = {}
         loaded = {}
@@ -2211,7 +2272,12 @@ def _stage_and_install(data):
         r'if exist "update-staging\LICENSE" copy /y "update-staging\LICENSE" "LICENSE" >nul',
         r'for %%f in ("update-staging\*.txt") do copy /y "%%f" "%%~nxf" >nul',
         'rmdir /s /q "update-staging" >nul 2>&1',
-        # 自动重启：等端口就绪，未起来自动重试（v1.0.9，配合 runtime 释放目录根治启动弹窗）
+        # 自动重启（v1.1.5 强化）：TMP/TEMP 指向安装目录 runtime（即使 exe 参数失效，
+        # 解压也不进系统 Temp，避开杀软扫描窗口导致的 python3xx.dll 加载失败）；
+        # 重试 6 次递增等待，跨过杀软静默扫描期
+        'if not exist "runtime" mkdir "runtime"',
+        'set "TMP=%~dp0runtime"',
+        'set "TEMP=%~dp0runtime"',
         'set /a rst=0',
         ':RESTART',
         'set /a rst+=1',
@@ -2219,8 +2285,8 @@ def _stage_and_install(data):
         'ping -n 7 127.0.0.1 >nul',
         'netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1',
         'if %errorlevel%==0 goto RESTART_OK',
-        'if %rst% LSS 3 goto RESTART',
-        'echo update restart failed after 3 tries>>"%~dp0update-restart.log"',
+        'if %rst% LSS 6 goto RESTART',
+        'echo update restart failed after 6 tries>>"%~dp0update-restart.log"',
         ':RESTART_OK',
         'ping -n 3 127.0.0.1 >nul',
         'del /q "%~f0"',

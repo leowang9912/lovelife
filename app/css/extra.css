@@ -255,15 +255,15 @@
   transition: opacity .18s;
 }
 
-/* 穿搭日历：每日照片窗口固定 9:16 竖长条（v1.1.4）
-   照片按 9:16 上传（裁切器 9:16 档）→ contain 恰好满框；
-   旧照片（1:1 等任意比例）contain 白底完整显示——兼容不裁切；
+/* 穿搭日历：每日照片窗口固定 3:4 竖图（v1.1.5，覆盖 v1.1.4 的 9:16）
+   照片按 3:4 上传（裁切器 3:4 档）→ contain 恰好满框；
+   旧照片（1:1 / 9:16 等任意比例）contain 白底完整显示——兼容不裁切；
    aspect-ratio 锁定比例，窗口缩放格子宽度变化时不再"有时显示不完整" */
 .cal-grid-outfit .cal-cell { height: auto; }
 .cal-grid-outfit .cal-cover,
 .cal-grid-outfit .cal-outfits,
 .cal-grid-outfit .cal-hint {
-  aspect-ratio: 9 / 16; width: 100%; flex: none;
+  aspect-ratio: 3 / 4; width: 100%; flex: none;
 }
 .cal-grid-outfit .cal-cover img {
   object-fit: contain; background: #fff;
@@ -563,15 +563,17 @@
 }
 .weather-icon { font-size: 34px; line-height: 1; }
 .weather-temp { font-size: 24px; font-weight: 700; letter-spacing: -.3px; }
-.weather-recs { flex: 1; min-width: 260px; }
+/* 推荐区保底 240px：窄容器时换行到天气下方（天气在上、推荐在下），而不是压成竖条 */
+.weather-recs { flex: 1 1 240px; min-width: 240px; }
 .weather-rec-title { font-size: 12px; font-weight: 600; color: var(--text-2); margin-bottom: 8px; }
 .rec-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 4px; }
 .rec-card {
   width: 118px; flex-shrink: 0; padding: 8px; border-radius: 11px; text-align: center;
   background: #fff; border: 1px solid var(--line-soft);
 }
+/* 推荐卡照片 3:4 竖图（v1.1.5，与穿搭日历统一） */
 .rec-card img, .rec-noimg {
-  width: 100px; height: 100px; border-radius: 8px; object-fit: cover;
+  width: 100px; aspect-ratio: 3 / 4; border-radius: 8px; object-fit: cover;
   background: #f2f2f4; display: block; margin: 0 auto;
 }
 .rec-noimg {
@@ -615,6 +617,9 @@
 
 /* ===== v1.0.9 体验修整 ===== */
 .seg-toggle { display: inline-flex; margin-left: 8px; vertical-align: middle; }
+/* 面板右上角的周期切换器：紧凑尺寸、不拉伸（v1.1.5） */
+.seg-toggle-head { margin-left: auto; }
+.seg-toggle-head .seg-btn { height: 28px; padding: 0 13px; font-size: 12px; }
 .seg-btn {
   padding: 2px 10px; font-size: 11px; border: 1px solid var(--line);
   background: #fff; color: var(--text-2); cursor: pointer;
@@ -919,7 +924,9 @@
 /* ===== v1.1.2 我的主页 ===== */
 .home-hero { display: flex; align-items: baseline; gap: 14px; margin: 4px 2px 16px; }
 .home-greet { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; }
-.home-date { font-size: 13px; }
+/* 日期行：调大+正常色，倒计时简报用 · 分隔（v1.1.5） */
+.home-date { font-size: 16px; color: var(--text); font-weight: 500; }
+.home-cd-brief { color: var(--text-2); font-weight: 400; }
 
 /* 四大快捷记录：大按钮（定稿为下方「灰底 + 淡彩图标」版，彩色配方段已删；
    --hq 由 views-home.js 内联传入，仅用于图标淡彩着色） */
@@ -939,8 +946,79 @@
 .home-check.done .home-check-state { color: #34c759; font-weight: 600; }
 
 /* 两栏（推荐卡/今日概览、提醒/动态） */
-.home-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-.home-two .panel { margin-bottom: 0; }
+.home-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; align-items: start; }
+/* 两列随窗口同步缩放：grid 子项必须允许收缩（否则内容 min-width 撑破 1fr、右列被挤小） */
+.home-two .panel, .home-col { margin-bottom: 0; min-width: 0; }
+.home-col { display: flex; flex-direction: column; gap: 14px; }
+
+/* ===== 倒计时卡（v1.1.5） ===== */
+.cd-strip { display: flex; flex-wrap: wrap; gap: 10px; }
+.cd-card {
+  flex: 1 1 150px; min-width: 140px; max-width: 230px;
+  padding: 12px 16px; border-radius: var(--r-xl);
+  background: #fff; border: 1px solid var(--line-soft); box-shadow: var(--shadow-card);
+  cursor: pointer; transition: box-shadow var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-out);
+}
+.cd-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+.cd-name { font: var(--f-body-m); color: var(--text-2); }
+.cd-days {
+  font: 700 30px/36px var(--font); color: var(--accent);
+  font-variant-numeric: tabular-nums; letter-spacing: -.02em; margin: 2px 0;
+}
+.cd-days.over { color: var(--text-3); }
+.cd-date { font: var(--f-cap); }
+.cd-repeat-row { flex-direction: row !important; align-items: center; gap: 8px; cursor: pointer; }
+.cd-repeat-row input { width: 16px; height: 16px; min-height: 0; }
+.cd-repeat-row span { font: var(--f-body-2); color: var(--text-2); }
+
+/* ===== 热力打卡（v1.1.5）：月视图格 + 淡色系习惯色 ===== */
+.hb-month-nav { display: flex; align-items: center; gap: 6px; margin-right: 8px; }
+.hb-month-label { font: var(--f-cap-m); color: var(--text-2); min-width: 86px; text-align: center; }
+.hb-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 11px 2px; border-bottom: 1px solid var(--line-soft);
+}
+.hb-row:last-child { border-bottom: none; }
+.hb-name {
+  display: flex; align-items: center; gap: 7px;
+  flex: 0 0 92px; min-width: 0; padding: 4px 6px; border: none; background: none;
+  cursor: pointer; font: var(--f-body-2-m); color: var(--text);
+  border-radius: 8px; transition: background var(--t-fast);
+}
+.hb-name:hover { background: #f2f2f6; }
+.hb-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+.hb-cells { display: flex; gap: 3px; flex: 1; min-width: 0; overflow-x: auto; padding: 4px 2px; }
+.hb-cell {
+  width: 14px; height: 14px; flex-shrink: 0; padding: 0;
+  border-radius: 3px; border: none; cursor: pointer;
+  background: #f2f2f4;
+  /* hover 不再放大（会被滚动容器裁切遮挡）：改亮度反馈，点击有 toast 确认 */
+  transition: background var(--t-fast), filter var(--t-fast);
+}
+.hb-cell:hover:not(:disabled) { filter: brightness(.88); }
+.hb-cell.on { background: var(--hc); box-shadow: inset 0 0 0 1px rgba(0, 0, 0, .06); }
+/* 计数型习惯：格子中心次数（v1.1.5 梯度式） */
+.hb-n {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 8px; font-weight: 600; line-height: 1; color: #fff;
+  text-shadow: 0 0 2px rgba(0, 0, 0, .35); pointer-events: none;
+}
+.hb-cell.future { opacity: .35; cursor: default; }
+.hb-cell.today { outline: 2px solid var(--accent); outline-offset: 1px; }
+.hb-pill {
+  flex-shrink: 0; padding: 4px 12px; border-radius: 999px;
+  border: 1px solid var(--line); background: #fff;
+  font: var(--f-cap-m); color: var(--text-2); cursor: pointer;
+  transition: all var(--t-fast);
+}
+.hb-pill:hover { border-color: var(--accent); color: var(--accent); }
+.hb-pill.done { background: var(--accent-soft); border-color: transparent; color: var(--accent); }
+.hb-color-swatch {
+  width: 26px; height: 26px; border-radius: 50%; border: 2px solid transparent;
+  cursor: pointer; padding: 0; transition: transform var(--t-fast);
+}
+.hb-color-swatch:hover { transform: scale(1.12); }
+.hb-color-swatch.on { border-color: var(--text); }
 .home-mini-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .home-mini { padding: 10px 12px; background: #f7f8fc; border-radius: 11px; }
 .home-mini-val { font-size: 17px; font-weight: 700; margin-top: 2px; }

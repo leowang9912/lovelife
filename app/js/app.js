@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.1.4";
+  const FRONTEND_VERSION = "1.1.5";
 
   let current = 'home'; // 默认首屏=我的主页（v1.1.2）
   let booted = false;

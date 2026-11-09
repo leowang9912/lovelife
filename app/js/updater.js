@@ -203,7 +203,8 @@ window.Updater = (function () {
       } catch (e) { /* 忽略 */ }
       if (tries > 80) {
         clearInterval(timer);
-        if (text) text.textContent = '服务未自动重启，请手动双击 lovelife.bat';
+        if (text) text.textContent = '服务未自动重启，请手动双击 lovelife.bat（安全提示选"允许"）';
+        try { window.UI.toast('服务未自动重启，请手动双击 lovelife.bat 启动', 'error'); } catch (e) {}
       }
     }, 1500);
   }

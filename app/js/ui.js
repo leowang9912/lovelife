@@ -156,10 +156,10 @@ window.UI = (function () {
 
   function cropImage(file, opts) {
     opts = opts || {};
-    // 比例档（v1.1.4）：'9:16' 竖图（穿搭日历照片），默认 1:1。框与输出同比例
-    const portrait = opts.ratio === '9:16';
+    // 比例档（v1.1.5）：'3:4' 竖图（穿搭照片/推荐封面），默认 1:1。框与输出同比例
+    const portrait = opts.ratio === '3:4' || opts.ratio === '9:16';
     const frameW = portrait ? 270 : 320;
-    const frameH = portrait ? 480 : 320;
+    const frameH = portrait ? 360 : 320;
     return new Promise(function (resolve, reject) {
       let settled = false;
       // 任何关闭方式（取消/×/遮罩/确认）都会结算，杜绝上传循环挂死丢图（v1.0.9）
@@ -170,7 +170,7 @@ window.UI = (function () {
         let scale = 1, offsetX = 0, offsetY = 0;
         const frame = frameW; // 输出换算基准（框与输出等比）
         modal({
-          title: '裁切图片（' + (portrait ? '9:16 竖图' : '1:1') + '）',
+          title: '裁切图片（' + (portrait ? '3:4 竖图' : '1:1') + '）',
           width: 420,
           bodyHTML:
             '<div class="crop-frame" id="crop-frame">' +
@@ -272,8 +272,8 @@ window.UI = (function () {
             });
             wrap.querySelector('[data-act=ok]').addEventListener('click', async function () {
               // 输出 ≥1024px（甲2-②）：按预览同款构图（等比缩放 + 白底补边）放大输出。
-              // 9:16 竖图输出 576×1024，1:1 输出 1024×1024（v1.1.4 比例档）
-              const OUT_W = portrait ? 576 : 1024;
+              // 3:4 竖图输出 768×1024，1:1 输出 1024×1024（v1.1.5 比例档）
+              const OUT_W = portrait ? 768 : 1024;
               const OUT_H = 1024;
               const outCanvas = document.createElement('canvas');
               outCanvas.width = OUT_W; outCanvas.height = OUT_H;
@@ -451,7 +451,7 @@ window.UI = (function () {
     { key: 'name', label: '名称', kinds: ['digital', 'clothing', 'life'], defDir: 1,
       dirs: ['A→Z', 'Z→A'],
       cmp: function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'zh'); } },
-    { key: 'cat', label: '分类归拢', kinds: ['digital', 'clothing', 'life'], defDir: 1,
+    { key: 'cat', label: '按分类顺序', kinds: ['digital', 'clothing', 'life'], defDir: 1,
       dirs: ['正序', '倒序'],
       cmp: function (a, b) {
         return String(a.categoryId || '').localeCompare(String(b.categoryId || '')) ||
@@ -679,7 +679,8 @@ window.UI = (function () {
         '<label><span class="f-label">保修截止</span><input type="date" name="warrantyEnd" value="' + U.escapeHtml(item.warrantyEnd || '') + '"></label>' +
         '<label><span class="f-label">固件版本</span><input name="firmware" value="' + U.escapeHtml(item.firmware || '') + '"></label>' +
         '<label><span class="f-label">电池健康度 %</span><input type="number" min="0" max="100" name="batteryHealth" value="' + (item.batteryHealth !== null && item.batteryHealth !== undefined ? item.batteryHealth : '') + '"></label>' +
-        '<label><span class="f-label">绑定子配件</span><select name="parentItemId">' + deviceOpts + '</select></label>' +
+        '<label><span class="f-label">所属主机</span><select name="parentItemId">' + deviceOpts + '</select>' +
+        '<span class="muted small">挂到主机名下：本机价格将计入该主机的总投入（配件挂靠 TCO）</span></label>' +
         '<label><span class="f-label">预估寿命（年）</span><input type="number" step="0.5" name="estimatedLifeYears" value="' + (item.estimatedLifeYears || '') + '"></label>' +
         '<label><span class="f-label">预估二手价</span><input type="number" step="0.01" name="estimatedResalePrice" value="' + (item.estimatedResalePrice || '') + '"></label>' +
         '<label class="game-only"><span class="f-label">游玩状态</span><select name="gameStatus">' +
@@ -721,9 +722,14 @@ window.UI = (function () {
         [['', '不限'], ['3', '3M'], ['6', '6M'], ['12', '12M'], ['18', '18M'], ['24', '24M'], ['36', '36M']].map(function (s) {
           return '<option value="' + s[0] + '"' + (String(item.paoMonths || '') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
         }).join('') + '</select></label>' +
-        '<label><span class="f-label">未开封限用日期</span><input type="date" name="expiryDate" value="' + U.escapeHtml(item.expiryDate || '') + '"></label>' +
-        '<label><span class="f-label">剩余量</span><select name="remainLevel">' + enumSel(db.categories.remainLevel, item.remainLevel, '（未记录）') + '</select></label>' +
-        '<label><span class="f-label">用完日期（剩余量选「空」后填写）</span><input type="date" name="emptyDate" value="' + U.escapeHtml(item.emptyDate || '') + '"></label>' +
+        // 保质区三项定稿（v1.1.5）：开封日期 / PAO 开封保质 / 未开封保质期（年数自动推算限用日期）
+        '<label><span class="f-label">未开封保质期（年）</span>' +
+        '<input type="number" name="shelfYears" min="0" step="0.5" placeholder="如 3" value="' +
+        (item.shelfYears != null ? U.escapeHtml(String(item.shelfYears)) : '') + '">' +
+        '<span class="muted small">按购买日期自动推算限用日期（临期提醒用）</span></label>' +
+        '<label><span class="f-label">剩余量 / 空瓶日期（选填）</span><div class="tag-add-row">' +
+        '<select name="remainLevel">' + enumSel(db.categories.remainLevel, item.remainLevel, '（未记录）') + '</select>' +
+        '<input type="date" name="emptyDate" title="剩余量选「空」后填写" value="' + U.escapeHtml(item.emptyDate || '') + '"></div></label>' +
         '<label><span class="f-label">使用频率</span><select name="usageFreq">' + enumSel(db.categories.usageFreq, item.usageFreq) + '</select></label>' +
         '<label><span class="f-label">是否致敏</span><select name="allergenic">' +
         ['', '是', '否', '不确定'].map(function (v) {
@@ -880,7 +886,15 @@ window.UI = (function () {
       item.openedDate = fd.get('openedDate') || '';
       const pao = fd.get('paoMonths');
       item.paoMonths = pao === '' ? null : Number(pao);
-      item.expiryDate = fd.get('expiryDate') || '';
+      // 未开封保质期（年）→ 自动推算限用日期（v1.1.5）：购买日期 + N 年；
+      // 未填年数时保留原限用日期（旧数据兼容，baseItem 值经 Object.assign 带入不覆盖）
+      const sy = fd.get('shelfYears');
+      item.shelfYears = sy === '' || sy == null ? null : Math.max(0, Number(sy) || 0);
+      if (item.shelfYears && item.purchaseDate) {
+        const p = item.purchaseDate.split('-');
+        const d = new Date(Number(p[0]) + item.shelfYears, Number(p[1]) - 1, Number(p[2]));
+        item.expiryDate = U.todayStr(d);
+      }
       item.remainLevel = fd.get('remainLevel') || '';
       item.emptyDate = fd.get('emptyDate') || '';
       item.usageFreq = fd.get('usageFreq') || '';

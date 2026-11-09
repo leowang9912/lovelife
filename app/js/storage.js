@@ -7,6 +7,9 @@ window.Storage = (function () {
   let session = null; // {accounts, lastAccountId, dataRoot}
   const listeners = [];
   const accountChangeListeners = []; // 账号切换成功后的钩子（A3：模块筛选/搜索/排序状态统一重置）
+  // 双向同步防环标志位（v1.1.7）：账单→词条（_applyBillMemory）与词条→账单（syncItemToBills/syncFoodToBills）
+  // 嵌套触发只走一层——正/反向同步期间的任何再入保存不再触发对向回写
+  let _biSyncing = false;
 
   function onChange(fn) { listeners.push(fn); }
   function onAccountChange(fn) { accountChangeListeners.push(fn); }
@@ -133,6 +136,7 @@ window.Storage = (function () {
       outfits: raw.outfits || [],
       food: raw.food || [],
       events: raw.events || [],
+      habits: normHabits(raw.habits),
       categories: raw.categories || M.defaultCategories(),
       settings: Object.assign(M.defaultSettings(), raw.settings || {}),
       wallet: Object.assign({
@@ -180,6 +184,7 @@ window.Storage = (function () {
     if (!scope || scope === 'outfits') push('outfits', db.outfits);
     if (!scope || scope === 'food') push('food', db.food);
     if (!scope || scope === 'events') push('events', db.events);
+    if (!scope || scope === 'habits') push('habits', db.habits);
     if (!scope || scope === 'settings') {
       jobs.push(api('/api/save', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -271,6 +276,7 @@ window.Storage = (function () {
   /* ---------- 业务操作 ---------- */
   function saveItem(item) {
     const idx = db.items.findIndex(function (i) { return i.id === item.id; });
+    const prevRec = idx >= 0 ? db.items[idx] : null; // 反向同步基线（调用方可能直接改原对象时与 item 同引用，见 syncItemToBills）
     // 新分类体系盖章：防止服务端旧数据迁移把新建物品的分类当旧分类重写（v1.0.9 修复）
     item.taxonomy = 2;
     item.updatedAt = new Date().toISOString();
@@ -286,7 +292,9 @@ window.Storage = (function () {
       item.createdAt = item.createdAt || new Date().toISOString();
       db.items.push(item);
     }
-    return persist('items');
+    // 词条 → 账单反向同步（v1.1.7）：名称/购入金额/购入日期真实变化才回写关联购入账单
+    const billTouched = prevRec ? syncItemToBills(item, prevRec) : false;
+    return billTouched ? Promise.all([persist('items'), persist('wallet')]) : persist('items');
   }
 
   function removeItem(id) {
@@ -398,9 +406,12 @@ window.Storage = (function () {
 
   function saveFood(rec) {
     const idx = db.food.findIndex(function (f) { return f.id === rec.id; });
+    const prevRec = idx >= 0 ? db.food[idx] : null; // 反向同步基线（与 saveItem 同口径）
     if (idx >= 0) db.food[idx] = rec;
     else db.food.push(rec);
-    return persist('food');
+    // 词条 → 账单反向同步（v1.1.7）：名称/价格/日期真实变化才回写关联正餐账单
+    const billTouched = prevRec ? syncFoodToBills(rec, prevRec) : false;
+    return billTouched ? Promise.all([persist('food'), persist('wallet')]) : persist('food');
   }
 
   function removeFood(id) {
@@ -426,6 +437,175 @@ window.Storage = (function () {
   function removeEvent(id) {
     db.events = db.events.filter(function (e) { return e.id !== id; });
     return persist('events');
+  }
+
+  /* ---------- 热力打卡（habits 域，v1.1.7） ----------
+     数据：db.habits = { defs: [{id, name, color, type, max, showNum}], log: { habitId: { 'YYYY-MM-DD': true|n } } }
+     - 日期键 = U.todayStr() 口径的 'YYYY-MM-DD'（本地零点）
+     - **二值习惯**（type='check'，默认）：有键=已打卡（值 true/1）
+     - **计数习惯**（type='count'，v1.1.5 梯度式）：值=正整数次数（如喝水 3 次）；
+       max=满色阈值（默认 5）；showNum=格子中心显示次数（默认 true）
+     - 可补打/编辑过去的日子：setHabitCount 直接设定历史键次数
+     - 预设三例（运动/阅读/早睡）只是 UI 层的初始建议（作者主页实现），数据层不预置 */
+  const HABIT_COLORS = [
+    '#aecbfa', '#d7aefb', '#b7e1c1', '#fbd2a7',
+    '#f6b8d0', '#a8e0e8', '#f7e6a1', '#f2b3b3'
+  ];
+
+  function habits() { return db.habits; }
+
+  /* 结构兜底（loadAll/各操作共用，与服务端 _sanitize_habits 同语义）：
+     缺省 {defs:[],log:{}}；defs 归一 type/max/showNum；log 值归一 true→1、正整数保留 */
+  function normHabits(raw) {
+    const out = { defs: [], log: {} };
+    if (!raw || typeof raw !== 'object') return out;
+    if (Array.isArray(raw.defs)) {
+      raw.defs.forEach(function (d) {
+        if (d && typeof d === 'object' && typeof d.id === 'string' && d.id) {
+          const def = d;
+          if (def.type !== 'check' && def.type !== 'count') def.type = 'check';
+          if (!(Number(def.max) > 0)) def.max = 5;
+          if (def.showNum == null) def.showNum = true;
+          out.defs.push(def);
+        }
+      });
+    }
+    if (raw.log && typeof raw.log === 'object' && !Array.isArray(raw.log)) {
+      Object.keys(raw.log).forEach(function (hid) {
+        const m = raw.log[hid];
+        if (hid && m && typeof m === 'object' && !Array.isArray(m)) {
+          const map = {};
+          Object.keys(m).forEach(function (k) {
+            const v = m[k];
+            // true（二值打卡）与 ≥1 整数（计数）保留原值；0/负/非法剔除
+            const ok = v === true || (typeof v === 'number' && isFinite(v) && Math.floor(v) >= 1);
+            if (ok && /^\d{4}-\d{2}-\d{2}$/.test(k)) map[k] = v === true ? true : Math.floor(v);
+          });
+          out.log[hid] = map;
+        }
+      });
+    }
+    return out;
+  }
+
+  /* 梯度色（计数习惯）：n/max 线性映射深浅（1 次最浅 → max 次满色），返回 #rrggbb。
+     底色=#f2f2f4（未打卡浅灰），与习惯色 srgb 线性插值 */
+  function habitColorScale(color, n, max) {
+    const c = String(color || HABIT_COLORS[0]);
+    const m = Math.max(1, Number(max) || 5);
+    const t = Math.min(1, Math.max(0, (Number(n) || 0) / m));
+    const pct = 0.35 + 0.65 * t; // 1/max 也至少 35% 深度，满色 100%
+    const hex = function (s) {
+      const v = s.replace('#', '');
+      return [parseInt(v.slice(0, 2), 16), parseInt(v.slice(2, 4), 16), parseInt(v.slice(4, 6), 16)];
+    };
+    const bg = [242, 242, 244]; // #f2f2f4
+    const fg = hex(c.length >= 6 ? c : c.slice(0, 4) + c.slice(1)); // #abc → #aabbcc
+    const mix = fg.map(function (f, i) { return Math.round(bg[i] + (f - bg[i]) * pct); });
+    return '#' + mix.map(function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+  }
+
+  /* 保存/更新习惯定义（新增自动补 id；无颜色时从 8 色池按序循环取） */
+  function saveHabitDef(def) {
+    const h = db.habits || (db.habits = { defs: [], log: {} });
+    if (!def.id) def.id = U.uid();
+    const idx = h.defs.findIndex(function (d) { return d.id === def.id; });
+    if (idx >= 0) h.defs[idx] = def;
+    else {
+      if (!def.color) def.color = HABIT_COLORS[h.defs.length % HABIT_COLORS.length];
+      h.defs.push(def);
+    }
+    return persist('habits');
+  }
+
+  /* 删除习惯：连带删除该习惯全部打卡记录（log[habitId]），不留孤儿 */
+  function removeHabitDef(id) {
+    const h = db.habits || (db.habits = { defs: [], log: {} });
+    h.defs = h.defs.filter(function (d) { return d.id !== id; });
+    delete h.log[id];
+    return persist('habits');
+  }
+
+  /* 打/取消打卡（同键再点=取消）；补打过去的日子直接传历史 dateStr（YYYY-MM-DD）。
+     二值语义写 true（countOf 读取时归 1）；计数习惯用 setHabitCount 写数字 */
+  function toggleHabit(habitId, dateStr) {
+    const h = db.habits || (db.habits = { defs: [], log: {} });
+    const key = dateStr || U.todayStr();
+    const map = h.log[habitId] || (h.log[habitId] = {});
+    if (map[key]) {
+      delete map[key];
+      if (!Object.keys(map).length) delete h.log[habitId]; // 空映射不落盘留孤儿键
+    } else {
+      map[key] = true;
+    }
+    return persist('habits');
+  }
+
+  /* 计数习惯（v1.1.5 梯度式）：直接设定某日次数；n<=0 清除该日（=未打卡） */
+  function setHabitCount(habitId, dateStr, n) {
+    const h = db.habits || (db.habits = { defs: [], log: {} });
+    const key = dateStr || U.todayStr();
+    const map = h.log[habitId] || (h.log[habitId] = {});
+    const v = Math.floor(Number(n) || 0);
+    if (v > 0) map[key] = v;
+    else {
+      delete map[key];
+      if (!Object.keys(map).length) delete h.log[habitId];
+    }
+    return persist('habits');
+  }
+
+  /* 某日打卡次数（二值习惯=0/1；计数习惯=次数） */
+  function habitCountOf(habitId, dateStr) {
+    const v = ((db.habits || {}).log || {})[habitId] && ((db.habits || {}).log || {})[habitId][dateStr];
+    return typeof v === 'number' ? v : (v ? 1 : 0);
+  }
+
+  /* 手动落盘整个 habits 域（预设直接写 db.habits.defs 后调用，与 saveSettings 同形） */
+  function saveHabits() { return persist('habits'); }
+
+  /* ===== 统计口径（导出供「我的统计」栏目与主页热力卡共用）=====
+     日期键一律 'YYYY-MM-DD'（U.todayStr 口径），连续=自然日相邻。
+     - habitYearCount：该年打卡天数（补打的历史日子照计）
+     - habitCurrentStreak：当前连续——终点=今天；今天尚未打卡则从昨天往回数（今天不打不断签），
+       与统计页「打卡连续与季节分布」栏目同口径
+     - habitLongestStreak：历史最长连续天数（跨月/跨年连续不断） */
+  function habitYearCount(habitId, year) {
+    const map = ((db.habits || {}).log || {})[habitId] || {};
+    const p = String(year);
+    let n = 0;
+    Object.keys(map).forEach(function (k) {
+      if (map[k] && k.slice(0, 4) === p) n++;
+    });
+    return n;
+  }
+
+  function habitCurrentStreak(habitId) {
+    const map = ((db.habits || {}).log || {})[habitId] || {};
+    const cur = new Date();
+    if (!map[U.todayStr(cur)]) cur.setDate(cur.getDate() - 1); // 今天还没打卡不断签
+    let n = 0;
+    while (map[U.todayStr(cur)]) {
+      n++;
+      cur.setDate(cur.getDate() - 1);
+    }
+    return n;
+  }
+
+  function habitLongestStreak(habitId) {
+    const map = ((db.habits || {}).log || {})[habitId] || {};
+    const days = Object.keys(map).filter(function (k) {
+      return map[k] && /^\d{4}-\d{2}-\d{2}$/.test(k);
+    }).sort();
+    let best = 0, run = 0, prev = null;
+    days.forEach(function (k) {
+      const d = U.parseDate(k);
+      if (!d) return;
+      run = (prev && U.daysBetween(prev, d) === 1) ? run + 1 : 1;
+      if (run > best) best = run;
+      prev = d;
+    });
+    return best;
   }
 
   /* ---------- 钱袋（记账 v1.1.0） ---------- */
@@ -458,7 +638,14 @@ window.Storage = (function () {
   }
 
   // 账单入内存（余额 + 词条/美食同步）；persist 由调用方统一执行（批量导入只发 3 个请求）
+  // 双向同步防环（v1.1.7）：正向同步期间置 _biSyncing，嵌套触发的 saveItem/saveFood 不再反向回写（只走一层）
   function _applyBillMemory(bill, prev, idx) {
+    _biSyncing = true;
+    try { return _applyBillMemoryInner(bill, prev, idx); }
+    finally { _biSyncing = false; }
+  }
+
+  function _applyBillMemoryInner(bill, prev, idx) {
     const explicitItemId = bill.itemId; // 调用方显式指定关联（如新建物品勾"同时记账"）
     if (idx >= 0) {
       applyBillToBalance(db.wallet.bills[idx], -1);
@@ -919,6 +1106,91 @@ window.Storage = (function () {
     delete bill.itemId;
   }
 
+  /* ================= 词条 → 账单 反向同步（v1.1.7）：名称/金额/日期回写 =================
+     触发：saveItem / saveFood 保存时，与库中旧值相比**真实变化**的字段才回写（防误踩、防环）。
+     口径（拍板"名称+金额+日期全跟"）：
+     - 名称：name → bill.note（billSyncName「备注优先」的反向映射），回写全部关联支出账单
+     - 金额：仅 1:1 单账单关联回写——1:1 时金额等价；N:1 合并词条金额=关联账单合计
+       （recalcItemFromBills），回写会把合计摊回每笔、越滚越大，破坏合计口径，故不回写。
+       priceManual 美食手改价/手动物品价照回写（用户显式改=两边都该是它）；
+       账单侧再编辑仍不会改回 priceManual 美食价（单向保护，A7 口径不动）。
+       回写金额同步调账：先按旧值回滚余额 → 改金额 → 按新值入账（applyBillToBalance）
+     - 日期：物品仅 1:1 回写（合并词条日期=最早账单，N:1 回写会压平分期付款的真实日期）；
+       美食回写全部关联账单（同日合并语义：日期=这一顿的日期）
+     - 只回写支出账单：二手回血收入账单金额=售出价，不被购入价/名称污染；
+       syncOff（解除关联/删过同步记忆）的账单不动，删除/解除既有行为不变
+     - 防环：_biSyncing 同步标志位，正/反向同步嵌套触发只走一层；反向=就地改账单字段
+       （不走 saveBill），正向=就地改词条（不走 saveItem），两侧结构上不互相回调 */
+
+  // 金额标准化：空值=null（视为未填不回写）；取绝对值+两位小数（与 recalcItemFromBills 同口径）
+  function _syncPrice(v) {
+    return (v == null || v === '') ? null : Math.round(Math.abs(Number(v)) * 100) / 100;
+  }
+
+  // 支出账单金额回写：同步调账保持账户余额一致（回滚旧值→改金额→套新值），返回是否有真实变化
+  function _writeBillAmount(bill, amt) {
+    const cur = Math.round(Math.abs(Number(bill.amount) || 0) * 100) / 100;
+    if (cur === amt) return false;
+    applyBillToBalance(bill, -1);
+    bill.amount = amt;
+    applyBillToBalance(bill, 1);
+    return true;
+  }
+
+  // 物品 → 关联购入账单（名称→备注全部；金额/日期仅 1:1），返回是否有回写
+  function syncItemToBills(item, old) {
+    if (_biSyncing || !item || !old || item === old || !db.wallet) return false;
+    const name = String(item.name || '').trim();
+    const nmChg = !!name && name !== String(old.name || '').trim();
+    const price = _syncPrice(item.purchasePrice);
+    const priceChg = price != null && price !== _syncPrice(old.purchasePrice);
+    const date = String(item.purchaseDate || '');
+    const dateChg = !!date && date !== String(old.purchaseDate || '');
+    if (!nmChg && !priceChg && !dateChg) return false;
+    const bills = (db.wallet.bills || []).filter(function (b) {
+      return b && b.type === 'expense' && b.itemId === item.id && !b.syncOff;
+    });
+    if (!bills.length) return false;
+    const single = bills.length === 1;
+    let touched = false;
+    _biSyncing = true; // 回写期间置位：嵌套触发的对向同步只走一层
+    try {
+      bills.forEach(function (b) {
+        if (nmChg && b.note !== name) { b.note = name; touched = true; }
+        if (single && priceChg && _writeBillAmount(b, price)) touched = true;
+        if (single && dateChg && b.date !== date) { b.date = date; touched = true; }
+      });
+    } finally { _biSyncing = false; }
+    return touched;
+  }
+
+  // 美食 → 关联正餐账单（名称/日期→全部；金额仅 1:1，priceManual 手改价也回写），返回是否有回写
+  function syncFoodToBills(rec, old) {
+    if (_biSyncing || !rec || !old || rec === old || !db.wallet) return false;
+    const name = String(rec.name || '').trim();
+    const nmChg = !!name && name !== String(old.name || '').trim();
+    const price = _syncPrice(rec.price);
+    const priceChg = price != null && price !== _syncPrice(old.price);
+    const date = String(rec.date || '');
+    const dateChg = !!date && date !== String(old.date || '');
+    if (!nmChg && !priceChg && !dateChg) return false;
+    const bills = (db.wallet.bills || []).filter(function (b) {
+      return b && b.type === 'expense' && b.foodId === rec.id && !b.syncOff;
+    });
+    if (!bills.length) return false;
+    const single = bills.length === 1;
+    let touched = false;
+    _biSyncing = true; // 回写期间置位：嵌套触发的对向同步只走一层
+    try {
+      bills.forEach(function (b) {
+        if (nmChg && b.note !== name) { b.note = name; touched = true; }
+        if (single && priceChg && _writeBillAmount(b, price)) touched = true;
+        if (dateChg && b.date !== date) { b.date = date; touched = true; }
+      });
+    } finally { _biSyncing = false; }
+    return touched;
+  }
+
   /* ---------- 账户余额记录（快照）：记录某个时间点各账户的余额，与流水倒推曲线互补 ---------- */
   function saveBalanceRecord(rec) {
     if (!rec.id) rec.id = U.uid();
@@ -1158,6 +1430,7 @@ window.Storage = (function () {
 
   function resetAll() {
     db.items = []; db.outfits = []; db.food = []; db.events = [];
+    db.habits = { defs: [], log: {} }; // 热力打卡一并清空（与"清空当前账号数据"语义一致）
     db.settings = M.defaultSettings();
     // 钱袋一并清空（账单/账户/余额记录/导入批次），与"清空当前账号数据"语义一致
     db.wallet = {
@@ -1181,6 +1454,13 @@ window.Storage = (function () {
     saveOutfit: saveOutfit, removeOutfit: removeOutfit,
     saveFood: saveFood, removeFood: removeFood,
     saveEvent: saveEvent, removeEvent: removeEvent,
+    /* 热力打卡（habits 域） */
+    habits: habits, saveHabitDef: saveHabitDef, removeHabitDef: removeHabitDef,
+    toggleHabit: toggleHabit, setHabitCount: setHabitCount, habitCountOf: habitCountOf,
+    habitColorScale: habitColorScale,
+    saveHabits: saveHabits, HABIT_COLORS: HABIT_COLORS,
+    habitYearCount: habitYearCount, habitCurrentStreak: habitCurrentStreak,
+    habitLongestStreak: habitLongestStreak,
     /* 钱袋 */
     wallet: wallet, saveBill: saveBill, saveBills: saveBills, removeBill: removeBill,
     saveWalletAccount: saveWalletAccount, removeWalletAccount: removeWalletAccount,

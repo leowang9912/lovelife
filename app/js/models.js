@@ -133,18 +133,37 @@ window.Models = (function () {
   }
 
   /* ---------- 成本 ---------- */
+  /* ownInvested 自身投入 = 购入价 + 维修流水（type='repair'）。
+     负购入价按 0 处理：负投入会把日均/次均打成负数（脏数据兜底）。 */
   function ownInvested(db, item) {
-    let sum = Number(item.purchasePrice) || 0;
+    let sum = Math.max(0, Number(item.purchasePrice) || 0);
     db.events.forEach(function (e) {
       if (e.itemId === item.id && e.type === 'repair') sum += Number(e.cost) || 0;
     });
     return sum;
   }
 
+  /* 维修流水逐条（成本审计用） */
+  function repairEventsOf(db, item) {
+    return db.events.filter(function (e) {
+      return e.itemId === item.id && e.type === 'repair';
+    }).map(function (e) {
+      return { id: e.id, date: e.date || '', cost: Number(e.cost) || 0, note: e.note || '' };
+    });
+  }
+
+  /* 挂靠配件（parentItemId 指向本机的子物品）：只挂一层，孙配件不再递归 */
+  function accessoryItemsOf(db, item) {
+    return db.items.filter(function (i) {
+      return i && i.parentItemId === item.id;
+    });
+  }
+
+  /* totalInvested 总投入（TCO）= 自身投入 + 挂靠配件各自投入（配件挂靠 TCO，设计口径） */
   function totalInvested(db, item) {
     let sum = ownInvested(db, item);
-    db.items.forEach(function (i) {
-      if (i.parentItemId === item.id) sum += ownInvested(db, i);
+    accessoryItemsOf(db, item).forEach(function (i) {
+      sum += ownInvested(db, i);
     });
     return sum;
   }
@@ -156,20 +175,41 @@ window.Models = (function () {
     return U.parseDate(item.soldDate) || U.parseDate(item.retiredAt) || (now || new Date());
   }
 
+  /* 数值归一：null/undefined/''/NaN → null（空=未填），其余转 Number */
+  function numOrNull(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return isNaN(n) ? null : n;
+  }
+
   function calcItemCost(db, item, now) {
     now = now || new Date();
     const cat = findCategory(db, item) || {};
     const pDate = U.parseDate(item.purchaseDate) || now;
     const soldDate = U.parseDate(item.soldDate);
+    const retiredAt = U.parseDate(item.retiredAt);
     const endDate = useEndDate(item, now);
     const heldDays = Math.max(1, U.daysBetween(pDate, endDate));
-    const invested = totalInvested(db, item);
 
-    const lifeYears = Number(item.estimatedLifeYears) || Number(cat.lifeYears) || 5;
-    const residualRate = item.residualRate !== null && item.residualRate !== undefined
-      ? Number(item.residualRate) : (Number(cat.residualRate) || 0.1);
+    // 总投入构成（可审计）：购入价 + 维修流水 + 配件挂靠（与 totalInvested 同口径，拆开算便于出 breakdown）
+    const base = Math.max(0, Number(item.purchasePrice) || 0);
+    const repairs = repairEventsOf(db, item);
+    const repairCost = repairs.reduce(function (a, b) { return a + b.cost; }, 0);
+    const accessories = accessoryItemsOf(db, item).map(function (i) {
+      return { id: i.id, name: i.name || '', amount: ownInvested(db, i) };
+    });
+    const accessoriesTotal = accessories.reduce(function (a, b) { return a + b.amount; }, 0);
+    const invested = base + repairCost + accessoriesTotal;
+
+    // 寿命：item 优先（空/0/负数=未填，落到分类），分类空/0/负数落到默认 5 年
+    const lyItem = numOrNull(item.estimatedLifeYears);
+    const lyCat = numOrNull(cat.lifeYears);
+    const lifeYears = (lyItem !== null && lyItem > 0) ? lyItem : ((lyCat !== null && lyCat > 0) ? lyCat : 5);
+    // 残值率：item 优先（空=未填），再分类（显式 0 是合法值，不得被 0.1 默认吞掉），再默认 0.1
+    let residualRate = numOrNull(item.residualRate);
+    if (residualRate === null) residualRate = numOrNull(cat.residualRate);
+    if (residualRate === null) residualRate = 0.1;
     const usedRatio = Math.min(1, heldDays / (lifeYears * 365));
-    const base = Number(item.purchasePrice) || 0;
     const value = base * (residualRate + (1 - residualRate) * (1 - usedRatio));
     const dailyCost = invested / heldDays;
 
@@ -178,10 +218,23 @@ window.Models = (function () {
     const wearCount = totalWearCount(db, item);
     const playHours = Number(item.playHours) || 0;
 
-    let costPerUse = null;
-    if (item.kind === 'clothing' && wearCount > 0) costPerUse = invested / wearCount;
-    else if (item.kind === 'life' && useCount > 0) costPerUse = invested / useCount;
-    else if (useCount > 0) costPerUse = invested / useCount;
+    // 次均成本分母（不重复计）：
+    // - clothing：穿着次数 = 穿搭自动(autoWearMap) + 手动(manualWearCount)；usageLog 是台账与 manualWearCount 同步，不叠加
+    // - life/数码/游戏：useCount（与 usageLog 同步的总数）；0 次 → null
+    // - clothing 分母只认穿着次数，历史脏数据里的 useCount 不得混入（v117 修正）
+    let costPerUse = null, perUse = null;
+    if (item.kind === 'clothing') {
+      if (wearCount > 0) {
+        costPerUse = invested / wearCount;
+        perUse = {
+          denominator: 'wear', count: wearCount,
+          auto: autoWearMap(db)[item.id] || 0, manual: Number(item.manualWearCount) || 0
+        };
+      }
+    } else if (useCount > 0) {
+      costPerUse = invested / useCount;
+      perUse = { denominator: 'use', count: useCount };
+    }
 
     const costPerHour = playHours > 0 ? invested / playHours : null;
     // 售出回血（甲4）：只要填了售出价就算净成本/回血率（售出日期缺失也不挡展示）；
@@ -196,7 +249,22 @@ window.Models = (function () {
       heldDays: heldDays, invested: invested, dailyCost: dailyCost,
       monthlyCost: dailyCost * 30, currentValue: value, usedRatio: usedRatio,
       lifeYears: lifeYears, costPerUse: costPerUse, costPerHour: costPerHour,
-      netCost: netCost, recoveryRate: recoveryRate
+      netCost: netCost, recoveryRate: recoveryRate,
+      /* breakdown：成本构成审计（v117）——总投入/天数/次均分母每一步可复核 */
+      breakdown: {
+        formula: '总投入 = 购入价 + 维修流水 + 配件挂靠',
+        invested: invested, purchase: base,
+        repairCost: repairCost, repairs: repairs,
+        accessories: accessories, accessoriesTotal: accessoriesTotal,
+        heldDays: {
+          purchaseDate: item.purchaseDate || '',
+          from: U.todayStr(pDate), to: U.todayStr(endDate),
+          source: soldDate ? 'soldDate' : (retiredAt ? 'retiredAt' : 'now'),
+          days: heldDays
+        },
+        perUse: perUse,
+        perHour: playHours > 0 ? { hours: playHours } : null
+      }
     };
   }
 
