@@ -18,6 +18,10 @@ if %errorlevel%==0 goto WAIT_LOOP
 rem ===== 3. start local server (auto retry up to 3x) =====
 set /a attempt=1
 :LAUNCH
+rem redirect runtime extraction to install dir (avoids AV scanning system Temp)
+if not exist "%~dp0runtime" mkdir "%~dp0runtime"
+set "TMP=%~dp0runtime"
+set "TEMP=%~dp0runtime"
 start "" "%~dp0lovelife-server.exe"
 
 rem ===== 4. wait until port ready; retry if process died =====
@@ -34,9 +38,9 @@ goto WAIT_LOOP
 tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1
 if %errorlevel%==0 goto WAIT_LOOP
 set /a attempt+=1
-if %attempt% GTR 3 goto ERR_START_FAIL
+if %attempt% GTR 6 goto ERR_START_FAIL
 echo [INFO] Service exited unexpectedly, retrying to start ...
-ping -n 3 127.0.0.1 >nul
+ping -n %attempt% 127.0.0.1 >nul
 goto LAUNCH
 
 rem ===== 5. open browser =====

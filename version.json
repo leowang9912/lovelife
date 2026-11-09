@@ -1,13 +1,15 @@
 {
-  "version": "1.1.4",
+  "version": "1.1.5",
   "minSchema": 3,
-  "publishedAt": "2026-11-06",
+  "publishedAt": "2026-11-09",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "修复穿搭打卡点分类筛选导致软件\"重启\"（表单按钮误提交整页刷新）",
-    "穿搭日历照片窗口固定 9:16 竖长条，旧照片完整显示；打卡照片按 9:16 裁切上传",
-    "窗口最小尺寸限制（小于 1024x700 自动拉回，布局不畸形）",
-    "窗口大小记忆：关闭时保存，下次启动按上次大小打开"
+    "新增热力打卡（习惯追踪：计数型梯度色/补打/整年视图）与倒计时（支持生日纪念日每年循环）",
+    "成本计算审计修复：总投入构成明细可见、修复 3 处口径错误、表单语义更正",
+    "词条与账单双向同步（名称/金额/日期实时跟随）",
+    "穿搭照片统一 3:4；选衣按种类排序；统计周期每模块独立控制；热力按月分段",
+    "美妆保质期精简（年数自动推算）+ 发饰分类",
+    "更新自动重启强化（解压目录兜底+6 次重试），根治 python DLL 报错"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -15,6 +17,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.4/lovelife-v1.1.4-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.5/lovelife-v1.1.5-win64.zip"
   }
 }
