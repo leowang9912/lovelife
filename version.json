@@ -1,15 +1,15 @@
 {
-  "version": "1.1.5",
+  "version": "1.1.6",
   "minSchema": 3,
-  "publishedAt": "2026-11-09",
+  "publishedAt": "2026-11-10",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "新增热力打卡（习惯追踪：计数型梯度色/补打/整年视图）与倒计时（支持生日纪念日每年循环）",
-    "成本计算审计修复：总投入构成明细可见、修复 3 处口径错误、表单语义更正",
-    "词条与账单双向同步（名称/金额/日期实时跟随）",
-    "穿搭照片统一 3:4；选衣按种类排序；统计周期每模块独立控制；热力按月分段",
-    "美妆保质期精简（年数自动推算）+ 发饰分类",
-    "更新自动重启强化（解压目录兜底+6 次重试），根治 python DLL 报错"
+    "热力打卡大改版：卡片式月视图、今日打卡卡片变绿、周/月视图、统计年视图两种排布",
+    "全新日期选择控件：自定义月历（年份直改/多格式直接输入），替换原生控件",
+    "美食打卡与钱袋同步（同时记一笔账/账单同步区/今日概览计入）",
+    "模拟使用深度修复 25 项（打卡不亮色/词条分裂/抠图变形等）",
+    "统计 UI 升级（KPI 环比语境/小结卡片化/图表标注）+ 分段切换统一",
+    "关窗 10 分钟自动退出（不再残留进程）+ 更新链路加固（DLL 弹窗显著减少）"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -17,6 +17,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.5/lovelife-v1.1.5-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.6/lovelife-v1.1.6-win64.zip"
   }
 }

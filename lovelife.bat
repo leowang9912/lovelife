@@ -20,6 +20,7 @@ set /a attempt=1
 :LAUNCH
 rem redirect runtime extraction to install dir (avoids AV scanning system Temp)
 if not exist "%~dp0runtime" mkdir "%~dp0runtime"
+for /d %%d in ("%~dp0runtime\_MEI*") do rd /s /q "%%d" >nul 2>&1
 set "TMP=%~dp0runtime"
 set "TEMP=%~dp0runtime"
 start "" "%~dp0lovelife-server.exe"
