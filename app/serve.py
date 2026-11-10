@@ -27,6 +27,30 @@ import urllib.request
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+# ===== 关窗空闲自动退出（v1.1.6）：消除任务管理器残留进程 =====
+# 前端窗口关闭时发 /api/goodbye 信标 → 此后 10 分钟无任何请求自动退出；
+# 期间有新请求（如用户重新双击 bat 秒开窗）则取消退出。挂机但窗口开着不发信标，不受影响。
+# 数据即写即落盘，退出安全。
+_LAST_ACTIVITY = [0.0]
+_CLIENT_GONE = [False]
+_IDLE_EXIT_SEC = 600
+
+
+def _touch_activity(client_still_here=True):
+    _LAST_ACTIVITY[0] = time.time()
+    if client_still_here:
+        _CLIENT_GONE[0] = False
+
+
+def _idle_watchdog():
+    while True:
+        time.sleep(30)
+        try:
+            if _CLIENT_GONE[0] and _LAST_ACTIVITY[0] and (time.time() - _LAST_ACTIVITY[0]) > _IDLE_EXIT_SEC:
+                os._exit(0)
+        except Exception:
+            pass
+
 if getattr(sys, "frozen", False):
     ROOT = os.path.dirname(os.path.abspath(sys.executable))
 else:
@@ -51,7 +75,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.1.5"
+SERVER_BUILD = "1.1.6"
 
 _lock = threading.Lock()
 
@@ -1363,6 +1387,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         # 与 do_POST 对齐：任何异常回 JSON 500，不让连接裸断（前端只能看到 network error）
+        _touch_activity()  # 任何请求=客户端还在，取消关窗退出倒计时
         try:
             self._do_GET_impl()
         except Exception as e:
@@ -1374,6 +1399,11 @@ class Handler(BaseHTTPRequestHandler):
     def _do_GET_impl(self):
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
+        if path == "/api/goodbye":
+            # 关窗信标（v1.1.6）：前端窗口关闭时 sendBeacon；此后 10 分钟无请求自动退出
+            _LAST_ACTIVITY[0] = time.time()
+            _CLIENT_GONE[0] = True
+            return self._json({"ok": True})
         if path == "/api/ping":
             return self._json({"ok": True, "schemaVersion": SCHEMA_VERSION, "root": ROOT})
         if path == "/api/session":
@@ -1446,6 +1476,7 @@ class Handler(BaseHTTPRequestHandler):
         return self._send_static(path)
 
     def do_POST(self):
+        _touch_activity()  # 任何请求=客户端还在
         parsed = urllib.parse.urlparse(self.path)
         path = parsed.path
         try:
@@ -2232,6 +2263,70 @@ def _verify_zip(data):
         return False
 
 
+def _updater_cmd_lines():
+    """updater.cmd 内容（纯函数，便于测试断言）：替换文件 → 递增等待重启 6 次 → 失败留日志。
+
+    自动重启（v1.1.5 强化）：
+    - TMP/TEMP 兜底到安装目录 runtime（即使 exe 参数失效，解压也不进系统 Temp，
+      避开杀软扫描窗口导致的 python3xx.dll 加载失败）
+    - 重试 6 次、等待逐次递增（5/7/9/11/13/15 秒），跨过杀软静默扫描期
+    - 6 次都起不来：写 update-restart.log 留痕（不再无声失败）"""
+    return [
+        "@echo off",
+        "setlocal",
+        'cd /d "%~dp0"',
+        "ping -n 4 127.0.0.1 >nul",
+        'taskkill /f /im lovelife-server.exe >nul 2>&1',
+        # 等进程真正消失（v1.1.6）：残留进程占着 exe/解压目录会导致 copy 失败、
+        # 旧 exe 被启动、DLL 加载冲突——这正是更新报错与弹窗的帮凶
+        'set /a wt=0',
+        ':WAITDEAD',
+        'set /a wt+=1',
+        'tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1',
+        'if %errorlevel% GTR 0 goto DEAD',
+        'if %wt% GEQ 10 goto DEAD',
+        'ping -n 2 127.0.0.1 >nul',
+        'goto WAITDEAD',
+        ':DEAD',
+        r'if exist "update-staging\app" robocopy "update-staging\app" "app" /E /PURGE >nul',
+        # exe 替换重试 3 次（v1.1.6）：旧进程未死透时文件被占用，copy 失败会导致启动的还是旧 exe
+        'set /a cpy=0',
+        ':COPYEXE',
+        'set /a cpy+=1',
+        r'copy /y "update-staging\lovelife-server.exe" "lovelife-server.exe" >nul 2>&1',
+        'if not errorlevel 1 goto COPY_OK',
+        'if %cpy% LSS 3 (ping -n 3 127.0.0.1 >nul & goto COPYEXE)',
+        'echo copy exe failed (old exe may be reused)>>"%~dp0update-restart.log"',
+        ':COPY_OK',
+        r'if exist "update-staging\lovelife.bat" copy /y "update-staging\lovelife.bat" "lovelife.bat" >nul',
+        r'if exist "update-staging\version.json" copy /y "update-staging\version.json" "version.json" >nul',
+        r'if exist "update-staging\README.md" copy /y "update-staging\README.md" "README.md" >nul',
+        r'if exist "update-staging\CHANGELOG.md" copy /y "update-staging\CHANGELOG.md" "CHANGELOG.md" >nul',
+        r'if exist "update-staging\LICENSE" copy /y "update-staging\LICENSE" "LICENSE" >nul',
+        r'for %%f in ("update-staging\*.txt") do copy /y "%%f" "%%~nxf" >nul',
+        'rmdir /s /q "update-staging" >nul 2>&1',
+        'if not exist "runtime" mkdir "runtime"',
+        # 清残留解压目录（v1.1.6）：强退残留会被杀软锁住，导致新解压创建失败、
+        # bootloader 回退系统 %TEMP%（python DLL 弹窗的温床）
+        r'for /d %%d in ("%~dp0runtime\_MEI*") do rd /s /q "%%d" >nul 2>&1',
+        'set "TMP=%~dp0runtime"',
+        'set "TEMP=%~dp0runtime"',
+        'set /a rst=0',
+        ':RESTART',
+        'set /a rst+=1',
+        'start "" "%~dp0lovelife-server.exe"',
+        'set /a wt=3+rst*2',
+        'ping -n %wt% 127.0.0.1 >nul',
+        'netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1',
+        'if %errorlevel%==0 goto RESTART_OK',
+        'if %rst% LSS 6 goto RESTART',
+        'echo update restart failed after 6 tries>>"%~dp0update-restart.log"',
+        ':RESTART_OK',
+        'ping -n 3 127.0.0.1 >nul',
+        'del /q "%~f0"',
+    ]
+
+
 def _stage_and_install(data):
     """解压到 update-staging，校验通过后交给 updater.cmd 做替换（现网文件不动到最后一刻）"""
     staging = os.path.join(ROOT, "update-staging")
@@ -2257,40 +2352,7 @@ def _stage_and_install(data):
             UPDATE_STATE.update(state="failed", phase="", error=str(e))
         return False
 
-    bat_lines = [
-        "@echo off",
-        "setlocal",
-        'cd /d "%~dp0"',
-        "ping -n 4 127.0.0.1 >nul",
-        'taskkill /f /im lovelife-server.exe >nul 2>&1',
-        r'if exist "update-staging\app" robocopy "update-staging\app" "app" /E /PURGE >nul',
-        r'if exist "update-staging\lovelife-server.exe" copy /y "update-staging\lovelife-server.exe" "lovelife-server.exe" >nul',
-        r'if exist "update-staging\lovelife.bat" copy /y "update-staging\lovelife.bat" "lovelife.bat" >nul',
-        r'if exist "update-staging\version.json" copy /y "update-staging\version.json" "version.json" >nul',
-        r'if exist "update-staging\README.md" copy /y "update-staging\README.md" "README.md" >nul',
-        r'if exist "update-staging\CHANGELOG.md" copy /y "update-staging\CHANGELOG.md" "CHANGELOG.md" >nul',
-        r'if exist "update-staging\LICENSE" copy /y "update-staging\LICENSE" "LICENSE" >nul',
-        r'for %%f in ("update-staging\*.txt") do copy /y "%%f" "%%~nxf" >nul',
-        'rmdir /s /q "update-staging" >nul 2>&1',
-        # 自动重启（v1.1.5 强化）：TMP/TEMP 指向安装目录 runtime（即使 exe 参数失效，
-        # 解压也不进系统 Temp，避开杀软扫描窗口导致的 python3xx.dll 加载失败）；
-        # 重试 6 次递增等待，跨过杀软静默扫描期
-        'if not exist "runtime" mkdir "runtime"',
-        'set "TMP=%~dp0runtime"',
-        'set "TEMP=%~dp0runtime"',
-        'set /a rst=0',
-        ':RESTART',
-        'set /a rst+=1',
-        'start "" "%~dp0lovelife-server.exe"',
-        'ping -n 7 127.0.0.1 >nul',
-        'netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1',
-        'if %errorlevel%==0 goto RESTART_OK',
-        'if %rst% LSS 6 goto RESTART',
-        'echo update restart failed after 6 tries>>"%~dp0update-restart.log"',
-        ':RESTART_OK',
-        'ping -n 3 127.0.0.1 >nul',
-        'del /q "%~f0"',
-    ]
+    bat_lines = _updater_cmd_lines()
     # 更新完成标记：装完重启后 /api/update/status 仍能报告 done，前端据此自动刷新（v1.0.7）
     new_ver = ""
     try:
@@ -2342,6 +2404,7 @@ def main():
         return
     _cleanup_runtime_dirs()
     data_root()
+    threading.Thread(target=_idle_watchdog, daemon=True).start()
     ThreadingHTTPServer(("127.0.0.1", PORT), Handler).serve_forever()
 
 
