@@ -1,5 +1,5 @@
 {
-  "version": "1.1.7",
+  "version": "1.1.8",
   "minSchema": 3,
   "publishedAt": "2026-11-10",
   "repo": "leowang9912/lovelife",
@@ -17,6 +17,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.7/lovelife-v1.1.7-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.1.8/lovelife-v1.1.8-win64.zip"
   }
 }
