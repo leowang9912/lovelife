@@ -1,15 +1,16 @@
 {
-  "version": "1.2.0",
+  "version": "1.2.1",
   "minSchema": 3,
-  "publishedAt": "2026-11-10",
+  "publishedAt": "2026-11-12",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "热力打卡大改版：卡片式月视图、今日打卡卡片变绿、周/月视图、统计年视图两种排布",
-    "全新日期选择控件：自定义月历（年份直改/多格式直接输入），替换原生控件",
-    "美食打卡与钱袋同步（同时记一笔账/账单同步区/今日概览计入）",
-    "模拟使用深度修复 25 项（打卡不亮色/词条分裂/抠图变形等）",
-    "统计 UI 升级（KPI 环比语境/小结卡片化/图表标注）+ 分段切换统一",
-    "关窗 10 分钟自动退出（不再残留进程）+ 更新链路加固（DLL 弹窗显著减少）"
+    "时间日历（新模块）：周视图时间轴，时间段+时间点+待办同屏聚合",
+    "两套自定义类型（颜色盘/图标点选），类型必选，可固定关联习惯打卡",
+    "待办截止时刻自动落时间轴，点击勾完成双向同步；计时器/拖拽/hover 预览",
+    "我的统计新分类「时间统计」：类型时长排行+每日记录时长",
+    "侧栏导航可排序/屏蔽（实时生效），拖窄吸成纯图标模式",
+    "分类聚类：分类统计自由归组合并看大类（仅该模块生效）",
+    "主页今日概览挪至倒计时下方；统计口径类说明小字清理"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -17,6 +18,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.0/lovelife-v1.2.0-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.1/lovelife-v1.2.1-win64.zip"
   }
 }
