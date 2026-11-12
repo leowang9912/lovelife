@@ -15,24 +15,35 @@ rem process check: exe already starting (double click) -> just wait, do not laun
 tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1
 if %errorlevel%==0 goto WAIT_LOOP
 
-rem ===== 3. start local server (auto retry up to 3x) =====
+rem ===== 3. start local server (auto restart up to 3x) =====
 set /a attempt=1
 :LAUNCH
+rem redirect runtime extraction to install dir (avoids AV scanning system Temp)
+if not exist "%~dp0runtime" mkdir "%~dp0runtime"
+for /d %%d in ("%~dp0runtime\_MEI*") do rd /s /q "%%d" >nul 2>&1
+set "TMP=%~dp0runtime"
+set "TEMP=%~dp0runtime"
 start "" "%~dp0lovelife-server.exe"
 
-rem ===== 4. wait until port ready; retry if process died =====
+rem ===== 4. wait until port ready; retry if process died or startup stuck =====
 set /a tries=0
 :WAIT_LOOP
 netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1
 if %errorlevel%==0 goto OPEN_BROWSER
 set /a tries+=1
-if %tries% GEQ 24 goto ERR_START_FAIL
-if %tries% GEQ 3 goto CHECK_ALIVE
+if %tries% GEQ 20 goto ERR_START_FAIL
 ping -n 2 127.0.0.1 >nul
-goto WAIT_LOOP
+if %tries% LSS 3 goto WAIT_LOOP
 :CHECK_ALIVE
 tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1
-if %errorlevel%==0 goto WAIT_LOOP
+if %errorlevel% GTR 0 goto RETRY
+rem alive but no port yet: keep waiting (each loop waits 1s above, no busy spin)
+if %tries% LSS 12 goto WAIT_LOOP
+rem alive >12s without port: startup stuck (usually a hidden error dialog) -> kill zombie and retry
+echo [INFO] Startup seems stuck, killing zombie process and retrying ...
+taskkill /f /im lovelife-server.exe >nul 2>&1
+ping -n 2 127.0.0.1 >nul
+:RETRY
 set /a attempt+=1
 if %attempt% GTR 3 goto ERR_START_FAIL
 echo [INFO] Service exited unexpectedly, retrying to start ...
@@ -52,7 +63,11 @@ echo [INFO] Edge and Chrome not found, open with system default browser.
 start "" "http://127.0.0.1:8765/index.html"
 exit /b 0
 :RUN_BROWSER
-start "" "%BROWSER%" --app="http://127.0.0.1:8765/index.html" --window-size=1480,940
+rem window-size.txt = last window size saved by the app (format WxH); default 1480x940
+set "WW=1480"
+set "WH=940"
+if exist "%~dp0window-size.txt" for /f "usebackq tokens=1,2 delims=x" %%a in ("%~dp0window-size.txt") do (set "WW=%%a" & set "WH=%%b")
+start "" "%BROWSER%" --app="http://127.0.0.1:8765/index.html" --window-size=%WW%,%WH%
 exit /b 0
 
 :ALREADY_RUNNING
@@ -90,8 +105,9 @@ pause
 exit /b 1
 
 :ERR_START_FAIL
+taskkill /f /im lovelife-server.exe >nul 2>&1
 echo.
-echo [ERROR] Service failed to start, port 8765 not ready in 20s.
+echo [ERROR] Service failed to start, port 8765 not ready in time.
 echo.
 echo 常见原因与解决办法：
 echo   1. 杀毒软件拦截了 lovelife-server.exe：

@@ -1,80 +1,52 @@
-/* settings-cost.test.js — 验证设置页成本模型可见（新分类树） */
-const fs = require('fs');
-const path = require('path');
-const { JSDOM } = require('jsdom');
-const APP = path.join(__dirname, '..', 'app');
+/* settings-cost.test.js — 验证设置页成本模型可见（新分类树）
+   （已迁移到 tests/helpers/harness.js） */
+'use strict';
+const { makeWindow, waitFor, waitMain } = require('./helpers/harness');
 
-const dom = new JSDOM(fs.readFileSync(path.join(APP, 'index.html'), 'utf8'), {
-  url: 'http://127.0.0.1:8765/', runScripts: 'outside-only', pretendToBeVisual: true
-});
-const { window } = dom;
+let curN = 0, curName = '';
+function begin(n, name) { curN = n; curName = name; }
 
-window.fetch = async (url) => {
-  const u = String(url);
-  const ok = (body) => ({ ok: true, status: 200, json: async () => body, blob: async () => new Blob([1]), arrayBuffer: async () => new ArrayBuffer(4) });
-  if (u.includes('/api/session')) return ok({ ok: true, accounts: [{ id: 'me', name: 'Me', icon: 'x' }], lastAccountId: 'me', dataRoot: 'mem', schemaVersion: 3 });
-  if (u.includes('/api/ping')) return ok({ ok: true });
-  if (u.includes('/api/db')) return ok({
-    schemaVersion: 3,
-    account: { id: 'me', name: 'Me', icon: 'x' },
-    accounts: [{ id: 'me', name: 'Me', icon: 'x' }],
-    items: [], outfits: [], food: [], events: [],
-    settings: {
-      idleWarnDays: 60, budget: { monthlyTotal: 0, categories: {} },
-      planSections: [], rememberAccount: true
-    },
-    categories: {
-      digital: [
-        { id: 'host', name: 'Host', lifeYears: 5, residualRate: 0.1, children: [{ id: 'host_phone', name: 'Phone' }] },
-        { id: 'game', name: 'Game', children: [{ id: 'gm_cartridge', name: 'Cart' }] }
-      ],
-      clothing: [{ id: 'top', name: 'Top', children: [] }],
-      life: [{ id: 'skin', name: 'Skin', children: [] }],
-      foodCuisine: [], foodType: [], meal: [], foodTag: [], occasion: [], season: [],
-      tagPresets: [], condition: [], remainLevel: [], sizeSystem: [], skinType: [], usageFreq: [], washMethod: []
-    },
-    dataRoot: 'mem'
+async function main() {
+  const w = makeWindow({
+    data: {
+      settings: {
+        idleWarnDays: 60, budget: { monthlyTotal: 0, categories: {} },
+        planSections: [], rememberAccount: true
+      },
+      categories: {
+        digital: [
+          { id: 'host', name: 'Host', lifeYears: 5, residualRate: 0.1, children: [{ id: 'host_phone', name: 'Phone' }] },
+          { id: 'game', name: 'Game', children: [{ id: 'gm_cartridge', name: 'Cart' }] }
+        ],
+        clothing: [{ id: 'top', name: 'Top', children: [] }],
+        life: [{ id: 'skin', name: 'Skin', children: [] }],
+        foodCuisine: [], foodType: [], meal: [], foodTag: [], occasion: [], season: [],
+        tagPresets: [], condition: [], remainLevel: [], sizeSystem: [], skinType: [], usageFreq: [], washMethod: []
+      }
+    }
   });
-  return ok({ ok: true });
-};
-window.HTMLCanvasElement.prototype.getContext = () => ({ drawImage() {} });
-window.URL.createObjectURL = () => 'blob:x';
 
-for (const f of ['utils.js', 'models.js', 'storage.js', 'charts.js', 'cutout.js', 'ui.js',
-  'views-plan.js', 'views-main.js', 'views-life.js', 'views-food.js', 'views-settings.js', 'updater.js', 'app.js']) {
-  window.eval(fs.readFileSync(path.join(APP, 'js', f), 'utf8'));
-}
-window.document.dispatchEvent(new window.Event('DOMContentLoaded'));
+  begin(1, '成本模型可见（新分类树）');
+  if (!(await waitMain(w))) throw new Error('no main-content. app=' + w.document.getElementById('app').innerHTML.slice(0, 200));
+  const mc = w.document.getElementById('main-content');
+  if (!mc) throw new Error('no main-content. app=' + w.document.getElementById('app').innerHTML.slice(0, 200));
 
-setTimeout(async () => {
-  try {
-    let acc = window.document.querySelector('[data-acc]');
-    if (acc) { acc.click(); await new Promise(r => setTimeout(r, 250)); }
-    if (!window.document.getElementById('main-content')) {
-      acc = window.document.querySelector('[data-acc]');
-      if (acc) { acc.click(); await new Promise(r => setTimeout(r, 250)); }
-    }
-    const mc = window.document.getElementById('main-content');
-    if (!mc) {
-      console.error('FAIL: no main-content. app=', window.document.getElementById('app').innerHTML.slice(0, 200));
-      process.exit(1);
-    }
-    window.App.go('settings');
-    await new Promise(r => setTimeout(r, 300));
-    const html = window.document.getElementById('main-content').innerHTML;
-    const rows = window.document.querySelectorAll('.cat-table tbody tr[data-cid]').length;
-    const inputs = window.document.querySelectorAll('.cat-table input[data-f]').length;
-    const hasHost = html.indexOf('Host') >= 0;
-    const hasScroll = html.indexOf('table-scroll') >= 0;
-    console.log('cost rows:', rows, '| inputs:', inputs, '| has Host:', hasHost, '| has table-scroll:', hasScroll);
-    if (rows < 3 || inputs < 6 || !hasHost || !hasScroll) {
-      console.error('FAIL: cost model not visible');
-      process.exit(1);
-    }
-    console.log('PASS: cost model visible');
-    process.exit(0);
-  } catch (e) {
-    console.error('FAIL:', e.message);
-    process.exit(1);
+  w.App.go('settings');
+  await waitFor(function () {
+    return w.document.querySelectorAll('.cat-table tbody tr[data-cid]').length > 0;
+  }, { label: 'cost model not visible' });
+  const html = w.document.getElementById('main-content').innerHTML;
+  const rows = w.document.querySelectorAll('.cat-table tbody tr[data-cid]').length;
+  const inputs = w.document.querySelectorAll('.cat-table input[data-f]').length;
+  const hasHost = html.indexOf('Host') >= 0;
+  const hasScroll = html.indexOf('table-scroll') >= 0;
+  if (rows < 3 || inputs < 6 || !hasHost || !hasScroll) {
+    throw new Error('cost model not visible');
   }
-}, 1500);
+  console.log('PASS 1. 成本模型可见（新分类树）');
+
+  console.log('========== settings-cost：1 项全部通过 ==========');
+  process.exit(0);
+}
+
+main().catch(e => { console.error('FAIL ' + curN + '. ' + curName + ': ' + e.message); process.exit(1); });

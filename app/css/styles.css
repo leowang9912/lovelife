@@ -14,13 +14,54 @@
   --orange: #ff9500;
   --pink: #ff2d55;
   --purple: #af52de;
-  --radius: 12px;
-  --radius-lg: 16px;
   --shadow: 0 1px 2px rgba(0, 0, 0, .04), 0 4px 16px rgba(0, 0, 0, .05);
   --shadow-lg: 0 8px 30px rgba(0, 0, 0, .12);
-  --sidebar-w: 232px;
+  --sidebar-w: 200px; /* 默认收窄（原 232px，v1.1.x 四次精修后定稿 200px，与 JS 复位值一致） */
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
     "PingFang SC", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+
+  /* ===== 质感令牌层（提炼自成熟设计系统的质感配方，中文行高微调） =====
+     字阶成套（字重/字号/行高/字体族四元组，用法：font: var(--f-body)）
+     注意：必须带 var(--font)，否则 font 简写会把字体族重置为浏览器默认 */
+  --f-title-1: 700 24px/34px var(--font);      /* 页面主标题 */
+  --f-title-2: 600 20px/28px var(--font);      /* 大卡片标题 */
+  --f-title-3: 600 18px/26px var(--font);      /* 面板标题 */
+  --f-headline: 600 16px/24px var(--font);     /* 小节标题 */
+  --f-body: 400 14px/21px var(--font);         /* 主正文 */
+  --f-body-m: 500 14px/21px var(--font);       /* 主正文·强调 */
+  --f-body-2: 400 13px/19px var(--font);       /* 次级正文 */
+  --f-body-2-m: 500 13px/19px var(--font);     /* 次级正文·强调 */
+  --f-cap: 400 12px/17px var(--font);          /* 说明文字 */
+  --f-cap-m: 500 12px/17px var(--font);        /* 说明文字·强调 */
+  --f-cap-2: 500 11px/15px var(--font);        /* 微标签（tracking 略放） */
+  --f-num-l: 700 21px/28px var(--font);        /* 数值字阶·L：统计 KPI 数字卡（tabular-nums） */
+  --f-num-m: 700 16px/22px var(--font);        /* 数值字阶·M：月度小结数字块（tabular-nums） */
+  /* 阴影阶梯（6%/10% 柔和配方：近影浅、远影散） */
+  --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, .06), 0 1px 3px 0 rgba(0, 0, 0, .10);
+  --shadow-md: 0 2px 4px -1px rgba(0, 0, 0, .06), 0 4px 6px -1px rgba(0, 0, 0, .10);
+  --shadow-xl: 0 10px 10px -5px rgba(0, 0, 0, .04), 0 20px 25px -5px rgba(0, 0, 0, .10);
+  --shadow-card: 0 1px 1px 0 rgba(0, 0, 0, .05);   /* 白卡贴地 1px contact 影 */
+  --shadow-pop: 0 1px 1px 0 rgba(0, 0, 0, .04), 0 4px 12px 0 rgba(0, 0, 0, .08), 0 0 1px 0 rgba(0, 0, 0, .30);
+  /* 圆角阶梯 */
+  --r-sm: 6px;   /* 小控件/标签 */
+  --r-md: 8px;   /* 输入框/按钮 */
+  --r-lg: 10px;  /* 大按钮/卡片行 */
+  --r-xl: 12px;  /* 卡片 */
+  --r-2xl: 16px; /* 弹窗/大面板 */
+  /* 边框灰阶递进（默认→悬停→按下）+ 焦点环 */
+  --line-hover: #b8b8bf;
+  --line-active: #aeaeb2;
+  --focus-ring: 0 0 0 3.5px rgba(0, 113, 227, .28);
+  /* 主按钮纵向渐变（默认→悬停提亮→按下加深→禁用灰化） */
+  --grad-btn: linear-gradient(180deg, #2383e2 0%, var(--accent) 100%);
+  --grad-btn-hover: linear-gradient(180deg, #3795ec 0%, #1673cf 100%);
+  --grad-btn-active: linear-gradient(180deg, #0062c4 0%, #0058b0 100%);
+  --grad-btn-danger: linear-gradient(180deg, #ff453a 0%, var(--red) 100%);
+  /* 动效（统一缓动与时长档位） */
+  --ease-out: cubic-bezier(.2, .8, .2, 1);
+  --t-fast: .12s;
+  --t-base: .18s;
+  --t-slow: .28s;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -35,18 +76,12 @@ body {
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.01em;
 }
-#app { display: flex; min-height: 100vh; }
+/* #app 壳层最终态已并入 extra.css「侧栏对齐（浮岛式导航）」分区（.app, #app） */
 
-/* ---------- 侧边栏（毛玻璃浅色） ---------- */
-.sidebar {
-  width: var(--sidebar-w);
-  background: rgba(246, 246, 248, 0.78);
-  backdrop-filter: saturate(180%) blur(28px);
-  -webkit-backdrop-filter: saturate(180%) blur(28px);
-  border-right: 0.5px solid var(--line);
-  display: flex; flex-direction: column; flex-shrink: 0;
-  position: sticky; top: 0; height: 100vh;
-}
+/* ---------- 侧边栏 ---------- */
+/* 视觉最终态（白卡浮岛版）以 extra.css「侧栏对齐（浮岛式导航）」分区为准；
+   此处仅保留会被下方 ≤860px 媒体查询接管的定位基底（position: relative 行为依赖此先后次序） */
+.sidebar { position: sticky; top: 0; }
 .brand { display: flex; gap: 11px; align-items: center; padding: 22px 18px 16px; }
 .brand-icon {
   width: 34px; height: 34px; border-radius: 9px;
@@ -58,13 +93,8 @@ body {
 .brand-name { font-weight: 650; font-size: 15.5px; color: var(--text); letter-spacing: -0.02em; }
 .brand-sub { font-size: 11px; color: var(--text-3); font-weight: 500; }
 .nav { flex: 1; padding: 6px 10px; display: flex; flex-direction: column; gap: 1px; }
-.nav-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 11px;
-  border-radius: 8px; color: var(--text); cursor: pointer; text-decoration: none;
-  transition: background .12s, color .12s; user-select: none; font-size: 13.5px; font-weight: 500;
-}
-.nav-item:hover { background: rgba(0, 0, 0, .05); }
-.nav-item.active { background: var(--accent); color: #fff; font-weight: 600; }
+/* .nav-item / .nav-item.active 最终态已并入 extra.css「侧栏对齐（浮岛式导航）」分区
+   （cursor/user-select 等存活属性已一并收入该分区） */
 .nav-icon { font-size: 16px; width: 22px; text-align: center; }
 .sidebar-foot {
   padding: 14px 18px; border-top: 0.5px solid var(--line-soft);
@@ -72,10 +102,7 @@ body {
 }
 
 /* ---------- 主区 ---------- */
-.main {
-  flex: 1; padding: 28px 32px 64px; min-width: 0;
-  max-width: 1720px; margin: 0 auto; width: 100%;
-}
+/* .main 最终态已并入 extra.css「侧栏对齐（浮岛式导航）」分区（含 width/max-width/margin） */
 .page-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 22px; flex-wrap: wrap; gap: 12px;
@@ -83,27 +110,11 @@ body {
 .page-head h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.03em; }
 .page-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 
-/* ---------- 按钮（苹果胶囊风） ---------- */
-.btn {
-  border: none; border-radius: 980px; padding: 8px 17px; cursor: pointer;
-  font-size: 13.5px; font-weight: 550; transition: .15s; font-family: inherit;
-  letter-spacing: -0.01em; white-space: nowrap;
-}
-.btn:active { transform: scale(.97); }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: #0077ed; }
-.btn-ghost {
-  background: #fff; color: var(--text);
-  box-shadow: inset 0 0 0 0.5px var(--line);
-}
-.btn-ghost:hover { background: #fafafa; }
-.btn-danger { background: var(--red); color: #fff; }
-.btn-danger:hover { background: #ff453a; }
-.btn-sm { padding: 6px 13px; font-size: 12.5px; }
-.btn-lg { padding: 12px 28px; font-size: 15px; }
+/* ---------- 按钮 ---------- */
+/* .btn / .btn-primary / .btn-ghost / .btn-danger / .btn-sm / .btn-lg 最终态
+   已统一收进 extra.css「质感校准 · 按钮最终态」分区（渐变/过渡/焦点/禁用一套定稿）；
+   此处仅保留未被覆盖的按钮族杂项 */
 .btn-block { width: 100%; }
-.btn:disabled { opacity: .45; cursor: not-allowed; }
-.btn:disabled:active { transform: none; }
 .btn-icon {
   background: none; border: none; cursor: pointer; color: var(--text-3);
   font-size: 15px; padding: 2px 7px; border-radius: 6px;
@@ -116,16 +127,13 @@ body {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
   gap: 14px; margin-bottom: 18px;
 }
-.kpi {
-  background: var(--panel); border-radius: var(--radius-lg); padding: 17px 19px;
-  box-shadow: var(--shadow);
-}
+/* .kpi 卡片与 .kpi-sub 已删：模板不再产出（仅 views-plan.js 死函数 kpi() 引用，无人调用）；
+   .kpi-label / .kpi-value 仍被 views-wallet.js 账户汇总使用，保留 */
 .kpi-label { font-size: 12px; color: var(--text-2); font-weight: 500; margin-bottom: 7px; }
 .kpi-value {
   font-size: 24px; font-weight: 700; letter-spacing: -0.035em;
   font-variant-numeric: tabular-nums;
 }
-.kpi-sub { font-size: 11.5px; color: var(--text-3); margin-top: 5px; }
 
 /* ---------- 面板 ---------- */
 .dash-grid {
@@ -133,16 +141,14 @@ body {
   gap: 15px; align-items: start;
 }
 .dash-grid > .panel { min-width: 0; }
-.panel {
-  background: var(--panel); border-radius: var(--radius-lg); box-shadow: var(--shadow);
-  overflow: visible;
-}
+/* 面板圆角/阴影最终态在 extra.css（--r-xl + 贴地 1px contact 影）；此处仅保留未被覆盖项 */
+.panel { overflow: visible; }
 .panel.span-2 { grid-column: span 2; }
 .panel-head {
   padding: 16px 20px 8px; display: flex; justify-content: space-between; align-items: center;
   gap: 10px; flex-wrap: wrap;
 }
-.panel-head h3 { font-size: 14px; font-weight: 650; letter-spacing: -0.015em; }
+/* 面板标题字阶已统一到 extra.css（.panel-head h3 → var(--f-title-3)） */
 .panel-body { padding: 6px 20px 18px; overflow-x: auto; min-width: 0; }
 .panel-body.center { text-align: center; }
 
@@ -157,23 +163,16 @@ body {
 .search-input:focus {
   background: #fff; box-shadow: 0 0 0 3.5px rgba(0, 113, 227, .18);
 }
-.filter-bar select, .form-grid select, .form-grid input {
-  padding: 8px 12px; border: 0.5px solid var(--line); border-radius: 9px;
-  font-size: 13.5px; outline: none; font-family: inherit; background: #fff; color: var(--text);
-}
-.filter-bar select:focus, .form-grid select:focus, .form-grid input:focus {
-  border-color: var(--accent); box-shadow: 0 0 0 3.5px rgba(0, 113, 227, .18);
-}
+/* 旧白底边框输入规则已删：统一吃 extra.css 的灰底内嵌环（:where 基础层） */
 .count-label { color: var(--text-3); font-size: 12.5px; }
 
 .item-grid {
   display: grid; grid-template-columns: repeat(auto-fill, minmax(186px, 1fr)); gap: 15px;
 }
+/* 圆角/阴影/过渡/hover 最终态在 extra.css（--r-xl + shadow-card + hover 微浮）；此处仅保留未被覆盖项 */
 .item-card {
-  background: var(--panel); border-radius: var(--radius-lg); overflow: hidden;
-  box-shadow: var(--shadow); cursor: pointer; transition: transform .18s, box-shadow .18s;
+  background: var(--panel); overflow: hidden; cursor: pointer;
 }
-.item-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lg); }
 .item-card:active { transform: scale(.98); }
 .item-thumb {
   position: relative; aspect-ratio: 1 / 1; background: #f2f2f4;
@@ -182,8 +181,9 @@ body {
 .item-thumb img { width: 100%; height: 100%; object-fit: cover; }
 .item-noimg { font-size: 42px; opacity: .35; }
 .item-badges { position: absolute; top: 8px; left: 8px; display: flex; gap: 5px; flex-wrap: wrap; }
+/* 字号/字重/圆角最终态在 extra.css（--f-cap-2 + 4px 小圆角）；此处仅保留未被覆盖项 */
 .badge {
-  font-size: 10px; padding: 3px 8px; border-radius: 980px; font-weight: 600;
+  padding: 3px 8px;
   background: rgba(255, 255, 255, .88); color: var(--text);
   backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
 }
@@ -221,22 +221,28 @@ body {
 .muted { color: var(--text-2); }
 .small { font-size: 11.5px; }
 .pad-8 { padding: 8px 0; }
+/* 字阶/内边距/圆角最终态在 extra.css（--f-cap-2 + 3px 8px + 6px）；此处仅保留未被覆盖项 */
 .tag {
-  display: inline-block; font-size: 11px; padding: 3px 10px; border-radius: 980px;
-  background: var(--accent-soft); color: var(--accent); font-weight: 600;
+  display: inline-block;
+  background: var(--accent-soft); color: var(--accent);
 }
 .tag-status { background: rgba(118, 118, 128, 0.12); color: var(--text-2); }
-.tag-warn { background: rgba(255, 149, 0, .15); color: #c93400; }
+/* .tag-warn 旧值已删（extra.css 状态色对段：浅底 + 深字版全量接管） */
 
 .rank-row { display: flex; align-items: center; gap: 12px; padding: 7px 0; }
+/* v1.1.8：名称固定宽度列——所有排行条同起点（旧弹性宽度让条形起点随名称长度漂移） */
 .rank-label {
-  width: 128px; font-size: 12.5px; white-space: nowrap; overflow: hidden;
-  text-overflow: ellipsis; font-weight: 500;
+  flex: 0 0 96px; width: 96px; min-width: 0; font-size: 12.5px; white-space: nowrap;
+  overflow: hidden; text-overflow: ellipsis; font-weight: 500;
 }
-.rank-bar-track { flex: 1; height: 8px; background: #f2f2f4; border-radius: 980px; overflow: hidden; }
+/* 过长名称：悬停自动滚动展示（UI.bindRankMarquee 测量溢出后驱动动画） */
+.rank-label-text { display: inline-block; }
+/* 窄面板（s 档）名称列收窄，保进度条可见宽度 */
+.plan-sec[data-size="s"] .rank-label { flex-basis: 72px; width: 72px; }
+.rank-bar-track { flex: 1 1 auto; min-width: 56px; height: 8px; background: #f2f2f4; border-radius: 980px; overflow: hidden; }
 .rank-bar-fill { height: 100%; border-radius: 980px; transition: width .45s cubic-bezier(.2, .8, .2, 1); }
 .rank-value {
-  width: 118px; font-size: 11.5px; color: var(--text-2); text-align: right;
+  flex: 0 1 auto; min-width: 96px; font-size: 11.5px; color: var(--text-2); text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
@@ -299,38 +305,22 @@ body {
   z-index: 1000; opacity: 0; transition: opacity .22s; overflow-y: auto;
 }
 .modal-mask.show { opacity: 1; }
-.modal {
-  background: #fff; border-radius: 14px; width: 100%; max-width: 560px;
-  max-height: 88vh; display: flex; flex-direction: column;
-  box-shadow: 0 24px 64px rgba(0, 0, 0, .22); transform: translateY(10px) scale(.98);
-  transition: transform .22s cubic-bezier(.2, .8, .2, 1);
-}
-.modal-body { overflow-y: auto; min-height: 0; }
-.modal-foot { flex-shrink: 0; }
-.modal-head { flex-shrink: 0; }
-.modal-mask.show .modal { transform: translateY(0) scale(1); }
-.modal-head {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 22px 10px;
-}
-.modal-head h3 { font-size: 16px; font-weight: 650; letter-spacing: -0.02em; }
+/* .modal / .modal-head / .modal-body / .modal-foot / .modal-head h3 最终态
+   已统一收进 extra.css「质感校准 · 弹窗最终态」分区（24px 圆角 + 缩放模糊进出场） */
 .modal-close {
   background: none; border: none; font-size: 22px; cursor: pointer; color: var(--text-3);
   line-height: 1; padding: 0 5px; border-radius: 50%;
 }
 .modal-close:hover { color: var(--text); background: rgba(0, 0, 0, .05); }
-.modal-body { padding: 6px 22px 18px; overflow-y: auto; min-height: 0; }
-.modal-foot {
-  padding: 13px 22px 20px; display: flex; justify-content: flex-end; gap: 10px;
-}
 .confirm-text { padding: 8px 0 16px; color: var(--text); }
 
 /* ---------- 详情（三类条目共用，左右列统一） ---------- */
 .detail-imgs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 12px; }
 .detail-imgs img { height: 160px; border-radius: 11px; object-fit: cover; flex-shrink: 0; }
 .detail-cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; align-items: start; }
+/* 字阶最终态在 extra.css（--f-headline）；此处仅保留未被覆盖项 */
 .detail-sub {
-  font-size: 12px; font-weight: 650; margin: 18px 0 8px;
+  margin: 18px 0 8px;
   color: var(--text-2); text-transform: none; letter-spacing: -0.01em;
 }
 .detail-cols > div > .detail-sub:first-child { margin-top: 0; }

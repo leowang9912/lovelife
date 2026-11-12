@@ -1,5 +1,13 @@
 # -*- coding: utf-8 -*-
-"""生成 lovelife.bat：GBK + CRLF + 危险字节校验（反斜杠/管道/尖括号/脱字符会破坏 cmd 解析）"""
+"""生成 lovelife.bat：GBK + CRLF + 危险字节校验（反斜杠/管道/尖括号/脱字符会破坏 cmd 解析）
+
+v1.1.7：启动重试防弹窗叠罗汉（杀僵尸+防忙等空转）——
+PyInstaller bootloader 启动失败弹的 Fatal error 框会让进程挂起不死，
+盲目重试会叠出多个弹窗（v1.1.6 更新后 5 连弹事故）。本版：
+- 重试上限 3 次（原 6 次），每次重试前 taskkill 杀掉挂弹框的僵尸进程（弹框跟着消失）
+- 进程活着但久无端口（>12s）判启动卡死 → 杀僵尸重来，而不是干等到超时
+- WAIT_LOOP 每圈必有 1s 等待（修 CHECK_ALIVE↔WAIT_LOOP 忙等空转假 20s 超时）
+"""
 import io
 
 LINES = [
@@ -20,24 +28,35 @@ LINES = [
     r'tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1',
     r"if %errorlevel%==0 goto WAIT_LOOP",
     r"",
-    r"rem ===== 3. start local server (auto retry up to 3x) =====",
+    r"rem ===== 3. start local server (auto restart up to 3x) =====",
     r"set /a attempt=1",
     r":LAUNCH",
+    r"rem redirect runtime extraction to install dir (avoids AV scanning system Temp)",
+    r'if not exist "%~dp0runtime" mkdir "%~dp0runtime"',
+    r'for /d %%d in ("%~dp0runtime\_MEI*") do rd /s /q "%%d" >nul 2>&1',
+    r'set "TMP=%~dp0runtime"',
+    r'set "TEMP=%~dp0runtime"',
     r'start "" "%~dp0lovelife-server.exe"',
     r"",
-    r"rem ===== 4. wait until port ready; retry if process died =====",
+    r"rem ===== 4. wait until port ready; retry if process died or startup stuck =====",
     r"set /a tries=0",
     r":WAIT_LOOP",
     r'netstat -ano | findstr /c:":8765 " | findstr /c:"LISTENING" >nul 2>&1',
     r"if %errorlevel%==0 goto OPEN_BROWSER",
     r"set /a tries+=1",
-    r"if %tries% GEQ 24 goto ERR_START_FAIL",
-    r"if %tries% GEQ 3 goto CHECK_ALIVE",
+    r"if %tries% GEQ 20 goto ERR_START_FAIL",
     r"ping -n 2 127.0.0.1 >nul",
-    r"goto WAIT_LOOP",
+    r"if %tries% LSS 3 goto WAIT_LOOP",
     r":CHECK_ALIVE",
     r'tasklist /fi "imagename eq lovelife-server.exe" | findstr /c:"lovelife-server.exe" >nul 2>&1',
-    r"if %errorlevel%==0 goto WAIT_LOOP",
+    r"if %errorlevel% GTR 0 goto RETRY",
+    r"rem alive but no port yet: keep waiting (each loop waits 1s above, no busy spin)",
+    r"if %tries% LSS 12 goto WAIT_LOOP",
+    r"rem alive >12s without port: startup stuck (usually a hidden error dialog) -> kill zombie and retry",
+    r"echo [INFO] Startup seems stuck, killing zombie process and retrying ...",
+    r"taskkill /f /im lovelife-server.exe >nul 2>&1",
+    r"ping -n 2 127.0.0.1 >nul",
+    r":RETRY",
     r"set /a attempt+=1",
     r"if %attempt% GTR 3 goto ERR_START_FAIL",
     r"echo [INFO] Service exited unexpectedly, retrying to start ...",
@@ -57,7 +76,11 @@ LINES = [
     r'start "" "http://127.0.0.1:8765/index.html"',
     r"exit /b 0",
     r":RUN_BROWSER",
-    r'start "" "%BROWSER%" --app="http://127.0.0.1:8765/index.html" --window-size=1480,940',
+    r"rem window-size.txt = last window size saved by the app (format WxH); default 1480x940",
+    r'set "WW=1480"',
+    r'set "WH=940"',
+    r'if exist "%~dp0window-size.txt" for /f "usebackq tokens=1,2 delims=x" %%a in ("%~dp0window-size.txt") do (set "WW=%%a" & set "WH=%%b")',
+    r'start "" "%BROWSER%" --app="http://127.0.0.1:8765/index.html" --window-size=%WW%,%WH%',
     r"exit /b 0",
     r"",
     r":ALREADY_RUNNING",
@@ -95,8 +118,9 @@ LINES = [
     r"exit /b 1",
     r"",
     r":ERR_START_FAIL",
+    r"taskkill /f /im lovelife-server.exe >nul 2>&1",
     r"echo.",
-    r"echo [ERROR] Service failed to start, port 8765 not ready in 20s.",
+    r"echo [ERROR] Service failed to start, port 8765 not ready in time.",
     r"echo.",
     r"echo 常见原因与解决办法：",
     r"echo   1. 杀毒软件拦截了 lovelife-server.exe：",

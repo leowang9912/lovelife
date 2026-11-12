@@ -14,6 +14,10 @@ window.Utils = (function () {
 
   function parseDate(s) {
     if (!s) return null;
+    // 纯日期串按本地零点解析：JS 默认把 'YYYY-MM-DD' 当 UTC 零点，
+    // 东八区会偏成 08:00，天数取整因此可能差 1（v1.1.0 修正）
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(s));
+    if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
     const d = new Date(s);
     return isNaN(d.getTime()) ? null : d;
   }

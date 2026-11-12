@@ -1,15 +1,14 @@
 {
-  "version": "1.0.9",
+  "version": "1.2.2",
   "minSchema": 3,
-  "publishedAt": "2026-11-04",
+  "publishedAt": "2026-11-12",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "全站图标统一 Lucide 风格，规范固化（docs/UI-ICON-GUIDE.md）；设置页改六分标签",
-    "修复分类被静默改写（新建物品分类丢失）、裁切弹窗丢图等 20+ 问题（详见更新日志）",
-    "穿搭打卡：妆品使用次数可调（一天多次准确记账），预填带全温度/天气/次数",
-    "标签体系：chip × 只管本物品，设置页新增标签管理（增删个人标签库）",
-    "天气推荐支持今日/明日切换；美妆/数码吃灰天数口径修正",
-    "更新后自动重启更稳（重试×3），DLL 弹窗问题根治（释放目录离开临时目录）"
+    "桌面小窗 Widget：今日待办置顶悬浮，与主窗互斥切换（开关窗口不丢尺寸记忆）",
+    "主页待办改 7 列周视图：两行条目、hover 划入完成/跳过、预览卡详情、翻周",
+    "待办循环截止（到期即停、历史保留）；点击条目直接编辑",
+    "习惯管理排序就地重排无闪烁；侧栏新模块按默认位置插入",
+    "时间日历（1.2.1）：周视图时间段+时间点+待办同屏、两套类型、习惯联动、计时器、时间统计"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -17,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.0.9/lovelife-v1.0.9-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.2/lovelife-v1.2.2-win64.zip"
   }
 }

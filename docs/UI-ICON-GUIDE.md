@@ -60,6 +60,9 @@ UI.icon('trash-2');             // 默认 16px
 | 穿搭组合 | `layers` | | 妆容组合 | `palette` |
 | 裁切 | `crop` | | 一键抠图 | `scissors` |
 | 上传图片 | `image-plus` | | 备份导出 | `download` |
+| 重新定位 | `map-pin` | | 导入 / 导出账单 | `file-down` / `file-up` |
+| 热力打卡 | `flame` | | 倒计时 | `timer` |
+| 翻月 / 翻年 | `chevron-left` / `chevron-right` | |  |  |
 | 备份恢复 | `upload` | | 迁移数据 | `folder-sync` |
 | 创建桌面快捷方式 | `monitor-up` | | 查看更新日志 | `file-text` |
 | 手动填入 | `pencil-line` | | 套用/打卡 | `check` |
@@ -112,6 +115,27 @@ UI.icon('trash-2');             // 默认 16px
 |---|---|---|---|---|
 | 拖动手柄 | `grip-vertical` | | 游戏兜底/光盘 | `disc-3` |
 
+### 4.8 钱袋 / 记账（v1.1.0）
+| 语义 | 图标名 | | 语义 | 图标名 |
+|---|---|---|---|---|
+| 我的钱袋（导航/账户） | `wallet` | | 记一笔 / 添加 | `plus` |
+| 流水账 | `list` | | 导入管理 | `upload` |
+| 查看统计 | `chart-column` | | 转账 | `arrow-left-right` |
+| 预算 | `target` | | 标签库 | `tags` |
+| 下载模板 | `download` | | 选择文件 | `file-up` |
+| 导入批次 | `history` | | 支出构成 | `pie-chart` |
+| 收支趋势 | `trending-up` | | 升/降序 | `arrow-up` / `arrow-down` |
+| 食品餐饮 | `utensils` | | 购物消费 | `shopping-bag` |
+| 出行交通 | `car` | | 居家生活 | `home` |
+| 休闲娱乐 | `music` | | 文化教育 | `book-open` |
+| 健康医疗 | `heart-pulse` | | 人情往来/礼金 | `gift` |
+| 宠物 | `paw-print` | | 其他收支 | `more-horizontal` |
+| 工资 | `briefcase` | | 兼职外快 | `zap` |
+| 报销 | `receipt` | | 理财收益 | `trending-up` |
+| 二手闲置 | `refresh-cw` | | 现金 | `banknote` |
+| 微信 | `message-circle` | | 支付宝 | `smartphone` |
+| 银行卡 | `credit-card` | | 账单行图标 | 分类图标（同上） |
+
 ## 7. 扩展图标（Lucide 缺失且语义必需时自绘）
 
 lucide 目前没有"裤子"类图标；`pants` 为自绘补充，**lucide 同风格**（24 网格 / stroke=currentColor / stroke-width 2 / 圆角端点），登记如下：
@@ -137,3 +161,4 @@ lucide 目前没有"裤子"类图标；`pants` 为自绘补充，**lucide 同风
 | 2026-11-04 | 初版：确立 Lucide 唯一图标库、四档尺寸、全站映射表（v1.0.9 全量替换） |
 | 2026-11-04 | 修订：下装改自绘 `pants`（§7）；「我的生活」sparkles→heart |
 | 2026-11-04 | 修订：登记展示档尺寸（28/32/48）与 sparkles/circle-check/grip-vertical/disc-3 |
+| 2026-11-04 | v1.1.0 钱袋：登记 §4.8 记账/分类/账户全套图标（28 语义） |

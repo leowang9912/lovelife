@@ -3,7 +3,13 @@ window.UI = (function () {
   const U = window.Utils;
 
   /* ---------- Toast ---------- */
+  /* 同文案 2 秒节流（v1.1.9）：连点打卡同一条提示不再连弹刷屏；不同文案不受影响 */
+  const _toastShownAt = {};
   function toast(msg, type) {
+    const key = String(msg);
+    const now = Date.now();
+    if (_toastShownAt[key] && now - _toastShownAt[key] < 2000) return; // 2 秒内同文案不重复弹
+    _toastShownAt[key] = now;
     let box = document.getElementById('toast-box');
     if (!box) {
       box = document.createElement('div');
@@ -18,54 +24,484 @@ window.UI = (function () {
     setTimeout(function () {
       el.classList.remove('show');
       setTimeout(function () { el.remove(); }, 300);
-    }, 2600);
+    }, type === 'error' ? 5000 : 2600); // 错误信息多看几秒（乙3），成功保持 2.6s
   }
 
   /* ---------- Modal ---------- */
+  // 弹窗栈：Esc 只响应最上层弹窗（嵌套 confirmDialog 时不连锁关闭底层）
+  const modalStack = [];
+
   function modal(opts) {
     const wrap = document.createElement('div');
     wrap.className = 'modal-mask';
     wrap.innerHTML =
-      '<div class="modal" style="' + (opts.width ? 'max-width:' + opts.width + 'px' : '') + '">' +
+      '<div class="modal' + (opts.width ? (Number(opts.width) <= 460 ? ' modal-sm' : Number(opts.width) >= 680 ? ' modal-lg' : '') : '') + '">' +
       '<div class="modal-head"><h3>' + U.escapeHtml(opts.title || '') + '</h3>' +
+      (opts.headExtra || '') +
       '<button class="modal-close" title="关闭">' + icon('x', 16) + '</button></div>' +
       '<div class="modal-body">' + (opts.bodyHTML || '') + '</div>' +
       (opts.footerHTML ? '<div class="modal-foot">' + opts.footerHTML + '</div>' : '') +
       '</div>';
     document.body.appendChild(wrap);
+    modalStack.push(wrap);
+    // 表单内的 <button> 默认 type=submit，点击会触发表单提交→整页导航（用户看到"软件重启"）。
+    // 弹窗内所有 form 一律拦截提交：本应用全部走 JS 保存，从不原生提交（v1.1.4 修复）
+    wrap.querySelectorAll('form').forEach(function (fm) {
+      fm.addEventListener('submit', function (e) { e.preventDefault(); });
+    });
+    // 日期输入 → 自定义日期选择控件（v1.2.0）：弹窗内表单自动覆盖（幂等转换）
+    bindDatePickers(wrap);
     requestAnimationFrame(function () { wrap.classList.add('show'); });
     let closed = false;
+    let keyHandler = null;
     function close() {
       if (closed) return;
       closed = true;
+      const si = modalStack.indexOf(wrap);
+      if (si >= 0) modalStack.splice(si, 1);
+      if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
       wrap.classList.remove('show');
+      // 渐隐 220ms 内遮罩透明但仍拦截点击（嵌套弹窗关闭/连点场景，v1.2.01 合并弹窗"点保存没反应"根因之一）
+      wrap.style.pointerEvents = 'none';
       setTimeout(function () { wrap.remove(); }, 220);
       if (opts.onClose) { try { opts.onClose(); } catch (e) {} }
     }
     wrap.querySelector('.modal-close').addEventListener('click', close);
     wrap.addEventListener('click', function (e) {
-      if (e.target === wrap && opts.closable !== false) close();
+      if (e.target === wrap && opts.closable !== false) {
+        // 带表单的弹窗（formGuard）误点遮罩先确认，防填一半全丢（甲8）
+        if (opts.formGuard) {
+          confirmDialog('放弃已填内容？', '弹窗里已填写的内容将丢失，确定关闭吗？').then(function (yes) {
+            if (yes) close();
+          });
+        } else {
+          close();
+        }
+      }
     });
+    // Esc 统一关闭（甲8）：IME 组词中不拦截；只最上层弹窗响应
+    keyHandler = function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key !== 'Escape' && e.key !== 'Esc') return;
+      if (modalStack[modalStack.length - 1] !== wrap) return;
+      e.preventDefault();
+      close();
+    };
+    document.addEventListener('keydown', keyHandler);
     if (opts.onMount) opts.onMount(wrap, close);
     return { close: close, el: wrap };
   }
 
+  /* 保存按钮 loading 挂点（丙4）：保存中加 .is-loading + 文案「保存中…」，完成/失败还原。
+     样式（透明度/spinner）由 app\css 定义，这里只接线状态。 */
+  function loadingBtn(btn, on) {
+    if (!btn) return;
+    if (on) {
+      if (!btn.hasAttribute('data-label')) btn.setAttribute('data-label', btn.innerHTML);
+      btn.classList.add('is-loading');
+      btn.innerHTML = '保存中…';
+      btn.disabled = true;
+    } else {
+      btn.classList.remove('is-loading');
+      if (btn.hasAttribute('data-label')) {
+        btn.innerHTML = btn.getAttribute('data-label');
+        btn.removeAttribute('data-label');
+      }
+      btn.disabled = false;
+    }
+  }
+
   function confirmDialog(title, text) {
     return new Promise(function (resolve) {
+      let settled = false;
+      let keyHandler = null;
+      const done = function (v) { if (!settled) { settled = true; resolve(v); } };
       modal({
         title: title,
         bodyHTML: '<p class="confirm-text">' + U.escapeHtml(text) + '</p>',
         footerHTML: '<button class="btn btn-ghost" data-act="no">取消</button><button class="btn btn-danger" data-act="yes">确认</button>',
         onMount: function (wrap, close) {
-          wrap.querySelector('[data-act=no]').addEventListener('click', function () { close(); resolve(false); });
-          wrap.querySelector('[data-act=yes]').addEventListener('click', function () { close(); resolve(true); });
+          // 先结算再 close：close 会触发 onClose 的 done(false)，done 幂等保证按钮结果优先
+          wrap.querySelector('[data-act=no]').addEventListener('click', function () { done(false); close(); });
+          wrap.querySelector('[data-act=yes]').addEventListener('click', function () { done(true); close(); });
+          // 键盘（乙3）：Enter=确认、Esc=取消。IME 组词中不拦截；焦点在 textarea/多行输入时
+          // 不抢 Enter（让换行进原文）；弹窗有输入框时仅按钮聚焦才确认，无输入框直接确认（保守）
+          keyHandler = function (e) {
+            if (e.isComposing || e.keyCode === 229) return;
+            if (e.key === 'Escape' || e.key === 'Esc') {
+              e.preventDefault();
+              done(false); close();
+              return;
+            }
+            if (e.key !== 'Enter') return;
+            const t = e.target || {};
+            const tag = String(t.tagName || '').toLowerCase();
+            if (tag === 'textarea' || t.isContentEditable) return;
+            const onButton = !!(t.closest && t.closest('button'));
+            if (wrap.querySelector('input, textarea, select') && !onButton) return;
+            e.preventDefault();
+            done(true); close();
+          };
+          document.addEventListener('keydown', keyHandler);
+        },
+        // 点遮罩/× 关闭同样结算（否则调用方 await 永久挂起、重复点击叠加确认框）
+        onClose: function () {
+          if (keyHandler) { document.removeEventListener('keydown', keyHandler); keyHandler = null; }
+          done(false);
         }
       });
     });
   }
 
-  /* ---------- 图片裁切弹窗（1:1）+ 一键抠图 ---------- */
-  function cropImage(file) {
+  /* ---------- 日期选择控件（v1.2.1）：自定义月历弹层 + 可直接键入 ----------
+     根治原生 <input type="date"> 三问题：Chrome 聚焦后中英混杂占位（yyyy/mm/日）、
+     原生弹层与整体 UI 风格不符、旧 CSS 伪元素方案覆盖不全。
+     做法：input[type=date] 原地转成 <input type="text">（name/id/class/value/
+     disabled 全保留，可直接键入），value 恒为 YYYY-MM-DD（数据语义零改动，
+     readItemForm/FormData 读值不用改）；空值显示占位「年 / 月 / 日」。
+     输入容错（v1.2.1）：失焦/回车把 2026-11-10 / 2026/11/10 / 20261110 /
+     2026.2.3 / 2026年2月3日 等常见格式规范化为 YYYY-MM-DD；非法输入回退原值 + 轻提示；
+     清空合法。弹层：pointerdown 弹月历（纯键盘 Tab 聚焦不弹层，打字不被日历挡住），
+     Esc 关弹层；头部年份数字可点改（键入年份回车/失焦生效跳该年月）。
+     全局替换：UI.bindDatePickers(root) 幂等转换（data-dp-bound 标记），modal 创建时
+     自动对 wrap 调用，页面级表单由 app.js 的 MutationObserver 兜底调用。 */
+  const DP_WEEK = ['一', '二', '三', '四', '五', '六', '日'];
+  let dpPop = null;    // 当前月历弹层（全局单例）
+  let dpInput = null;  // 弹层锚定的日期输入
+  let dpViewY = 0, dpViewM = 0; // 当前浏览月（0-11）
+
+  /* 'YYYY-MM-DD' → {y,m,d}（真实日历日校验）；非法/空返回 null */
+  function dpParse(v) {
+    const p = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(v || ''));
+    if (!p) return null;
+    const y = Number(p[1]), m = Number(p[2]) - 1, d = Number(p[3]);
+    const t = new Date(y, m, d);
+    return (t.getFullYear() === y && t.getMonth() === m && t.getDate() === d) ? { y: y, m: m, d: d } : null;
+  }
+  /* 容错解析（v1.2.1）：2026-11-10 / 2026/11/10 / 2026.2.3 / 20261110 / 2026年2月3日
+     → 'YYYY-MM-DD'；空→''；非法/非真实日历日 → null */
+  function dpParseLoose(v) {
+    const s = String(v == null ? '' : v).trim();
+    if (s === '') return '';
+    let m = /^(\d{4})[-\/.年](\d{1,2})[-\/.月](\d{1,2})日?$/.exec(s) ||
+      /^(\d{4})(\d{2})(\d{2})$/.exec(s);
+    if (!m) return null;
+    const y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+    const t = new Date(y, mo - 1, d);
+    if (t.getFullYear() !== y || t.getMonth() !== mo - 1 || t.getDate() !== d) return null;
+    return dpISO(y, mo - 1, d);
+  }
+  function dpISO(y, m, d) {
+    return y + '-' + ('0' + (m + 1)).slice(-2) + '-' + ('0' + d).slice(-2);
+  }
+  function dpToday() {
+    const n = new Date();
+    return { y: n.getFullYear(), m: n.getMonth(), d: n.getDate() };
+  }
+  /* 写值并补发 input/change（既有监听不破坏） */
+  function dpWrite(v) {
+    if (!dpInput) return;
+    dpInput.value = v;
+    dpInput._dpOrig = v;
+    dpInput.dispatchEvent(new Event('input', { bubbles: true }));
+    dpInput.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+  /* 键入提交（失焦/回车）：容错解析 → 规范化为 YYYY-MM-DD；
+     非法输入回退编辑前原值 + 轻提示；空=清空（合法）。
+     最终值与编辑前不同才补发 input/change（清空/规范化都通知，回退不重复响） */
+  function dpCommit(el) {
+    const raw = el.value;
+    const orig = el._dpOrig != null ? el._dpOrig : '';
+    const parsed = dpParseLoose(raw);
+    if (parsed === null) {
+      if (raw !== orig) { // 只有用户改坏了才回退+提示（历史脏值不打扰）
+        el.value = orig;
+        toast('日期格式不正确，已还原', 'info');
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      return;
+    }
+    if (parsed !== raw) el.value = parsed; // 规范化（2026/2/3 → 2026-02-03）
+    if (parsed !== orig) {
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    el._dpOrig = parsed;
+  }
+  function dpClose() {
+    if (!dpPop) return;
+    if (dpPop.parentNode) dpPop.parentNode.removeChild(dpPop);
+    dpPop = null; dpInput = null;
+    document.removeEventListener('keydown', dpOnKey, true);
+    document.removeEventListener('click', dpOnClick, true);
+    window.removeEventListener('resize', dpOnAnchorMove);
+    window.removeEventListener('scroll', dpOnAnchorMove, true);
+  }
+  /* Esc：capture 阶段拦截并 stopPropagation——只关月历弹层，不连锁关掉底层弹窗
+     （modal 的 Esc 是 document 冒泡监听，拦住后不再到达）；
+     弹层内年份输入自己处理 Esc（只撤销年份编辑），此处让路 */
+  function dpOnKey(e) {
+    if (!dpPop) return;
+    if (e.isComposing || e.keyCode === 229) return;
+    const ae = document.activeElement;
+    if (ae && dpPop.contains(ae) && ae.tagName === 'INPUT') return;
+    if (e.key !== 'Escape' && e.key !== 'Esc') return;
+    e.preventDefault();
+    e.stopPropagation();
+    dpClose();
+  }
+  /* 点外部关闭（纯点击，isComposing 无关）；点弹窗遮罩时吞掉本次点击——
+     只关月历，不连锁关弹窗 / 触发 formGuard「放弃已填内容」确认 */
+  function dpOnClick(e) {
+    if (!dpPop) return;
+    const t = e.target;
+    if (dpPop.contains(t)) return;                       // 弹层内交互交给弹层自身
+    if (dpInput && t === dpInput) return;                // 再点同一输入=切换开关，交给输入 handler
+    dpClose();
+    if (t && t.classList && t.classList.contains('modal-mask')) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+  /* 输入随弹窗滚动/窗口缩放时重新锚定；输入已脱离 DOM 则收起 */
+  function dpOnAnchorMove() {
+    if (!dpPop || !dpInput) return;
+    if (!dpInput.isConnected) { dpClose(); return; }
+    dpPlace();
+  }
+  /* 焦点检查（v1.2.1）：焦点既不在锚定输入也不在弹层内 → 收弹层。
+     setTimeout 等焦点落定（focusout 的 relatedTarget 各浏览器不齐，不依赖它） */
+  function dpScheduleCloseCheck() {
+    setTimeout(function () {
+      if (!dpPop) return;
+      const ae = document.activeElement;
+      if (ae === dpInput) return;
+      if (ae && dpPop.contains(ae)) return;
+      dpClose();
+    }, 0);
+  }
+  function dpPlace() {
+    if (!dpPop || !dpInput) return;
+    const r = dpInput.getBoundingClientRect();
+    const pw = dpPop.offsetWidth || 272, ph = dpPop.offsetHeight || 330;
+    const vh = window.innerHeight || 800, vw = window.innerWidth || 1280;
+    let top = r.bottom + 6, left = r.left;
+    if (top + ph > vh - 8 && r.top - 6 > ph) top = r.top - ph - 6; // 下方放不下翻到上方
+    if (top < 8) top = 8;                                          // 窄窗兜底不越顶
+    if (left + pw > vw - 8) left = Math.max(8, vw - pw - 8);
+    dpPop.style.top = Math.round(top) + 'px';
+    dpPop.style.left = Math.round(left) + 'px';
+  }
+  /* 月格重绘（翻月（快）：只换 grid 内容，不重建弹层） */
+  function dpRender() {
+    const y = dpViewY, m = dpViewM;
+    // 年份数字可点改（v1.2.1）：点它变输入框直接键入年份
+    dpPop.querySelector('.dp-title').innerHTML =
+      '<button type="button" class="dp-year-btn" data-dp-year title="点击修改年份">' + y + '</button> 年 ' + (m + 1) + ' 月';
+    const sel = dpInput ? dpParse(dpParseLoose(dpInput.value)) : null;
+    const t = dpToday();
+    const first = new Date(y, m, 1);
+    const startOffset = (first.getDay() + 6) % 7; // 周一起始
+    let html = '';
+    for (let i = 0; i < 42; i++) {
+      const d = new Date(y, m, 1 - startOffset + i);
+      const iso = dpISO(d.getFullYear(), d.getMonth(), d.getDate());
+      const out = d.getMonth() !== m;
+      const isToday = d.getFullYear() === t.y && d.getMonth() === t.m && d.getDate() === t.d;
+      const isSel = !!sel && d.getFullYear() === sel.y && d.getMonth() === sel.m && d.getDate() === sel.d;
+      html += '<button type="button" class="dp-day' + (out ? ' dp-out' : '') +
+        (isToday ? ' dp-today' : '') + (isSel ? ' dp-sel' : '') +
+        '" data-dp-date="' + iso + '">' + d.getDate() + '</button>';
+    }
+    dpPop.querySelector('.dp-grid').innerHTML = html;
+  }
+  /* 年份快速修改（v1.2.1）：标题年份数字 → 输入框键入年份，回车/失焦生效跳该年月 */
+  function dpYearEdit() {
+    const titleEl = dpPop.querySelector('.dp-title');
+    if (!titleEl) return;
+    const m = dpViewM;
+    titleEl.innerHTML = '<input class="dp-year-in" inputmode="numeric" maxlength="4" value="' + dpViewY + '"> 年 ' + (m + 1) + ' 月';
+    const inp = titleEl.querySelector('.dp-year-in');
+    inp.focus();
+    inp.select();
+    let done = false;
+    function apply() {
+      if (done) return;
+      done = true;
+      dpPop._dpYearApply = null;
+      const v = Number(String(inp.value || '').trim());
+      if (v >= 1900 && v <= 2100 && v === Math.floor(v)) dpViewY = v; // 非法年份=不改
+      dpRender(); // 无论合法与否都回到年月视图（非法仅丢弃输入）
+    }
+    dpPop._dpYearApply = apply; // 翻月/今天等动作前先应用，避免编辑被丢
+    inp.addEventListener('keydown', function (e) {
+      if (e.isComposing || e.keyCode === 229) return;
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); apply(); return; }
+      if (e.key === 'Escape' || e.key === 'Esc') {
+        e.preventDefault();
+        e.stopPropagation(); // 只撤销年份编辑，不关弹层
+        if (!done) { done = true; dpPop._dpYearApply = null; dpRender(); }
+      }
+    });
+    inp.addEventListener('blur', apply);
+  }
+  /* 打开月历弹层（再点同一输入=收起） */
+  function dpOpen(input) {
+    if (input.disabled) return;
+    if (dpPop && dpInput === input) { dpClose(); return; }
+    dpClose();
+    dpInput = input;
+    const sel = dpParse(dpParseLoose(input.value)); // 容错格式（2026/11/10）也能定位到对应月
+    const t = dpToday();
+    dpViewY = sel ? sel.y : t.y;
+    dpViewM = sel ? sel.m : t.m;
+    const pop = document.createElement('div');
+    pop.className = 'dp-pop';
+    pop.innerHTML =
+      '<div class="dp-head">' +
+      '<button type="button" class="dp-nav" data-dp-nav="-1" title="上一月">' + icon('chevron-left', 15) + '</button>' +
+      '<div class="dp-title"></div>' +
+      '<button type="button" class="dp-nav" data-dp-nav="1" title="下一月">' + icon('chevron-right', 15) + '</button>' +
+      '<button type="button" class="dp-today-btn" data-dp-today>今天</button>' +
+      '</div>' +
+      '<div class="dp-week">' + DP_WEEK.map(function (w) { return '<span>' + w + '</span>'; }).join('') + '</div>' +
+      '<div class="dp-grid"></div>' +
+      '<div class="dp-foot">' +
+      '<button type="button" class="dp-txt-btn" data-dp-clear>清空</button>' +
+      '<button type="button" class="dp-txt-btn" data-dp-close>关闭</button>' +
+      '</div>';
+    document.body.appendChild(pop);
+    dpPop = pop;
+    dpRender();
+    dpPlace();
+    // 点弹层按钮不抢走输入框焦点（preventDefault 保住焦点，避免误触发失焦提交）；
+    // 年份输入框豁免——它需要正常聚焦打字
+    pop.addEventListener('mousedown', function (e) {
+      const t = e.target;
+      if (t && t.tagName === 'INPUT') return;
+      e.preventDefault();
+    });
+    pop.addEventListener('click', function (e) {
+      const t2 = e.target;
+      const btn = t2 && t2.closest ? t2.closest('button') : null;
+      if (!btn) return;
+      if (pop._dpYearApply && !btn.hasAttribute('data-dp-year')) pop._dpYearApply(); // 先定年份再执行动作
+      if (btn.hasAttribute('data-dp-year')) { dpYearEdit(); return; }
+      if (btn.hasAttribute('data-dp-nav')) {
+        // 翻月（快）：只重绘月格
+        dpViewM += Number(btn.getAttribute('data-dp-nav'));
+        if (dpViewM < 0) { dpViewM = 11; dpViewY--; }
+        if (dpViewM > 11) { dpViewM = 0; dpViewY++; }
+        dpRender();
+        return;
+      }
+      if (btn.hasAttribute('data-dp-today')) {
+        // 「今天」= 跳回今天所在月（视图导航，不写值不关弹层；选中走月格点击）
+        const n = dpToday();
+        dpViewY = n.y; dpViewM = n.m;
+        dpRender();
+        return;
+      }
+      const day = btn.getAttribute('data-dp-date');
+      if (day) {
+        dpWrite(day); // 选择日期→写入 input（YYYY-MM-DD）+ input/change + 关弹层
+        dpClose();
+        return;
+      }
+      if (btn.hasAttribute('data-dp-clear')) { dpWrite(''); dpClose(); return; }
+      if (btn.hasAttribute('data-dp-close')) { dpClose(); return; }
+    });
+    document.addEventListener('keydown', dpOnKey, true);
+    document.addEventListener('click', dpOnClick, true);
+    window.addEventListener('resize', dpOnAnchorMove);
+    window.addEventListener('scroll', dpOnAnchorMove, true);
+  }
+
+  /* root 内所有 input[type=date] → 自定义日期选择控件（幂等，data-dp-bound 标记）。
+     v1.2.1：可直接键入（不再 readonly）——失焦/回车容错解析规范化；点击弹月历，
+     纯键盘 Tab 聚焦不弹层（打字不被日历挡住） */
+  function bindDatePickers(root) {
+    if (dpPop && dpInput && !dpInput.isConnected) dpClose(); // 锚定输入随弹窗卸载→收起
+    (root || document).querySelectorAll('input[type="date"]').forEach(function (el) {
+      if (el.getAttribute('data-dp-bound')) return;
+      const val = el.value || '';
+      el.setAttribute('data-dp-bound', '1');
+      el.setAttribute('type', 'text');
+      el.setAttribute('placeholder', '年 / 月 / 日');
+      el.classList.add('dp-input');
+      el.value = val;
+      el._dpOrig = val;
+      // 弹月历：pointerdown 弹（真实指针点击）；click 兜底 label 转发点击（无 pointerdown）。
+      // 纯键盘聚焦（Tab）不弹，聚焦后可直接打字；同一手势只处理一次（时间戳去重）
+      el.addEventListener('pointerdown', function () {
+        if (el.disabled) return;
+        el._dpPdAt = Date.now();
+        dpOpen(el);
+      });
+      el.addEventListener('click', function () {
+        if (el.disabled) return;
+        if (el._dpPdAt && Date.now() - el._dpPdAt < 800) return; // pointerdown 已处理
+        dpOpen(el);
+      });
+      el.addEventListener('focus', function () {
+        el._dpOrig = el.value; // 记录编辑前原值（非法输入回退用）
+      });
+      el.addEventListener('keydown', function (e) {
+        if (e.isComposing || e.keyCode === 229) return;
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          e.stopPropagation(); // 只提交日期，不串到表单的 Enter=保存/确认
+          dpCommit(el); // 回车提交：容错解析 → 规范化 / 非法回退
+          if (dpPop && dpInput === el) dpClose();
+        }
+      });
+      el.addEventListener('input', function () {
+        // 打字过程中弹层视图跟随已键入的年月（只跟视图，不写值）
+        if (!dpPop || dpInput !== el) return;
+        const p = dpParse(dpParseLoose(el.value));
+        if (p && (p.y !== dpViewY || p.m !== dpViewM)) {
+          dpViewY = p.y; dpViewM = p.m;
+          dpRender();
+        }
+      });
+      el.addEventListener('blur', function () {
+        dpCommit(el); // 失焦提交：容错解析 → 规范化 / 非法回退
+        dpScheduleCloseCheck();
+      });
+    });
+  }
+
+  /* ---------- 图片裁切弹窗（1:1 / 3:4 比例档）+ 一键抠图 ---------- */
+  /* 回退扩展名按实际类型取（甲2-④）：image/jpeg→.jpg 等，默认 .png——
+     不再无脑 .webp（内容与后缀不符会让服务端/看图工具误判） */
+  function extOf(fileOrBlob) {
+    const t = String((fileOrBlob && fileOrBlob.type) || '').toLowerCase();
+    if (t === 'image/jpeg' || t === 'image/jpg') return '.jpg';
+    if (t === 'image/webp') return '.webp';
+    if (t === 'image/gif') return '.gif';
+    if (t === 'image/bmp') return '.bmp';
+    return '.png';
+  }
+
+  /* 「使用原图」统一路径（甲2-③）：也过 Storage.compressImage 统一压缩入库，
+     不把原图直塞进库（大图撑爆存储）；压缩失败才回退原文件并按 file.type 取扩展名（甲2-④）。
+     裁切窗「使用原图」按钮与「本批全用原图」剩余图片共用此口径 */
+  async function useOriginFile(file) {
+    let blob = file, ext = extOf(file);
+    try {
+      const c = window.Storage && window.Storage.compressImage ? await window.Storage.compressImage(file) : null;
+      if (c) { blob = c; ext = extOf(c) || '.webp'; }
+    } catch (e) { /* 压缩失败保留原图 */ }
+    return { blob: blob, isCutout: false, ext: ext };
+  }
+
+  function cropImage(file, opts) {
+    opts = opts || {};
+    // 比例档（v1.1.5）：'3:4' 竖图（穿搭照片/推荐封面），默认 1:1。框与输出同比例
+    const portrait = opts.ratio === '3:4' || opts.ratio === '9:16';
+    const frameW = portrait ? 270 : 320;
+    const frameH = portrait ? 360 : 320;
     return new Promise(function (resolve, reject) {
       let settled = false;
       // 任何关闭方式（取消/×/遮罩/确认）都会结算，杜绝上传循环挂死丢图（v1.0.9）
@@ -74,13 +510,13 @@ window.UI = (function () {
       const img = new Image();
       img.onload = function () {
         let scale = 1, offsetX = 0, offsetY = 0;
-        const frame = 320;
+        const frame = frameW; // 输出换算基准（框与输出等比）
         modal({
-          title: '裁切图片（1:1）',
+          title: '裁切图片（' + (portrait ? '3:4 竖图' : '1:1') + '）',
           width: 420,
           bodyHTML:
             '<div class="crop-frame" id="crop-frame">' +
-            '<canvas id="crop-canvas" width="' + frame + '" height="' + frame + '"></canvas>' +
+            '<canvas id="crop-canvas" width="' + frameW + '" height="' + frameH + '"></canvas>' +
             '<div class="crop-grid"></div></div>' +
             '<div class="crop-controls">' +
             '<label class="f-label">缩放（可缩小，四周自动补白）</label>' +
@@ -91,6 +527,8 @@ window.UI = (function () {
             '</div></div>',
           footerHTML:
             '<button class="btn btn-ghost" data-act="cancel">取消</button>' +
+            // 「本批全用原图」只在多图批量（opts.batch）时提供：单张行为不变
+            (opts.batch ? '<button class="btn btn-ghost" data-act="origin-all">本批全用原图</button>' : '') +
             '<button class="btn btn-ghost" data-act="origin">使用原图</button>' +
             '<button class="btn btn-primary" data-act="ok">确认裁切</button>',
           onClose: function () { done(null); },
@@ -103,22 +541,22 @@ window.UI = (function () {
             let cutoutCanvas = null;
 
             function fit() {
-              const base = Math.max(frame / img.width, frame / img.height);
+              const base = Math.max(frameW / img.width, frameH / img.height);
               scale = base * (Number(wrap.querySelector('#crop-zoom').value) / 100);
             }
             function draw() {
-              ctx.clearRect(0, 0, frame, frame);
+              ctx.clearRect(0, 0, frameW, frameH);
               ctx.fillStyle = '#ffffff'; // 白底补齐：缩小时四周就是输出的白边
-              ctx.fillRect(0, 0, frame, frame);
+              ctx.fillRect(0, 0, frameW, frameH);
               const w = img.width * scale, h = img.height * scale;
               // 缩小时也允许在白边范围内拖动构图（v1.0.8）
-              const maxX = Math.abs(w - frame) / 2, maxY = Math.abs(h - frame) / 2;
+              const maxX = Math.abs(w - frameW) / 2, maxY = Math.abs(h - frameH) / 2;
               offsetX = Math.min(maxX, Math.max(-maxX, offsetX));
               offsetY = Math.min(maxY, Math.max(-maxY, offsetY));
               if (cutoutCanvas) {
-                ctx.drawImage(cutoutCanvas, (frame - w) / 2 + offsetX, (frame - h) / 2 + offsetY, w, h);
+                ctx.drawImage(cutoutCanvas, (frameW - w) / 2 + offsetX, (frameH - h) / 2 + offsetY, w, h);
               } else {
-                ctx.drawImage(img, (frame - w) / 2 + offsetX, (frame - h) / 2 + offsetY, w, h);
+                ctx.drawImage(img, (frameW - w) / 2 + offsetX, (frameH - h) / 2 + offsetY, w, h);
               }
             }
             fit(); draw();
@@ -148,10 +586,11 @@ window.UI = (function () {
               try {
                 if (!window.Cutout) throw new Error('cutout module missing');
                 const tmp = document.createElement('canvas');
-                const side = Math.max(img.width, img.height);
-                tmp.width = side; tmp.height = side;
+                // 与原图同尺寸（v1.1.5 修正）：不再补成正方形——补边会让抠图画回时
+                // 被压进原图比例框而变形，且透明补边角会骗过颜色泛洪（白底反而抠不掉）
+                tmp.width = img.width; tmp.height = img.height;
                 const tctx = tmp.getContext('2d');
-                tctx.drawImage(img, (side - img.width) / 2, (side - img.height) / 2);
+                tctx.drawImage(img, 0, 0);
                 cutoutCanvas = await window.Cutout.cutout(tmp);
                 draw();
                 wrap.querySelector('#crop-tip').textContent = window.Cutout.isModelReady()
@@ -166,25 +605,44 @@ window.UI = (function () {
             });
 
             wrap.querySelector('[data-act=origin]').addEventListener('click', async function () {
-              done({ blob: file, isCutout: false });
+              // 「使用原图」也过 Storage.compressImage 统一压缩（甲2-③），口径见 useOriginFile
+              done(await useOriginFile(file));
               close();
             });
+            if (opts.batch) {
+              // 「本批全用原图」（v1.1.9 多图批量）：本张 + 剩余全部走「使用原图」路径（同压缩口径），
+              // 不再逐张弹裁切窗；后续图片由 imageUploader 按 batch.allOrigin 直取原图
+              wrap.querySelector('[data-act=origin-all]').addEventListener('click', async function (e) {
+                e.currentTarget.disabled = true;
+                opts.batch.allOrigin = true;
+                done(await useOriginFile(file));
+                close();
+              });
+            }
             wrap.querySelector('[data-act=ok]').addEventListener('click', async function () {
-              const out = cutoutCanvas || canvas;
-              let blob;
-              if (cutoutCanvas) {
-                blob = await new Promise(function (res) { cutoutCanvas.toBlob(res, 'image/png'); });
-              } else {
-                blob = await new Promise(function (res) { canvas.toBlob(res, 'image/webp', 0.88); });
-              }
-              done({ blob: blob, isCutout: !!cutoutCanvas });
+              // 输出 ≥1024px（甲2-②）：按预览同款构图（等比缩放 + 白底补边）放大输出。
+              // 3:4 竖图输出 768×1024，1:1 输出 1024×1024（v1.1.5 比例档）
+              const OUT_W = portrait ? 768 : 1024;
+              const OUT_H = 1024;
+              const outCanvas = document.createElement('canvas');
+              outCanvas.width = OUT_W; outCanvas.height = OUT_H;
+              const octx = outCanvas.getContext('2d');
+              octx.fillStyle = '#ffffff';
+              octx.fillRect(0, 0, OUT_W, OUT_H);
+              const k = OUT_W / frame;
+              const w = img.width * scale, h = img.height * scale;
+              octx.drawImage(cutoutCanvas || img, ((frameW - w) / 2 + offsetX) * k, ((frameH - h) / 2 + offsetY) * k, w * k, h * k);
+              const blob = await new Promise(function (res) {
+                outCanvas.toBlob(res, cutoutCanvas ? 'image/png' : 'image/webp', 0.88);
+              });
+              done({ blob: blob, isCutout: !!cutoutCanvas, ext: extOf(blob) });
               close();
             });
           }
         });
         URL.revokeObjectURL(url);
       };
-      img.onerror = function () { reject(new Error('图片读取失败')); };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error('图片读取失败')); };
       img.src = url;
     });
   }
@@ -228,16 +686,41 @@ window.UI = (function () {
 
       container.querySelector('input[type=file]').addEventListener('change', async function (e) {
         const files = Array.from(e.target.files || []);
+        let skipped = 0, invalid = 0;
+        const MAX_SIZE = 30 * 1024 * 1024; // 超大图（>30MB）：解码/上传都不可靠，直接跳过不进库
+        // 批量「本批全用原图」状态（仅多图批量传入）：点击后本批剩余图片全部走「使用原图」路径，不再逐张弹窗
+        const batch = files.length > 1 ? { allOrigin: false } : null;
         for (const f of files) {
-          if (!f.type.startsWith('image/')) continue;
+          // 非图片 / 0 字节 / 超大：跳过并计数提示，绝不把坏文件塞进库（v1.1.5 边界）
+          if (!f.type.startsWith('image/')) { invalid++; continue; }
+          if (!f.size) { invalid++; continue; }
+          if (f.size > MAX_SIZE) { invalid++; continue; }
           try {
-            const result = await cropImage(f);
-            if (!result) continue; // 用户取消：跳过该图，不拖累整批
-            pendingBlobs.push({ blob: result.blob, ext: result.isCutout ? '.png' : '.webp' });
+            if (batch && batch.allOrigin) {
+              // 「本批全用原图」后剩余图片：与「使用原图」同口径（useOriginFile 压缩入库），不再弹裁切窗
+              const r0 = await useOriginFile(f);
+              pendingBlobs.push({ blob: r0.blob, ext: r0.ext });
+              continue;
+            }
+            const result = await cropImage(f, { ratio: options.ratio, batch: batch });
+            if (!result) { skipped++; continue; } // 用户取消：跳过该图，不拖累整批
+            pendingBlobs.push({ blob: result.blob, ext: result.ext || (result.isCutout ? '.png' : '.webp') });
           } catch (err) {
-            pendingBlobs.push({ blob: f, ext: '.webp' });
+            // 裁切链路失败回退原图：扩展名按 file.type 取（甲2-④），不再硬编码 .webp；
+            // 偏大图（>8MB）回退前先压缩（与「使用原图」同口径，防撑爆存储），压缩失败才放行原文件
+            let blob = f, ext = extOf(f);
+            if (f.size > 8 * 1024 * 1024) {
+              try {
+                const c = Storage && Storage.compressImage ? await Storage.compressImage(f) : null;
+                if (c) { blob = c; ext = extOf(c) || '.png'; }
+              } catch (e2) { /* 压缩失败保留原图 */ }
+            }
+            pendingBlobs.push({ blob: blob, ext: ext });
           }
         }
+        // 取消不再无声消失（甲2-①）：整批处理完统一提示跳过张数
+        if (skipped > 0) toast('已跳过 ' + skipped + ' 张图片', 'info');
+        if (invalid > 0) toast('已跳过 ' + invalid + ' 张无法处理的文件（非图片 / 空文件 / 超大）', 'info');
         render();
       });
 
@@ -257,12 +740,14 @@ window.UI = (function () {
         const saved = paths.slice();
         for (const p of pendingBlobs) {
           const blob = p.blob || p;
-          const ext = p.ext || '.webp';
+          const ext = p.ext || '.png';
           saved.push(await Storage.uploadBlob(blob, 'img' + ext));
         }
         return saved;
       },
-      getPaths: function () { return paths.slice(); }
+      getPaths: function () { return paths.slice(); },
+      // 有没有图（已保存 + 待上传）：纯拍照打卡校验用（甲23-②）
+      hasImages: function () { return paths.length > 0 || pendingBlobs.length > 0; }
     };
   }
 
@@ -327,7 +812,7 @@ window.UI = (function () {
     { key: 'daily', label: '单日使用成本', kinds: ['digital'], defDir: -1,
       dirs: ['低→高', '高→低'],
       cmp: cmpNumGet(function (i) { return i.cost && i.cost.dailyCost; }, 1) },
-    { key: 'held', label: '已持有天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
+    { key: 'held', label: '使用天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
       dirs: ['短→长', '长→短'],
       cmp: cmpNumGet(function (i) { return i.cost && i.cost.heldDays; }, 1) },
     { key: 'idle', label: '吃灰天数', kinds: ['digital', 'clothing', 'life'], defDir: -1,
@@ -336,7 +821,7 @@ window.UI = (function () {
     { key: 'name', label: '名称', kinds: ['digital', 'clothing', 'life'], defDir: 1,
       dirs: ['A→Z', 'Z→A'],
       cmp: function (a, b) { return String(a.name || '').localeCompare(String(b.name || ''), 'zh'); } },
-    { key: 'cat', label: '分类归拢', kinds: ['digital', 'clothing', 'life'], defDir: 1,
+    { key: 'cat', label: '分类', kinds: ['digital', 'clothing', 'life'], defDir: 1,
       dirs: ['正序', '倒序'],
       cmp: function (a, b) {
         return String(a.categoryId || '').localeCompare(String(b.categoryId || '')) ||
@@ -444,10 +929,10 @@ window.UI = (function () {
     return (list || []).map(function (v) {
       const on = arr.indexOf(v) >= 0;
       const fixed = (presets || []).indexOf(v) >= 0;
-      return '<span class="chip-wrap">' +
+      return '<span class="chip-wrap op-host">' +
         '<label class="chip-check"><input type="checkbox" name="tags" value="' + U.escapeHtml(v) + '"' +
-        (on ? ' checked' : '') + '><span>' + U.escapeHtml(v) + '</span></label>' +
-        (fixed ? '' : '<button type="button" class="chip-del" data-del-tag="' + U.escapeHtml(v) + '" title="移出本物品">' + icon('x', 14) + '</button>') +
+        (on ? ' checked' : '') + '><span title="' + U.escapeHtml(v) + '">' + U.escapeHtml(v) + '</span></label>' +
+        (fixed ? '' : '<span class="op-float"><button type="button" class="chip-del" data-del-tag="' + U.escapeHtml(v) + '" title="移出本物品">' + icon('x', 14) + '</button></span>') +
         '</span>';
     }).join('');
   }
@@ -501,12 +986,22 @@ window.UI = (function () {
     const cats = catsFor(db, kind);
     const isDigital = kind === 'digital' || item.kind === 'device' || item.kind === 'game';
 
-    const catOpts = cats.map(function (c) {
+    // 分类下拉兜底（旧数据兼容）：物品存的分类 id 不在当前分类树（如旧库无「发饰」等新增子类、
+    // 或分类被删）时补一个可选中的占位项——否则编辑保存会把分类静默清空（数据丢失）
+    function optFallback(list, curId) {
+      const hit = (list || []).some(function (c) { return c && c.id === curId; });
+      return (!hit && curId)
+        ? [{ id: curId, name: curId + '（旧数据保留）', children: [] }]
+        : [];
+    }
+    const cats2 = optFallback(cats, item.categoryId).concat(cats);
+    const catOpts = cats2.map(function (c) {
       return '<option value="' + c.id + '"' + (item.categoryId === c.id ? ' selected' : '') + '>' +
         U.escapeHtml(c.name) + '</option>';
     }).join('');
     const l1 = cats.find(function (c) { return c.id === item.categoryId; });
-    const subOpts = ((l1 && l1.children) || []).map(function (c) {
+    const subs2 = optFallback((l1 && l1.children) || [], item.subCategoryId).concat((l1 && l1.children) || []);
+    const subOpts = subs2.map(function (c) {
       return '<option value="' + c.id + '"' + (item.subCategoryId === c.id ? ' selected' : '') + '>' +
         U.escapeHtml(c.name) + '</option>';
     }).join('');
@@ -526,10 +1021,21 @@ window.UI = (function () {
       (item.purchasePrice !== null && item.purchasePrice !== undefined ? item.purchasePrice : '') + '"></label>' +
       '<label><span class="f-label">购入渠道</span><input name="channel" value="' + U.escapeHtml(item.channel || '') + '" placeholder="京东/闲鱼/线下…"></label>' +
       '<label><span class="f-label">存放位置</span><input name="storageLocation" value="' + U.escapeHtml(item.storageLocation || '') + '" placeholder="如：书房抽屉2"></label>' +
-      '<label><span class="f-label">状态</span><select name="status">' +
+      '<label><span class="f-label">状态</span><select name="status" id="f-status">' +
       STATUS_OPTS.map(function (s) {
         return '<option value="' + s[0] + '"' + ((item.status || 'in_use') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
       }).join('') + '</select></label>' +
+      // 使用周期截止（v1.1.0）：非在用时补充停用时间，日均成本等使用类指标冻结在该日
+      '<label id="f-retired-row"' + ((item.status || 'in_use') === 'in_use' ? ' style="display:none"' : '') + '>' +
+      '<span class="f-label">停用时间</span><input type="date" name="retiredAt" value="' +
+      U.escapeHtml(item.retiredAt || U.todayStr()) + '"></label>' +
+      // 售出回血（甲4）：状态=已售出 时展开售出价/售出日期（默认今天）；
+      // 二手回血自动回填的值原样可见可改
+      '<label id="f-sold-row"' + ((item.status || 'in_use') === 'sold' ? '' : ' style="display:none"') + '>' +
+      '<span class="f-label">售出价 / 售出日期</span><div class="tag-add-row">' +
+      '<input type="number" step="0.01" name="soldPrice" placeholder="售出价" style="width:110px" value="' +
+      (item.soldPrice !== null && item.soldPrice !== undefined ? U.escapeHtml(String(item.soldPrice)) : '') + '">' +
+      '<input type="date" name="soldDate" value="' + U.escapeHtml(item.soldDate || '') + '"></div></label>' +
       '<label><span class="f-label">品牌</span><input name="brand" value="' + U.escapeHtml(item.brand || '') + '"></label>' +
       '<label class="f-full"><span class="f-label">备注</span><input name="notes" value="' + U.escapeHtml(item.notes || '') + '"></label>' +
       '<div class="f-full"><span class="f-label">标签（可多选）</span><div class="chip-row" id="tag-chips">' +
@@ -540,8 +1046,11 @@ window.UI = (function () {
       '</div></div></div>';
 
     if (isDigital) {
+      // 「所属主机」候选：不能选自己，也不能选自己的下级（A 挂 B 再把 B 挂 A = 循环挂靠，
+      // 总投入会互相重复计价）——沿候选的父链上溯，凡能走到本机的一律不进下拉
       const deviceOpts = '<option value="">（无）</option>' + db.items.filter(function (i) {
-        return (i.kind === 'device' || i.kind === 'game') && i.id !== item.id;
+        return (i.kind === 'device' || i.kind === 'game') && i.id !== item.id &&
+          !(window.Models && window.Models.parentChainReaches && window.Models.parentChainReaches(db, i.id, item.id));
       }).map(function (i) {
         return '<option value="' + i.id + '"' + (item.parentItemId === i.id ? ' selected' : '') + '>' + U.escapeHtml(i.name) + '</option>';
       }).join('');
@@ -553,7 +1062,8 @@ window.UI = (function () {
         '<label><span class="f-label">保修截止</span><input type="date" name="warrantyEnd" value="' + U.escapeHtml(item.warrantyEnd || '') + '"></label>' +
         '<label><span class="f-label">固件版本</span><input name="firmware" value="' + U.escapeHtml(item.firmware || '') + '"></label>' +
         '<label><span class="f-label">电池健康度 %</span><input type="number" min="0" max="100" name="batteryHealth" value="' + (item.batteryHealth !== null && item.batteryHealth !== undefined ? item.batteryHealth : '') + '"></label>' +
-        '<label><span class="f-label">绑定子配件</span><select name="parentItemId">' + deviceOpts + '</select></label>' +
+        '<label><span class="f-label">所属主机</span><select name="parentItemId">' + deviceOpts + '</select>' +
+        '<span class="muted small">挂到主机名下：本机价格将计入该主机的总投入（配件挂靠 TCO）</span></label>' +
         '<label><span class="f-label">预估寿命（年）</span><input type="number" step="0.5" name="estimatedLifeYears" value="' + (item.estimatedLifeYears || '') + '"></label>' +
         '<label><span class="f-label">预估二手价</span><input type="number" step="0.01" name="estimatedResalePrice" value="' + (item.estimatedResalePrice || '') + '"></label>' +
         '<label class="game-only"><span class="f-label">游玩状态</span><select name="gameStatus">' +
@@ -595,9 +1105,14 @@ window.UI = (function () {
         [['', '不限'], ['3', '3M'], ['6', '6M'], ['12', '12M'], ['18', '18M'], ['24', '24M'], ['36', '36M']].map(function (s) {
           return '<option value="' + s[0] + '"' + (String(item.paoMonths || '') === s[0] ? ' selected' : '') + '>' + s[1] + '</option>';
         }).join('') + '</select></label>' +
-        '<label><span class="f-label">未开封限用日期</span><input type="date" name="expiryDate" value="' + U.escapeHtml(item.expiryDate || '') + '"></label>' +
-        '<label><span class="f-label">剩余量</span><select name="remainLevel">' + enumSel(db.categories.remainLevel, item.remainLevel, '（未记录）') + '</select></label>' +
-        '<label><span class="f-label">用完日期（剩余量选「空」后填写）</span><input type="date" name="emptyDate" value="' + U.escapeHtml(item.emptyDate || '') + '"></label>' +
+        // 保质区三项定稿（v1.1.5）：开封日期 / PAO 开封保质 / 未开封保质期（年数自动推算限用日期）
+        '<label><span class="f-label">未开封保质期（年）</span>' +
+        '<input type="number" name="shelfYears" min="0" step="0.5" placeholder="如 3" value="' +
+        (item.shelfYears != null ? U.escapeHtml(String(item.shelfYears)) : '') + '">' +
+        '<span class="muted small">按购买日期自动推算限用日期（临期提醒用）</span></label>' +
+        '<label><span class="f-label">剩余量 / 空瓶日期（选填）</span><div class="tag-add-row">' +
+        '<select name="remainLevel">' + enumSel(db.categories.remainLevel, item.remainLevel, '（未记录）') + '</select>' +
+        '<input type="date" name="emptyDate" title="剩余量选「空」后填写" value="' + U.escapeHtml(item.emptyDate || '') + '"></div></label>' +
         '<label><span class="f-label">使用频率</span><select name="usageFreq">' + enumSel(db.categories.usageFreq, item.usageFreq) + '</select></label>' +
         '<label><span class="f-label">是否致敏</span><select name="allergenic">' +
         ['', '是', '否', '不确定'].map(function (v) {
@@ -620,13 +1135,18 @@ window.UI = (function () {
     const sel = formEl.querySelector('[name=categoryId]');
     const sub = formEl.querySelector('#f-sub');
     if (!sel) return;
-    function update() {
+    // keepStale=false（切分类时）：子分类重置为空；缺省/子分类自身变化时保留旧值，
+    // 旧值不在当前树里也补占位项（与 itemFormHTML 兜底同口径，防旧数据分类被静默清空）
+    function update(keepStale) {
       const cats = catsFor(db, kind === 'digital' ? 'digital' : (kind || 'digital'));
       const l1 = cats.find(function (c) { return c.id === sel.value; });
       if (sub) {
-        const cur = sub.value;
+        const cur = keepStale === false ? '' : sub.value;
+        const ch = (l1 && l1.children) || [];
+        const keep = (cur && !ch.some(function (c) { return c.id === cur; }))
+          ? [{ id: cur, name: cur + '（旧数据保留）' }] : [];
         sub.innerHTML = '<option value="">（可选）</option>' +
-          ((l1 && l1.children) || []).map(function (c) {
+          keep.concat(ch).map(function (c) {
             return '<option value="' + c.id + '"' + (cur === c.id ? ' selected' : '') + '>' + U.escapeHtml(c.name) + '</option>';
           }).join('');
       }
@@ -635,9 +1155,47 @@ window.UI = (function () {
         el.style.display = isGame ? '' : 'none';
       });
     }
-    sel.addEventListener('change', update);
+    sel.addEventListener('change', function () { update(false); });
     if (sub) sub.addEventListener('change', update);
+    // 状态联动（v1.1.0）：非在用显示「停用时间」（默认今天），使用类指标从该日起冻结
+    const statusSel = formEl.querySelector('#f-status');
+    const retiredRow = formEl.querySelector('#f-retired-row');
+    if (statusSel && retiredRow) {
+      const retiredInput = retiredRow.querySelector('[name=retiredAt]');
+      const syncRetired = function () {
+        const off = statusSel.value !== 'in_use';
+        retiredRow.style.display = off ? '' : 'none';
+        if (off && retiredInput && !retiredInput.value) retiredInput.value = U.todayStr();
+      };
+      statusSel.addEventListener('change', syncRetired);
+      syncRetired();
+    }
+    // 售出联动（甲4）：选「已售出」展开售出价/售出日期，日期默认今天
+    const soldRow = formEl.querySelector('#f-sold-row');
+    if (statusSel && soldRow) {
+      const soldDateInput = soldRow.querySelector('[name=soldDate]');
+      const syncSold = function () {
+        const on = statusSel.value === 'sold';
+        soldRow.style.display = on ? '' : 'none';
+        if (on && soldDateInput && !soldDateInput.value) soldDateInput.value = U.todayStr();
+      };
+      statusSel.addEventListener('change', syncSold);
+      syncSold();
+    }
     update();
+  }
+
+  /* 未开封限用日期推算（v1.1.5 保质期精简）：购买日期 + N 年（0.5 年 = 6 个月，表单 step=0.5）。
+     按月推进：new Date(y + 0.5, …) 的小数年会被截断成整年（0.5 年曾退化成 0 天偏移=当天到期）；
+     日溢出回退到目标月最后一天（2-29 + N 年 → 2-28，8-31 + 0.5 年 → 2 月末），不顺延出月 */
+  function shelfExpiryDate(purchaseDate, years) {
+    const p = String(purchaseDate || '').split('-');
+    const y = Number(p[0]), m = Number(p[1]) - 1, d = Number(p[2]);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) return null;
+    const months = Math.round((Number(years) || 0) * 12);
+    const t = new Date(y, m + months, 1);
+    const lastDay = new Date(t.getFullYear(), t.getMonth() + 1, 0).getDate();
+    return new Date(t.getFullYear(), t.getMonth(), Math.min(d, lastDay));
   }
 
   function readItemForm(formEl, baseItem, kind) {
@@ -648,9 +1206,22 @@ window.UI = (function () {
     item.subCategoryId = fd.get('subCategoryId') || '';
     item.name = (fd.get('name') || '').trim();
     item.status = fd.get('status') || 'in_use';
+    // 使用周期截止：非在用记停用时间（表单补充，默认今天）；在用则清除恢复计时
+    if (item.status !== 'in_use') {
+      item.retiredAt = fd.get('retiredAt') || U.todayStr();
+    } else {
+      delete item.retiredAt;
+    }
     item.purchaseDate = fd.get('purchaseDate') || '';
     const pp = fd.get('purchasePrice');
     item.purchasePrice = pp === '' || pp === null ? null : Number(pp);
+    // 售出回血（甲4）：状态=已售出 读取售出价/售出日期（空价记 ''=未填）；
+    // 其他状态保留原值不动（二手回血自动回填的数据不被表单抹掉）
+    if (item.status === 'sold') {
+      const sp = fd.get('soldPrice');
+      item.soldPrice = sp === '' || sp === null ? '' : Number(sp);
+      item.soldDate = fd.get('soldDate') || U.todayStr();
+    }
     item.brand = (fd.get('brand') || '').trim();
     item.notes = (fd.get('notes') || '').trim();
     item.channel = (fd.get('channel') || '').trim();
@@ -669,7 +1240,9 @@ window.UI = (function () {
         window.Storage.saveSettings();
       }
     }
-    item.kind = kind === 'digital'
+    // kind 跟随分类重算（甲21-②）：数码域入口（digital/device/game）都要重算——
+    // 编辑 device 物品把分类改到「游戏」侧时 kind 必须变 game，游戏字段才存得上
+    item.kind = (kind === 'digital' || kind === 'device' || kind === 'game')
       ? (kindOfCategory(db, 'digital', item.categoryId, item.subCategoryId) || 'device')
       : kind;
 
@@ -682,7 +1255,13 @@ window.UI = (function () {
       item.firmware = (fd.get('firmware') || '').trim();
       const bh = fd.get('batteryHealth');
       item.batteryHealth = bh === '' ? null : Number(bh);
-      item.parentItemId = fd.get('parentItemId') || '';
+      // 所属主机：自己/自己的下级（循环挂靠）即便被伪造提交也丢弃（下拉已过滤，此处兜底）
+      let pid = fd.get('parentItemId') || '';
+      if (pid && (pid === item.id ||
+        (window.Models && window.Models.parentChainReaches && window.Models.parentChainReaches(db, pid, item.id)))) {
+        pid = '';
+      }
+      item.parentItemId = pid;
       const el = fd.get('estimatedLifeYears');
       item.estimatedLifeYears = el === '' ? null : Number(el);
       const er = fd.get('estimatedResalePrice');
@@ -714,7 +1293,19 @@ window.UI = (function () {
       item.openedDate = fd.get('openedDate') || '';
       const pao = fd.get('paoMonths');
       item.paoMonths = pao === '' ? null : Number(pao);
-      item.expiryDate = fd.get('expiryDate') || '';
+      // 未开封保质期（年）→ 自动推算限用日期（v1.1.5）：购买日期 + N 年；
+      // 未填年数/0/负数时保留原限用日期（旧数据兼容，baseItem 值经 Object.assign 带入不覆盖）
+      const sy = fd.get('shelfYears');
+      item.shelfYears = sy === '' || sy == null ? null : Math.max(0, Number(sy) || 0);
+      if (item.shelfYears > 0 && item.purchaseDate) {
+        const expD = shelfExpiryDate(item.purchaseDate, item.shelfYears);
+        if (expD) item.expiryDate = U.todayStr(expD);
+      } else if (item.shelfYears > 0 && !item.purchaseDate &&
+        (db.settings.requiredFields || {}).purchaseDate === false) {
+        // 「购买日期必填」已关 + 填了年数但无购买日期（v1.1.9）：无法推算限用日期，保存时提示。
+        // 必填开着时会被 validateItem 的「购买日期必填」拦下，到不了这（提示语义只在真能保存时成立）
+        toast('未填购买日期，保质期年数已保存但未推算限用日期', 'info');
+      }
       item.remainLevel = fd.get('remainLevel') || '';
       item.emptyDate = fd.get('emptyDate') || '';
       item.usageFreq = fd.get('usageFreq') || '';
@@ -755,16 +1346,13 @@ window.UI = (function () {
       if (!jobs.length) return;
       Promise.all(jobs).then(function () {
         if (container.isConnected === false) return; // 弹窗已关，不再重绘
-        render();
+        renderResults();
       });
     }
 
-    function render() {
-      const cats = [];
-      items.forEach(function (i) {
-        const c = i.categoryName || '其他';
-        if (cats.indexOf(c) < 0) cats.push(c);
-      });
+    /* 结果区独立重绘（甲9）：搜索输入不再整格重建——input 本身不动，
+       中文输入法候选词/光标不被打断；选中/切 tab 也只刷结果区 */
+    function filtered() {
       let list = items;
       if (activeCat) list = list.filter(function (i) { return (i.categoryName || '其他') === activeCat; });
       if (keyword) {
@@ -774,48 +1362,73 @@ window.UI = (function () {
             ((i.brand || '') + (i.shade || '')).toLowerCase().indexOf(q) >= 0;
         });
       }
-      container.innerHTML =
-        '<div class="picker-search"><input type="search" id="pk-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(keyword) + '"></div>' +
-        '<div class="picker-tabs">' +
-        '<button class="ptab' + (activeCat === '' ? ' on' : '') + '" data-cat="">全部</button>' +
-        cats.map(function (c) {
-          return '<button class="ptab' + (activeCat === c ? ' on' : '') + '" data-cat="' + U.escapeHtml(c) + '">' + U.escapeHtml(c) + '</button>';
-        }).join('') + '</div>' +
-        '<div class="picker-grid">' +
-        (list.length ? list.map(function (i) {
-          const on = selected.has(i.id);
-          return '<div class="pick-card' + (on ? ' on' : '') + '" data-pid="' + i.id + '">' +
-            (thumbOf(i)
-              ? '<img src="' + U.escapeHtml(thumbOf(i)) + '"/>'
-              : '<div class="pick-noimg">' + iconOrEmoji(opts.icon || 'package', 32) + '</div>') +
-            '<div class="pick-name">' + U.escapeHtml(i.name) + '</div>' +
-            (on ? '<div class="pick-check">' + icon('check', 16) + '</div>' : '') +
-            '</div>';
-        }).join('') : '<p class="empty-hint">没有匹配的物品</p>') +
-        '</div>';
+      return list;
+    }
 
-      const searchEl = container.querySelector('#pk-search');
-      searchEl.addEventListener('input', U.debounce(function (e) {
-        keyword = e.target.value;
-        render();
-        const s = container.querySelector('#pk-search');
-        if (s) { s.focus(); s.setSelectionRange(s.value.length, s.value.length); }
-      }, 250));
-      container.querySelectorAll('.ptab').forEach(function (b) {
-        b.addEventListener('click', function () {
-          activeCat = b.getAttribute('data-cat');
-          render();
-        });
-      });
-      container.querySelectorAll('.pick-card').forEach(function (card) {
+    function renderResults() {
+      const grid = container.querySelector('#pk-results');
+      if (!grid) return;
+      const list = filtered();
+      grid.innerHTML = list.length ? list.map(function (i) {
+        const on = selected.has(i.id);
+        return '<div class="pick-card' + (on ? ' on' : '') + '" data-pid="' + i.id + '">' +
+          (thumbOf(i)
+            ? '<img src="' + U.escapeHtml(thumbOf(i)) + '"/>'
+            : '<div class="pick-noimg">' + iconOrEmoji(opts.icon || 'package', 32) + '</div>') +
+          '<div class="pick-name">' + U.escapeHtml(i.name) + '</div>' +
+          (on ? '<div class="pick-check">' + icon('check', 16) + '</div>' : '') +
+          '</div>';
+      }).join('') : '<p class="empty-hint">没有匹配的物品</p>';
+      grid.querySelectorAll('.pick-card').forEach(function (card) {
         card.addEventListener('click', function () {
           const id = card.getAttribute('data-pid');
           if (selected.has(id)) selected.delete(id);
           else selected.add(id);
-          render();
+          renderResults();
           if (opts.onChange) opts.onChange(Array.from(selected));
         });
       });
+    }
+
+    function render() {
+      const cats = [];
+      items.forEach(function (i) {
+        const c = i.categoryName || '其他';
+        if (cats.indexOf(c) < 0) cats.push(c);
+      });
+      container.innerHTML =
+        '<div class="picker-search"><input type="search" id="pk-search" placeholder="搜索名称 / 品牌 / 色号…" value="' + U.escapeHtml(keyword) + '"></div>' +
+        '<div class="picker-tabs">' +
+        '<button type="button" class="ptab' + (activeCat === '' ? ' on' : '') + '" data-cat="">全部</button>' +
+        cats.map(function (c) {
+          return '<button type="button" class="ptab' + (activeCat === c ? ' on' : '') + '" data-cat="' + U.escapeHtml(c) + '">' + U.escapeHtml(c) + '</button>';
+        }).join('') + '</div>' +
+        '<div class="picker-grid" id="pk-results"></div>';
+
+      const searchEl = container.querySelector('#pk-search');
+      // IME 组词期间挂起重绘，组词完成才刷新结果（甲9）
+      let composing = false;
+      searchEl.addEventListener('compositionstart', function () { composing = true; });
+      searchEl.addEventListener('compositionend', function (e) {
+        composing = false;
+        keyword = e.target.value;
+        renderResults();
+      });
+      searchEl.addEventListener('input', U.debounce(function (e) {
+        if (composing) return;
+        keyword = e.target.value;
+        renderResults();
+      }, 250));
+      container.querySelectorAll('.ptab').forEach(function (b) {
+        b.addEventListener('click', function () {
+          activeCat = b.getAttribute('data-cat');
+          container.querySelectorAll('.ptab').forEach(function (x) {
+            x.classList.toggle('on', x.getAttribute('data-cat') === activeCat);
+          });
+          renderResults();
+        });
+      });
+      renderResults();
     }
     render();
     resolveThumbs();
@@ -847,8 +1460,14 @@ window.UI = (function () {
       case 'uses': return ((item.kind === 'clothing' ? item.wearCount : item.useCount) || 0) + ' 次';
       case 'cpw': return item.cost && item.cost.costPerUse != null ? U.formatCost(item.cost.costPerUse) + ' / 次' : '暂无使用记录';
       case 'daily': return item.cost && item.cost.dailyCost != null ? U.formatCost(item.cost.dailyCost) + ' / 天' : '';
-      case 'held': return item.cost && item.cost.heldDays != null ? '已持有 ' + item.cost.heldDays + ' 天' : '';
+      case 'held': {
+        if (!item.cost || item.cost.heldDays == null) return '';
+        const stopped = item.retiredAt || item.soldDate;
+        return (stopped ? '共使用 ' : '已使用 ') + item.cost.heldDays + ' 天';
+      }
       case 'idle': {
+        // 已停用显示「已停用」（排序仍按数值参与）
+        if (item.retiredAt || item.soldDate) return '已停用';
         const d = window.Models.idleDaysOf(db, item);
         return d <= 1 ? '刚用过' : '吃灰 ' + d + ' 天';
       }
@@ -901,7 +1520,7 @@ window.UI = (function () {
         ? '<img data-path="' + U.escapeHtml(img) + '" alt=""/>'
         : '<div class="item-noimg">' + catIcon(db, item, 48) + '</div>') +
       '<div class="item-badges">' + badges + '</div>' +
-      (opts.quickAdd ? '<button class="quick-add" data-quick="' + item.id + '" title="' + (item.kind === 'clothing' ? '穿着 +1' : '使用 +1') + '">' + icon('plus', 12) + '1</button>' : '') +
+      (opts.quickAdd ? '<button type="button" class="quick-add" data-quick="' + item.id + '" title="' + (item.kind === 'clothing' ? '穿着 +1' : '使用 +1') + '">' + icon('plus', 12) + '1</button>' : '') +
       '</div>' +
       '<div class="item-info">' +
       '<div class="item-name" title="' + U.escapeHtml(item.name) + '">' + U.escapeHtml(item.name) + '</div>' +
@@ -915,12 +1534,12 @@ window.UI = (function () {
     const sourceLabel = { manual: '手动', outfit: '打卡', edit: '修正' };
     return log.length
       ? log.map(function (l) {
-        return '<div class="log-row">' +
+        return '<div class="log-row op-host">' +
           '<span class="log-delta ' + (l.delta >= 0 ? 'up' : 'down') + '">' + (l.delta >= 0 ? '+' : '') + l.delta + '</span>' +
           '<span class="muted">' + U.escapeHtml(l.date || '') + '</span>' +
           '<span class="tag">' + (sourceLabel[l.source] || U.escapeHtml(l.source || '手动')) + '</span>' +
           '<span class="flex1">' + U.escapeHtml(l.note || '') + '</span>' +
-          '<button class="btn-icon" data-del-log="' + l.id + '" title="删除此条">' + icon('trash-2', 14) + '</button>' +
+          '<span class="op-float"><button class="btn-icon" data-del-log="' + l.id + '" title="删除此条">' + icon('trash-2', 14) + '</button></span>' +
           '</div>';
       }).join('')
       : '<p class="empty-hint">暂无使用记录</p>';
@@ -963,7 +1582,7 @@ window.UI = (function () {
         title: cfg.title, width: 620,
         bodyHTML:
           (combos.length ? '<div class="combo-list">' + combos.map(function (c, i) {
-            return '<div class="combo-row">' +
+            return '<div class="combo-row op-host">' +
               (c.images && c.images[0]
                 ? '<img class="combo-thumb" data-path="' + U.escapeHtml(c.images[0]) + '" alt=""/>'
                 : '<div class="combo-thumb combo-thumb-empty">' + iconOrEmoji(cfg.icon || 'sparkles', 24) + '</div>') +
@@ -971,8 +1590,9 @@ window.UI = (function () {
               '<div class="combo-meta">' + comboBadges(c) +
               '<span class="muted small">' + (c.itemIds || []).length + ' 件物品' +
               ((c.images || []).length ? ' · 范例图 ' + c.images.length : '') + '</span></div></div>' +
+              '<span class="op-float">' +
               '<button class="btn btn-ghost btn-sm" data-edit-combo="' + i + '">编辑</button>' +
-              '<button class="btn-icon" data-del-combo="' + i + '" title="删除">' + icon('trash-2', 14) + '</button></div>';
+              '<button class="btn-icon" data-del-combo="' + i + '" title="删除">' + icon('trash-2', 14) + '</button></span></div>';
           }).join('') + '</div>'
             : '<p class="empty-hint">还没有' + U.escapeHtml(cfg.title) + '，点下方「新建组合」创建第一个</p>'),
         footerHTML: '<button class="btn btn-ghost" data-x="c">关闭</button>' +
@@ -1025,6 +1645,7 @@ window.UI = (function () {
           '<h4 class="detail-sub">范例图（可多张，便于打卡时对照参考）</h4><div id="combo-imgs"></div>',
         footerHTML: '<button class="btn btn-ghost" data-x="c">取消</button>' +
           '<button class="btn btn-primary" data-x="s">' + (ed ? '保存修改' : '保存组合') + '</button>',
+        formGuard: true, // 带表单弹窗：误点遮罩先确认（甲8）
         // × / 遮罩关闭也回列表（列表是这棵流程的根）
         onClose: function () { if (!navigated) openList(); },
         onMount: function (wrap, close) {
@@ -1073,7 +1694,7 @@ window.UI = (function () {
             if (!name) { toast('请填写组合名称', 'error'); return; }
             if (!ids.length) { toast('至少选择一件物品', 'error'); return; }
             const btn = wrap.querySelector('[data-x=s]');
-            btn.disabled = true;
+            loadingBtn(btn, true); // 丙4：保存中 loading
             try {
               const images = await uploader.finalize();
               const rec = {
@@ -1086,7 +1707,7 @@ window.UI = (function () {
               toast(ed ? '已保存' : '组合已保存', 'success');
               navigated = true; close(); openList();
             } catch (e) {
-              toast('保存失败：' + e.message, 'error'); btn.disabled = false;
+              toast('保存失败：' + e.message, 'error'); loadingBtn(btn, false);
             }
           });
         }
@@ -1130,8 +1751,34 @@ window.UI = (function () {
     });
   }
 
+  /* v1.1.8：排行条名称过长 → 悬停自动滚动展示（进入时测量溢出量，Web Animations 平移到名称尾） */
+  function bindRankMarquee(scope) {
+    var root = scope || document;
+    if (root.__rankMarqueeBound) return;
+    root.__rankMarqueeBound = true;
+    root.addEventListener('mouseover', function (e) {
+      var lab = e.target && e.target.closest ? e.target.closest('.rank-label') : null;
+      if (!lab || lab.__mq) return;
+      var t = lab.querySelector('.rank-label-text');
+      if (!t || !t.animate) return; // JSDOM/老环境无 Web Animations：静态省略号即可
+      var over = t.scrollWidth - lab.clientWidth;
+      if (over <= 2) return;
+      lab.__mq = t.animate(
+        [{ transform: 'translateX(0)' }, { transform: 'translateX(' + (-(over + 8)) + 'px)' }],
+        { duration: Math.min(3000, 500 + over * 14), fill: 'forwards', easing: 'linear' }
+      );
+    });
+    root.addEventListener('mouseout', function (e) {
+      var lab = e.target && e.target.closest ? e.target.closest('.rank-label') : null;
+      if (!lab || !lab.__mq) return;
+      if (e.relatedTarget && lab.contains(e.relatedTarget)) return;
+      try { lab.__mq.cancel(); } catch (err) {}
+      lab.__mq = null;
+    });
+  }
+
   return {
-    toast: toast, modal: modal, confirmDialog: confirmDialog,
+    toast: toast, modal: modal, confirmDialog: confirmDialog, loadingBtn: loadingBtn,
     cropImage: cropImage, imageUploader: imageUploader, picker: picker,
     itemFormHTML: itemFormHTML, bindFormToggles: bindFormToggles, readItemForm: readItemForm,
     calAddMini: calAddMini, calHint: calHint, calNav: calNav,
@@ -1139,6 +1786,7 @@ window.UI = (function () {
     icon: icon, iconOrEmoji: iconOrEmoji, ICON_SIZES: ICON_SIZES,
     bindTagAdd: bindTagAdd, comboBadges: comboBadges,
     sortOptionsFor: sortOptionsFor, sortItems: sortItems, sortDirLabel: sortDirLabel,
-    isGameCategory: isGameCategory, usageLogHTML: usageLogHTML, catIcon: catIcon
+    isGameCategory: isGameCategory, usageLogHTML: usageLogHTML, catIcon: catIcon,
+    bindDatePickers: bindDatePickers, bindRankMarquee: bindRankMarquee
   };
 })();

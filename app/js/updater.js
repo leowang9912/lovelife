@@ -184,17 +184,28 @@ window.Updater = (function () {
           const v = await p.json();
           if (!wantVer || String(v.version) === wantVer) {
             clearInterval(timer);
-            if (text) text.textContent = '已升级到 v' + wantVer + '，正在刷新…';
+            if (text) text.textContent = '已升级到 v' + wantVer + '，正在重新打开…';
             try { sessionStorage.setItem('lovelife-upgraded', wantVer); } catch (e) {}
-            setTimeout(function () { location.reload(); }, 600);
+            // v1.1.7 更新完成 = 完全关闭旧窗口，由 lovelife.bat 重新打开软件
+            // （新窗口已/将出现）。close() 被浏览器拒绝时兜底刷新保底可用
+            setTimeout(function () {
+              try { window.close(); } catch (e) {}
+              setTimeout(function () {
+                if (text) text.textContent = '新窗口已打开，本窗口可手动关闭';
+                try { window.UI.toast('更新完成，新窗口已打开', 'success'); } catch (e) {}
+                location.reload();
+              }, 800);
+            }, 300);
             return;
           }
         }
       } catch (e) { /* 服务重启中 */ }
-      // 更新失败的兜底观察：服务没换但状态变 failed
+      // 更新失败的兜底观察：服务没换但状态变 failed。
+      // 任何时刻看到 failed 都如实报「更新失败」——此前只在前 10 次内认失败，
+      // 超过 15 秒才失败的（如解包阶段）会被掩盖成「服务未自动重启」，误导用户
       try {
         const st = await (await fetch('/api/update/status', { cache: 'no-store' })).json();
-        if (st.state === 'failed' && tries < 10) {
+        if (st.state === 'failed') {
           clearInterval(timer);
           if (text) text.innerHTML = '更新失败：' + U.escapeHtml(st.error || '未知错误');
           window.UI.toast('更新失败：' + (st.error || '未知错误'), 'error');
@@ -203,7 +214,8 @@ window.Updater = (function () {
       } catch (e) { /* 忽略 */ }
       if (tries > 80) {
         clearInterval(timer);
-        if (text) text.textContent = '服务未自动重启，请手动双击 lovelife.bat';
+        if (text) text.textContent = '服务未自动重启，请手动双击 lovelife.bat（安全提示选"允许"）';
+        try { window.UI.toast('服务未自动重启，请手动双击 lovelife.bat 启动', 'error'); } catch (e) {}
       }
     }, 1500);
   }

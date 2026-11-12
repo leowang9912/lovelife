@@ -11,6 +11,71 @@ window.Models = (function () {
     };
   }
 
+  /* 钱袋分类兜底：服务端未下发 wallet.cats 时（如旧 exe 未重编译），前端仍可用完整主流记账分类树 */
+  function defaultWalletCats() {
+    const P = function (id, name, icon, children) {
+      return { id: id, name: name, icon: icon, children: children || [] };
+    };
+    const C = function (id, name, icon) { return { id: id, name: name, icon: icon }; };
+    return {
+      expense: [
+        P('w_food', '食品餐饮', 'color_ic_parent_restaurant', [
+          C('w_food_breakfast', '早餐', 'color_ic_restaurant_breakfast'), C('w_food_lunch', '午餐', 'color_ic_restaurant_lunch'),
+          C('w_food_dinner', '晚餐', 'color_ic_restaurant_dinner'), C('w_food_snack', '休闲零食', 'color_ic_restaurant_snacks'),
+          C('w_food_fresh', '生鲜食品', 'color_ic_restaurant_fresh'), C('w_food_foodstuff', '粮油调味', 'color_ic_restaurant_foodstuff'),
+          C('w_food_treat', '请客吃饭', 'color_ic_restaurant_treat'), C('w_food_wine', '饮料酒水', 'color_ic_restaurant_wine'),
+          C('w_food_other', '其他', 'color_ic_parent_restaurant')]),
+        P('w_shop', '购物消费', 'color_ic_parent_shopping', [
+          C('w_shop_digital', '手机数码', 'color_ic_shopping_phone'), C('w_shop_clothing', '服饰运动', 'color_ic_shopping_motion'),
+          C('w_shop_beauty', '个护美妆', 'color_ic_shopping_makeup'), C('w_shop_watch', '配饰腕表', 'color_ic_shopping_watch'),
+          C('w_shop_appliance', '生活电器', 'color_ic_shopping_electric'), C('w_shop_home', '日常家居', 'color_ic_shopping_home'),
+          C('w_shop_baby', '母婴玩具', 'color_ic_shopping_baby'), C('w_shop_office', '办公用品', 'color_ic_shopping_office'),
+          C('w_shop_pets', '宠物用品', 'color_ic_shopping_pets'), C('w_shop_virtual', '虚拟充值', 'color_ic_shopping_recharge'),
+          C('w_shop_renovation', '装修装饰', 'color_ic_shopping_renovation'), C('w_shop_other', '其他', 'color_ic_parent_shopping')]),
+        P('w_traffic', '出行交通', 'color_ic_parent_traffic', [
+          C('w_tf_taxi', '打车', 'color_ic_traffic_taxi'), C('w_tf_public', '公共交通', 'color_ic_traffic_bus'),
+          C('w_tf_fuel', '加油', 'color_ic_traffic_oil'), C('w_tf_park', '停车费', 'color_ic_traffic_parking'),
+          C('w_tf_maintain', '保养修车', 'color_ic_traffic_maintain'), C('w_tf_train', '火车', 'color_ic_traffic_train'),
+          C('w_tf_flight', '飞机', 'color_ic_traffic_aircraft'), C('w_tf_other', '其他', 'color_ic_parent_traffic')]),
+        P('w_home', '居家生活', 'color_ic_parent_home', [
+          C('w_hm_rent', '房租还贷', 'color_ic_home_loan'), C('w_hm_water', '水费', 'color_ic_home_water'),
+          C('w_hm_power', '电费', 'color_ic_home_electricity_fees'), C('w_hm_gas', '燃气费', 'color_ic_home_gas'),
+          C('w_hm_property', '物业费', 'color_ic_home_property'), C('w_hm_net', '话费宽带', 'color_ic_home_telephone_bill'),
+          C('w_hm_parking', '车位费', 'color_ic_home_parking_lot'), C('w_hm_clean', '家政清洁', 'color_ic_home_husekeeping'),
+          C('w_hm_other', '其他', 'color_ic_parent_home')]),
+        P('w_fun', '休闲娱乐', 'color_ic_parent_game', [
+          C('w_fn_travel', '旅游度假', 'color_ic_game_travel'), C('w_fn_movie', '电影唱歌', 'color_ic_game_film'),
+          C('w_fn_sport', '运动健身', 'color_ic_game_keep_fit'), C('w_fn_chess', '棋牌桌游', 'color_ic_game_chess'),
+          C('w_fn_show', '演出', 'color_ic_game_show'), C('w_fn_bar', '酒吧', 'color_ic_game_bar'),
+          C('w_fn_bath', '足浴按摩', 'color_ic_game_foot_bath'), C('w_fn_other', '其他', 'color_ic_parent_game')]),
+        P('w_edu', '文化教育', 'color_ic_parent_education', [
+          C('w_ed_book', '书报杂志', 'color_ic_education_book'), C('w_ed_train', '培训考试', 'color_ic_education_train'),
+          C('w_ed_tuition', '学费', 'color_ic_education_tuition'), C('w_ed_other', '其他', 'color_ic_parent_education')]),
+        P('w_medical', '健康医疗', 'color_ic_parent_medical', [
+          C('w_md_drug', '买药', 'color_ic_medical_medicine'), C('w_md_hospital', '医院', 'color_ic_medical_hospital'),
+          C('w_md_care', '滋补保健', 'color_ic_medical_healthcare'), C('w_md_other', '其他', 'color_ic_parent_medical')]),
+        P('w_gift', '送礼人情', 'color_ic_parent_gift', [
+          C('w_gf_present', '礼物', 'color_ic_gift_gift'), C('w_gf_redpacket', '红包', 'color_ic_gift_red_paper'),
+          C('w_gf_elder', '孝敬长辈', 'color_ic_gift_filial_piety'), C('w_gf_reward', '打赏', 'color_ic_gift_reward'),
+          C('w_gf_lend', '借出', 'color_ic_gift_lend'), C('w_gf_other', '其他', 'color_ic_parent_gift')]),
+        P('w_pet', '宠物', 'color_ic_shopping_pets', [
+          C('w_pt_food', '宠物食品', 'color_ic_shopping_pets'), C('w_pt_medical', '宠物医疗', 'color_ic_medical_medicine'),
+          C('w_pt_groom', '宠物美容', 'color_ic_shopping_pets'), C('w_pt_other', '其他', 'color_ic_shopping_pets')]),
+        P('w_other_exp', '其他支出', 'color_ic_parent_other', [
+          C('w_oe_charity', '慈善捐助', 'color_ic_other_charitable'), C('w_oe_loss', '罚款赔偿', 'color_ic_other_fine'),
+          C('w_oe_invest', '理财支出', 'color_ic_stock_out'), C('w_oe_other', '其他', 'color_ic_parent_other')])
+      ],
+      income: [
+        C('w_in_wages', '工资', 'color_ic_income_wages'), C('w_in_bonus', '奖金', 'color_ic_income_bonus'),
+        C('w_in_subsidy', '补贴', 'color_ic_income_subsidy'), C('w_in_parttime', '兼职外快', 'color_ic_income_part_time_job'),
+        C('w_in_reimb', '报销', 'color_ic_income_reimbursement'), C('w_in_gift', '礼金人情', 'color_ic_income_cash_gift'),
+        C('w_in_borrow', '借入', 'color_ic_income_borrow'), C('w_in_resale', '二手闲置', 'color_ic_income_second_hand'),
+        C('w_in_finance', '理财盈利', 'color_ic_income_manager_money'), C('w_in_winning', '中奖', 'color_ic_income_winning'),
+        C('w_in_other', '其他', 'color_ic_income_other')
+      ]
+    };
+  }
+
   function defaultSettings() {
     return {
       idleWarnDays: 60, currency: '¥', theme: 'light', rememberAccount: false,
@@ -21,6 +86,8 @@ window.Models = (function () {
         { id: 'composition', enabled: true, fixed: true },
         { id: 'monthly', enabled: true },
         { id: 'budget', enabled: true },
+        { id: 'wTrend', enabled: true },
+        { id: 'wCatPie', enabled: true },
         { id: 'expiry', enabled: true },
         { id: 'idle', enabled: true },
         { id: 'cpw', enabled: true },
@@ -66,20 +133,66 @@ window.Models = (function () {
   }
 
   /* ---------- 成本 ---------- */
+  /* ownInvested 自身投入 = 购入价 + 维修流水（type='repair'）。
+     负购入价按 0 处理：负投入会把日均/次均打成负数（脏数据兜底）。 */
   function ownInvested(db, item) {
-    let sum = Number(item.purchasePrice) || 0;
+    let sum = Math.max(0, Number(item.purchasePrice) || 0);
     db.events.forEach(function (e) {
       if (e.itemId === item.id && e.type === 'repair') sum += Number(e.cost) || 0;
     });
     return sum;
   }
 
+  /* 维修流水逐条（成本审计用） */
+  function repairEventsOf(db, item) {
+    return db.events.filter(function (e) {
+      return e.itemId === item.id && e.type === 'repair';
+    }).map(function (e) {
+      return { id: e.id, date: e.date || '', cost: Number(e.cost) || 0, note: e.note || '' };
+    });
+  }
+
+  /* 从 startId 沿 parentItemId 向上走，是否能到达 targetId（循环挂靠检测用，50 层封顶防脏数据死循环） */
+  function parentChainReaches(db, startId, targetId) {
+    let cur = startId, n = 0;
+    while (cur && n++ < 50) {
+      if (cur === targetId) return true;
+      const p = (db.items || []).find(function (x) { return x && x.id === cur; });
+      cur = p ? (p.parentItemId || '') : '';
+    }
+    return false;
+  }
+
+  /* 挂靠配件（parentItemId 指向本机的子物品）：只挂一层，孙配件不再递归。
+     循环挂靠防御（A↔B 互挂/自挂等脏数据）：若本机自己又挂在该"配件"名下（父链回环），
+     该"配件"实为本机的祖先/自身，不得计入本机总投入（防互相重复计价/自身价格算两遍） */
+  function accessoryItemsOf(db, item) {
+    return db.items.filter(function (i) {
+      return i && i.parentItemId === item.id && !parentChainReaches(db, item.id, i.id);
+    });
+  }
+
+  /* totalInvested 总投入（TCO）= 自身投入 + 挂靠配件各自投入（配件挂靠 TCO，设计口径） */
   function totalInvested(db, item) {
     let sum = ownInvested(db, item);
-    db.items.forEach(function (i) {
-      if (i.parentItemId === item.id) sum += ownInvested(db, i);
+    accessoryItemsOf(db, item).forEach(function (i) {
+      sum += ownInvested(db, i);
     });
     return sum;
+  }
+
+  /* 使用周期截止日：已售出(soldDate) > 状态非在用(retiredAt) > 现在。
+     物品一旦非在用，日均使用成本/使用天数/吃灰/开封时长等使用类指标全部冻结为固定值，
+     不再随时间刷新（v1.1.0 用户要求）。 */
+  function useEndDate(item, now) {
+    return U.parseDate(item.soldDate) || U.parseDate(item.retiredAt) || (now || new Date());
+  }
+
+  /* 数值归一：null/undefined/''/NaN → null（空=未填），其余转 Number */
+  function numOrNull(v) {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return isNaN(n) ? null : n;
   }
 
   function calcItemCost(db, item, now) {
@@ -87,15 +200,29 @@ window.Models = (function () {
     const cat = findCategory(db, item) || {};
     const pDate = U.parseDate(item.purchaseDate) || now;
     const soldDate = U.parseDate(item.soldDate);
-    const endDate = soldDate || now;
+    const retiredAt = U.parseDate(item.retiredAt);
+    const endDate = useEndDate(item, now);
     const heldDays = Math.max(1, U.daysBetween(pDate, endDate));
-    const invested = totalInvested(db, item);
 
-    const lifeYears = Number(item.estimatedLifeYears) || Number(cat.lifeYears) || 5;
-    const residualRate = item.residualRate !== null && item.residualRate !== undefined
-      ? Number(item.residualRate) : (Number(cat.residualRate) || 0.1);
+    // 总投入构成（可审计）：购入价 + 维修流水 + 配件挂靠（与 totalInvested 同口径，拆开算便于出 breakdown）
+    const base = Math.max(0, Number(item.purchasePrice) || 0);
+    const repairs = repairEventsOf(db, item);
+    const repairCost = repairs.reduce(function (a, b) { return a + b.cost; }, 0);
+    const accessories = accessoryItemsOf(db, item).map(function (i) {
+      return { id: i.id, name: i.name || '', amount: ownInvested(db, i) };
+    });
+    const accessoriesTotal = accessories.reduce(function (a, b) { return a + b.amount; }, 0);
+    const invested = base + repairCost + accessoriesTotal;
+
+    // 寿命：item 优先（空/0/负数=未填，落到分类），分类空/0/负数落到默认 5 年
+    const lyItem = numOrNull(item.estimatedLifeYears);
+    const lyCat = numOrNull(cat.lifeYears);
+    const lifeYears = (lyItem !== null && lyItem > 0) ? lyItem : ((lyCat !== null && lyCat > 0) ? lyCat : 5);
+    // 残值率：item 优先（空=未填），再分类（显式 0 是合法值，不得被 0.1 默认吞掉），再默认 0.1
+    let residualRate = numOrNull(item.residualRate);
+    if (residualRate === null) residualRate = numOrNull(cat.residualRate);
+    if (residualRate === null) residualRate = 0.1;
     const usedRatio = Math.min(1, heldDays / (lifeYears * 365));
-    const base = Number(item.purchasePrice) || 0;
     const value = base * (residualRate + (1 - residualRate) * (1 - usedRatio));
     const dailyCost = invested / heldDays;
 
@@ -104,22 +231,53 @@ window.Models = (function () {
     const wearCount = totalWearCount(db, item);
     const playHours = Number(item.playHours) || 0;
 
-    let costPerUse = null;
-    if (item.kind === 'clothing' && wearCount > 0) costPerUse = invested / wearCount;
-    else if (item.kind === 'life' && useCount > 0) costPerUse = invested / useCount;
-    else if (useCount > 0) costPerUse = invested / useCount;
+    // 次均成本分母（不重复计）：
+    // - clothing：穿着次数 = 穿搭自动(autoWearMap) + 手动(manualWearCount)；usageLog 是台账与 manualWearCount 同步，不叠加
+    // - life/数码/游戏：useCount（与 usageLog 同步的总数）；0 次 → null
+    // - clothing 分母只认穿着次数，历史脏数据里的 useCount 不得混入（v117 修正）
+    let costPerUse = null, perUse = null;
+    if (item.kind === 'clothing') {
+      if (wearCount > 0) {
+        costPerUse = invested / wearCount;
+        perUse = {
+          denominator: 'wear', count: wearCount,
+          auto: autoWearMap(db)[item.id] || 0, manual: Number(item.manualWearCount) || 0
+        };
+      }
+    } else if (useCount > 0) {
+      costPerUse = invested / useCount;
+      perUse = { denominator: 'use', count: useCount };
+    }
 
     const costPerHour = playHours > 0 ? invested / playHours : null;
+    // 售出回血（甲4）：只要填了售出价就算净成本/回血率（售出日期缺失也不挡展示）；
+    // ''/null/undefined 视为未填
     let netCost = null, recoveryRate = null;
-    if (soldDate && item.soldPrice !== null && item.soldPrice !== undefined) {
-      netCost = invested - (Number(item.soldPrice) || 0);
-      recoveryRate = invested > 0 ? (Number(item.soldPrice) || 0) / invested : null;
+    const sp = item.soldPrice;
+    if (sp !== null && sp !== undefined && sp !== '' && !isNaN(Number(sp))) {
+      netCost = invested - (Number(sp) || 0);
+      recoveryRate = invested > 0 ? (Number(sp) || 0) / invested : null;
     }
     return {
       heldDays: heldDays, invested: invested, dailyCost: dailyCost,
       monthlyCost: dailyCost * 30, currentValue: value, usedRatio: usedRatio,
       lifeYears: lifeYears, costPerUse: costPerUse, costPerHour: costPerHour,
-      netCost: netCost, recoveryRate: recoveryRate
+      netCost: netCost, recoveryRate: recoveryRate,
+      /* breakdown：成本构成审计（v117）——总投入/天数/次均分母每一步可复核 */
+      breakdown: {
+        formula: '总投入 = 购入价 + 维修流水 + 配件挂靠',
+        invested: invested, purchase: base,
+        repairCost: repairCost, repairs: repairs,
+        accessories: accessories, accessoriesTotal: accessoriesTotal,
+        heldDays: {
+          purchaseDate: item.purchaseDate || '',
+          from: U.todayStr(pDate), to: U.todayStr(endDate),
+          source: soldDate ? 'soldDate' : (retiredAt ? 'retiredAt' : 'now'),
+          days: heldDays
+        },
+        perUse: perUse,
+        perHour: playHours > 0 ? { hours: playHours } : null
+      }
     };
   }
 
@@ -193,6 +351,8 @@ window.Models = (function () {
   /* ---------- 化妆品：开封/PAO/临期 ---------- */
   function lifeStatus(item, now) {
     now = now || new Date();
+    // 非在用物品：开封时长等使用类指标冻结在截止日（PAO 到期日本身客观不变）
+    const end = useEndDate(item, now);
     const opened = U.parseDate(item.openedDate);
     const pao = Number(item.paoMonths) || 0;
     let paoExpiry = null, daysLeft = null, state = 'ok';
@@ -205,7 +365,7 @@ window.Models = (function () {
       else if (daysLeft <= 30) state = 'near';
     }
     return {
-      openedDays: opened ? U.daysBetween(opened, now) : null,
+      openedDays: opened ? U.daysBetween(opened, end) : null,
       paoExpiry: paoExpiry, paoDaysLeft: daysLeft, paoState: state,
       isEmptied: item.status === 'empty' || item.remainLevel === '空',
       emptyDate: item.emptyDate || '',
@@ -217,6 +377,8 @@ window.Models = (function () {
     now = now || new Date();
     const out = [];
     db.items.forEach(function (it) {
+      // 已离开（售出/转赠/报废）的物品不再提醒临期与保修
+      if (it.status === 'sold' || it.status === 'gifted' || it.status === 'broken') return;
       if (it.kind === 'life') {
         const s = lifeStatus(it, now);
         if (s.paoState === 'near' || s.paoState === 'expired') {
@@ -271,8 +433,10 @@ window.Models = (function () {
      都没有才按购入日起算（v1.0.9 修正：美妆/数码此前只看购入日，天天在用也显示吃灰） */
   function idleDaysOf(db, i, now) {
     now = now || new Date();
+    // 非在用物品：吃灰天数冻结在截止日，不再随时间增长
+    const end = useEndDate(i, now);
     const d0 = function (s) {
-      const d = U.daysBetween(U.parseDate(s), now);
+      const d = U.daysBetween(U.parseDate(s), end);
       return d == null ? 0 : d;
     };
     let last = i.lastUsedDate || '';
@@ -287,6 +451,41 @@ window.Models = (function () {
   }
 
   /* ---------- 汇总 ---------- */
+  // 钱袋（记账）统计：与物品/美食合并时，已关联物品的账单金额只算一次
+  // （账单里算过、物品购入里也有 → 差值扣除），未记账的物品购入照常计。
+  function walletStats(db) {
+    const bills = ((db.wallet || {}).bills) || [];
+    const monthExpense = {}, monthIncome = {}, monthLinked = {};
+    let curExp = 0, curInc = 0, curLinked = 0;
+    const byCat = {};
+    const mk = U.monthKey(U.todayStr());
+    bills.forEach(function (b) {
+      const k = U.monthKey(b.date || '');
+      const a = Math.abs(Number(b.amount) || 0);
+      if (b.type === 'income') {
+        monthIncome[k] = (monthIncome[k] || 0) + a;
+        if (k === mk) curInc += a;
+      } else if (b.type === 'expense') {
+        monthExpense[k] = (monthExpense[k] || 0) + a;
+        // 已关联物品词条或美食条目的账单，在合并口径里不再重复计（P0 修复：正餐账单曾被算两遍）
+        const linked = b.itemId || b.foodId;
+        if (linked) monthLinked[k] = (monthLinked[k] || 0) + a;
+        if (k === mk) {
+          curExp += a;
+          if (linked) curLinked += a;
+          const key = b.subCatId || b.catId || 'other';
+          byCat[key] = (byCat[key] || 0) + a;
+        }
+      }
+    });
+    return {
+      monthExpense: curExp, monthIncome: curInc,
+      monthUnlinkedExpense: Math.max(0, curExp - curLinked), monthLinkedExpense: curLinked,
+      monthlyExpense: monthExpense, monthlyIncome: monthIncome, monthlyLinkedExpense: monthLinked,
+      byCat: byCat, billCount: bills.length
+    };
+  }
+
   function summary(db, now) {
     now = now || new Date();
     const list = itemsWithComputed(db);
@@ -341,6 +540,9 @@ window.Models = (function () {
     catSpend.food = foodStats(db).monthSpend;
 
     // 估值趋势（近 12 月账面估值简化：当前值 + 未过折旧部分）
+    const wstat = walletStats(db);
+    // 综合花费（合并口径）：账单支出 + 物品购入 + 美食 − 已关联物品的账单（防重复计）
+    const combinedMonthSpend = wstat.monthExpense + monthSpend + (foodStats(db).monthSpend || 0) - wstat.monthLinkedExpense;
     return {
       items: list,
       counts: { all: list.length, device: devices.length, game: games.length, clothing: clothes.length, life: lifes.length },
@@ -350,7 +552,8 @@ window.Models = (function () {
       cpwList: cpwList, lifeUseList: lifeUseList,
       dailyCostTotal: sum(active, function (i) { return ownInvested(db, i) / i.cost.heldDays; }),
       expiry: expiryList(db, now), empties: emptyList(db),
-      food: foodStats(db), catSpend: catSpend
+      food: foodStats(db), catSpend: catSpend,
+      wallet: wstat, combinedMonthSpend: combinedMonthSpend
     };
   }
 
@@ -378,20 +581,41 @@ window.Models = (function () {
 
   function validateFood(rec) {
     const errs = [];
-    if (!rec.foodCuisine) errs.push('菜系必填');
+    // 菜系必填：手动新建必须填；账单同步来源（fromBill）豁免——
+    // 自动建档菜系预填「其他」，这里兜底保证补评分/图片永远能存上（甲1）
+    if (!rec.foodCuisine && !rec.fromBill) errs.push('菜系必填');
     if (!rec.meal) errs.push('餐别必填');
-    if (rec.price === '' || rec.price === null || rec.price === undefined || isNaN(Number(rec.price))) errs.push('价格必填');
+    if (rec.price === '' || rec.price === null || rec.price === undefined || isNaN(Number(rec.price))) {
+      errs.push('价格必填');
+    } else if (Number(rec.price) < 0) {
+      errs.push('价格不能为负'); // 甲10 范围校验：价格 ≥ 0
+    }
+    // 甲10 范围校验：评分/饱腹感 0~5、热量 ≥ 0；空值=未填不拦
+    function inRange(val, min, max, label) {
+      if (val === '' || val === null || val === undefined) return;
+      const n = Number(val);
+      if (isNaN(n) || n < min || n > max) errs.push(label + '需在 ' + min + '~' + max + ' 之间');
+    }
+    inRange(rec.rating, 0, 5, '评分');
+    inRange(rec.fullness, 0, 5, '饱腹感');
+    if (rec.calories !== '' && rec.calories !== null && rec.calories !== undefined) {
+      const cal = Number(rec.calories);
+      if (isNaN(cal) || cal < 0) errs.push('热量不能为负');
+    }
     return errs;
   }
 
   return {
     defaultCategories: defaultCategories, defaultSettings: defaultSettings, emptyDB: emptyDB,
+    defaultWalletCats: defaultWalletCats,
     findCategory: findCategory, findSubCategory: findSubCategory,
     catList: catList, isGameItem: isGameItem,
     ownInvested: ownInvested, totalInvested: totalInvested, calcItemCost: calcItemCost,
+    accessoryItemsOf: accessoryItemsOf, parentChainReaches: parentChainReaches,
     autoWearMap: autoWearMap, totalWearCount: totalWearCount, itemsWithComputed: itemsWithComputed,
     logSum: logSum, appendUsageLog: appendUsageLog, removeUsageLogEntry: removeUsageLogEntry,
     lifeStatus: lifeStatus, expiryList: expiryList, emptyList: emptyList, foodStats: foodStats, idleDaysOf: idleDaysOf,
+    walletStats: walletStats, useEndDate: useEndDate,
     summary: summary, lastWearDate: lastWearDate,
     validateItem: validateItem, validateFood: validateFood
   };

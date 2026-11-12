@@ -5,16 +5,19 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.0.9";
+  const FRONTEND_VERSION = "1.2.2";
 
-  let current = 'plan';
+  let current = 'home'; // 默认首屏=我的主页（v1.1.2）
   let booted = false;
 
   const NAV = [
+    { id: 'home', label: '我的主页', icon: 'house' },
     { id: 'plan', label: '我的统计', icon: 'chart-column' },
+    { id: 'timeline', label: '时间日历', icon: 'clock' },
     { id: 'digital', label: '我的数码', icon: 'gamepad-2' },
     { id: 'clothing', label: '我的衣橱', icon: 'shirt' },
     { id: 'life', label: '我的生活', icon: 'heart' },
+    { id: 'wallet', label: '我的钱袋', icon: 'wallet' },
     { id: 'outfits', label: '穿搭日历', icon: 'calendar-days' },
     { id: 'food', label: '美食日历', icon: 'utensils' },
     { id: 'settings', label: '设置', icon: 'settings' }
@@ -24,12 +27,48 @@ window.App = (function () {
     '🔥', '💎', '🎨', '🎧', '🍰', '🚀', '🌈', '🦋', '🌊', '🍑',
     '⚽', '🎮', '📚', '☕'];
 
+  // 侧栏导航顺序：settings.navOrder 可在设置中排序。
+  // 新增模块（未登记于 navOrder）按 NAV 原位置插入到前驱之后（曾一律垫底——时间日历被钉到设置后，与实际排布漂移）
+  function navOrdered(db) {
+    const raw = (db && db.settings && db.settings.navOrder) || [];
+    const byId = {};
+    NAV.forEach(function (n) { byId[n.id] = n; });
+    const order = raw.filter(function (id) { return byId[id]; });
+    const known = {};
+    order.forEach(function (id) { known[id] = true; });
+    const out = order.map(function (id) { return byId[id]; });
+    NAV.forEach(function (n, ni) {
+      if (known[n.id]) return;
+      // 插到「NAV 前驱里最后一个已就位项」的后面；前驱都没就位则放头部
+      let at = 0;
+      for (let i = ni - 1; i >= 0; i--) {
+        const idx = out.findIndex(function (x) { return x.id === NAV[i].id; });
+        if (idx >= 0) { at = idx + 1; break; }
+      }
+      out.splice(at, 0, n);
+    });
+    return out;
+  }
+
   function go(id) {
     current = id;
     render();
   }
 
   function refresh() { render(); }
+
+  /* 账号切换后统一重置各模块状态（A3）：清 filter/search/排序缓存（排序记忆按新账号
+     listSort 重读）、统计周期 statRange 回默认——防上一账号的筛选/搜索/排序状态残留 */
+  function resetModuleStates() {
+    if (window.Views && window.Views.resetState) window.Views.resetState();
+    if (window.LifeView && window.LifeView.resetState) window.LifeView.resetState();
+    if (window.WalletView && window.WalletView.resetState) window.WalletView.resetState();
+    if (window.PlanView && window.PlanView.resetState) window.PlanView.resetState();
+    if (window.FoodView && window.FoodView.resetState) window.FoodView.resetState();
+    if (window.HomeView && window.HomeView.resetState) window.HomeView.resetState();
+    if (window.TimelineView && window.TimelineView.resetState) window.TimelineView.resetState();
+  }
+  S.onAccountChange(resetModuleStates);
 
   /* ---------- 启动页 / 账号选择（横向一排） ---------- */
   function avatarPickerHTML(current) {
@@ -129,37 +168,57 @@ window.App = (function () {
       return;
     }
     const db = S.getDB();
-    // 侧栏宽度（v1.0.8）：恢复上次拖拽保存的宽度
-    if (db.settings.sidebarWidth) {
-      document.documentElement.style.setProperty('--sidebar-w', Number(db.settings.sidebarWidth) + 'px');
-    }
+    // 侧栏宽度（v1.0.8）：恢复上次拖拽保存的宽度；v1.2.01 图标模式（拖到阈值下自动切换）
+    const savedW = Number(db.settings.sidebarWidth) || 200;
+    document.documentElement.style.setProperty('--sidebar-w', savedW + 'px');
+    document.documentElement.classList.toggle('side-icon-only', savedW < 165);
+    const navHidden = db.settings.navHidden || [];
     app.innerHTML =
       '<aside class="sidebar">' +
-      '<div class="brand"><span class="brand-icon">∞</span>' +
-      '<div><div class="brand-name">人生管家</div><div class="brand-sub">' +
-      U.escapeHtml((db.account && db.account.icon) || '') + ' ' + U.escapeHtml((db.account && db.account.name) || '') +
-      '</div></div></div>' +
-      '<nav class="nav">' + NAV.map(function (n) {
-        return '<a class="nav-item' + (current === n.id ? ' active' : '') + '" data-nav="' + n.id + '">' +
+      '<div class="side-search"><span class="side-search-ic">' + window.UI.icon('search', 18) + '</span>' +
+      '<input id="global-search" placeholder="快速搜索"><span class="side-kbd">Ctrl K</span>' +
+      '<div class="search-results" id="search-results"></div></div>' +
+      '<nav class="nav">' + navOrdered(db).filter(function (n) {
+        return n.id !== 'settings' && navHidden.indexOf(n.id) < 0; // v1.2.01 屏蔽模块
+      }).map(function (n) {
+        return '<a class="nav-item' + (current === n.id ? ' active' : '') + '" data-nav="' + n.id + '" title="' + U.escapeHtml(n.label) + '">' +
           '<span class="nav-icon">' + window.UI.icon(n.icon, 20) + '</span><span>' + n.label + '</span></a>';
       }).join('') + '</nav>' +
-      '<div class="sidebar-foot"><div class="muted small">Ctrl+K 全局搜索 · 可整包迁移</div></div>' +
+      '<div class="sidebar-foot">' +
+      '<a class="nav-item' + (current === 'settings' ? ' active' : '') + '" data-nav="settings">' +
+      '<span class="nav-icon">' + window.UI.icon('settings', 20) + '</span><span>设置</span></a>' +
+      '<div class="side-divider"></div>' +
+      '<div class="side-account" id="side-account-jump" title="账号设置">' +
+      '<div class="side-avatar">' + U.escapeHtml((db.account && db.account.icon) || '😊') + '</div>' +
+      '<div class="side-account-name">' + U.escapeHtml((db.account && db.account.name) || '') + '</div>' +
+      '</div>' +
+      '</div>' +
       '<div class="sidebar-resizer" id="sidebar-resizer" title="拖动调节侧栏宽度；双击恢复默认"></div>' +
       '</aside>' +
       '<main class="main">' +
-      '<div class="top-search"><input id="global-search" placeholder="全局搜索物品 / 穿搭 / 美食…（Ctrl+K）">' +
-      '<div class="search-results" id="search-results"></div></div>' +
       '<div id="main-content"></div></main>';
 
     app.querySelectorAll('[data-nav]').forEach(function (el) {
       el.addEventListener('click', function () { go(el.getAttribute('data-nav')); });
     });
+    // 账户行：直达设置 → 账号页（v1.1.2）
+    const accJump = app.querySelector('#side-account-jump');
+    if (accJump) accJump.addEventListener('click', function () {
+      go('settings');
+      setTimeout(function () {
+        const b = document.querySelector('[data-stab-btn="account"]');
+        if (b) b.click();
+      }, 60);
+    });
 
     const main = document.getElementById('main-content');
-    if (current === 'plan') window.PlanView.render(main);
+    if (current === 'home') window.HomeView.render(main);
+    else if (current === 'plan') window.PlanView.render(main);
+    else if (current === 'timeline') window.TimelineView.render(main);
     else if (current === 'digital') window.Views.items(main, 'digital');
     else if (current === 'clothing') window.Views.items(main, 'clothing');
     else if (current === 'life') window.LifeView.render(main);
+    else if (current === 'wallet') window.WalletView.render(main);
     else if (current === 'outfits') window.Views.outfits(main);
     else if (current === 'food') window.FoodView.render(main);
     else if (current === 'settings') window.SettingsView.render(main);
@@ -168,11 +227,12 @@ window.App = (function () {
     bindSidebarResize(db);
   }
 
-  /* ---------- 侧栏宽度拖拽（v1.0.8）：接缝按住拖动，双击恢复默认 ---------- */
+  /* ---------- 侧栏宽度拖拽（v1.0.8）：接缝按住拖动，双击恢复默认 ----------
+     v1.2.01：拖到阈值（130px）下自动吸到纯图标模式（64px，再窄也不能更窄） */
   function bindSidebarResize(db) {
     const handle = document.getElementById('sidebar-resizer');
     if (!handle) return;
-    const MIN = 200, MAX = 360, DEF = 232;
+    const ICON_W = 64, TOGGLE_AT = 165, MAX = 300, DEF = 175;
     let dragging = false;
     let lastW = Number(db.settings.sidebarWidth) || DEF;
     handle.addEventListener('pointerdown', function (e) {
@@ -182,8 +242,11 @@ window.App = (function () {
     });
     handle.addEventListener('pointermove', function (e) {
       if (!dragging) return;
-      lastW = Math.min(MAX, Math.max(MIN, e.clientX));
-      document.documentElement.style.setProperty('--sidebar-w', lastW + 'px');
+      let w = Math.min(MAX, Math.max(ICON_W, e.clientX));
+      if (w < TOGGLE_AT) w = ICON_W; // 低于阈值吸到纯图标
+      lastW = w;
+      document.documentElement.style.setProperty('--sidebar-w', w + 'px');
+      document.documentElement.classList.toggle('side-icon-only', w === ICON_W);
     });
     function stop(e) {
       if (!dragging) return;
@@ -196,6 +259,7 @@ window.App = (function () {
     handle.addEventListener('pointercancel', stop);
     handle.addEventListener('dblclick', function () {
       document.documentElement.style.setProperty('--sidebar-w', DEF + 'px');
+      document.documentElement.classList.remove('side-icon-only');
       lastW = DEF;
       db.settings.sidebarWidth = DEF;
       S.saveSettings();
@@ -210,6 +274,15 @@ window.App = (function () {
     const input = document.getElementById('global-search');
     const box = document.getElementById('search-results');
     if (!input) return;
+    // v1.2.01 纯图标模式：点搜索图标展开侧栏并聚焦（搜索不因图标化失效）
+    const searchIc = document.querySelector('.side-search-ic');
+    if (searchIc) searchIc.addEventListener('click', function () {
+      if (!document.documentElement.classList.contains('side-icon-only')) return;
+      document.documentElement.classList.remove('side-icon-only');
+      document.documentElement.style.setProperty('--sidebar-w', '175px');
+      try { S.getDB().settings.sidebarWidth = 175; S.saveSettings(); } catch (e) {}
+      setTimeout(function () { input.focus(); }, 60);
+    });
 
     function doSearch() {
       const q = input.value.trim().toLowerCase();
@@ -231,9 +304,28 @@ window.App = (function () {
           results.push({ type: '美食', name: (f.name || f.foodType) + ' · ' + f.date, go: 'food' });
         }
       });
+      // 钱袋账单：备注/分类名/金额可搜，命中直达流水（v1.2.0；分类名按 cats 树解析补齐，乙4）
+      const wb = (db.wallet || {}).bills || [];
+      const billCatName = (function () {
+        const cats = (db.wallet || {}).cats || {};
+        const map = {};
+        ['expense', 'income'].forEach(function (k) {
+          (cats[k] || []).forEach(function (c) {
+            if (c && c.id) map[c.id] = c.name || '';
+            (c.children || []).forEach(function (ch) { if (ch && ch.id) map[ch.id] = ch.name || ''; });
+          });
+        });
+        return function (b) { return (map[b.catId] || '') + ' ' + (map[b.subCatId] || ''); };
+      })();
+      wb.forEach(function (b) {
+        const hay = ((b.note || '') + ' ' + (b.accountName || '') + ' ' + String(b.amount || '') + ' ' + billCatName(b)).toLowerCase();
+        if (hay.indexOf(q) >= 0) {
+          results.push({ type: '账单', name: (b.note || '账单') + ' · ' + b.date + ' · ¥' + (b.amount || 0), go: 'wallet', billDate: b.date });
+        }
+      });
       box.innerHTML = results.length
-        ? results.slice(0, 12).map(function (r) {
-          return '<div class="sr-row" data-go="' + r.go + '" data-id="' + (r.id || '') + '">' +
+        ? results.slice(0, 12).map(function (r, ri) {
+          return '<div class="sr-row" data-go="' + r.go + '" data-id="' + (r.id || '') + '" data-ri="' + ri + '">' +
             '<span class="tag">' + r.type + '</span><span class="flex1">' + U.escapeHtml(r.name) + '</span></div>';
         }).join('')
         : '<div class="sr-row"><span class="muted">没有找到相关内容</span></div>';
@@ -242,8 +334,13 @@ window.App = (function () {
         row.addEventListener('click', function () {
           const go = row.getAttribute('data-go');
           const id = row.getAttribute('data-id');
+          const r = results[Number(row.getAttribute('data-ri'))] || {};
           box.classList.remove('show');
           input.value = '';
+          if (go === 'wallet' && r.billDate && window.WalletView && window.WalletView.jumpTo) {
+            window.WalletView.jumpTo({ date: r.billDate }); // 账单命中直达流水并定位日期
+            return;
+          }
           goPage(go);
           if (id) setTimeout(function () { window.Views.openItemDetail(id); }, 120);
         });
@@ -257,7 +354,7 @@ window.App = (function () {
     if (!docClickBound) {
       docClickBound = true;
       document.addEventListener('click', function (e) {
-        if (!e.target.closest('.top-search')) {
+        if (!e.target.closest('.side-search') && !e.target.closest('.search-results')) {
           const rb = document.getElementById('search-results'); // 实时查找，避免闭包旧元素
           if (rb) rb.classList.remove('show');
         }
@@ -348,12 +445,93 @@ window.App = (function () {
         if (input) { input.focus(); input.select(); }
       }
     });
+    // 日期输入 → 自定义日期选择控件（v1.2.0）：全局替换原生 date 输入
+    // （UI.bindDatePickers 幂等转换，弹窗内表单由 UI.modal 创建时自动绑定；
+    //   此处兜底页面级/动态渲染的表单——子树变化时防抖重扫）
+    if (window.UI && UI.bindDatePickers) UI.bindDatePickers(document);
+    // 排行条名称过长悬停自动滚动（v1.1.8）：事件委托挂一次全局生效
+    if (window.UI && UI.bindRankMarquee) UI.bindRankMarquee(document);
+    // 待办提醒（v1.2.0）：DDL 前 remindBefore 分钟 → 应用内 toast + 系统通知（无声音）
+    // jsdom 测试环境不起定时器（JSDOM timer 会挂住 node 进程退出；提醒为纯副作用）
+    if (!/jsdom/i.test(navigator.userAgent)) {
+    const todoNotified = {};
+    const todoTimer = setInterval(function () {
+      if (!window.Storage) return;
+      let insts;
+      try { insts = window.Storage.todoOpenInstances(); } catch (e) { return; }
+      const now = Date.now();
+      insts.forEach(function (it) {
+        const rb = Number(it.def.remindBefore) || 0;
+        if (!rb) return;
+        const due = new Date(it.dateStr + 'T' + (it.def.due || '23:59') + ':00').getTime();
+        const key = it.def.id + '@' + it.dateStr;
+        if (todoNotified[key] || now < due - rb * 60000 || now > due) return;
+        todoNotified[key] = true;
+        const leftMin = Math.max(1, Math.round((due - now) / 60000));
+        const msg = '「' + it.def.name + '」还有 ' + leftMin + ' 分钟到期';
+        try { window.UI.toast(msg, 'warn'); } catch (e) {}
+        try {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+            new Notification('待办提醒', { body: msg });
+          }
+        } catch (e) {}
+      });
+    }, 30000);
+    if (todoTimer && todoTimer.unref) todoTimer.unref();
+    }
+    let dateSyncTimer = null;
+    new MutationObserver(function () {
+      clearTimeout(dateSyncTimer);
+      dateSyncTimer = setTimeout(function () {
+        if (window.UI && UI.bindDatePickers) UI.bindDatePickers(document);
+      }, 80);
+    }).observe(document.body, { childList: true, subtree: true });
+
+    // 关窗信标（v1.1.6）：窗口关闭通知服务进入"10 分钟无请求自动退出"，
+    // 消除任务管理器残留进程；期间重新打开窗口（请求到来）自动取消退出
+    window.addEventListener('beforeunload', function () {
+      try {
+        if (navigator.sendBeacon) navigator.sendBeacon('/api/goodbye', '');
+      } catch (e) { /* 忽略 */ }
+    });
+    // 窗口尺寸记忆（v1.1.4）：调整窗口后记录大小，下次启动脚本按此开窗。
+    // 小于 1024x700 的尺寸不记（防畸形窗口被记住）；失败静默不影响使用
+    const WIN_MIN_W = 1024, WIN_MIN_H = 700;
+    let winSizeTimer = null;
+    window.addEventListener('resize', function () {
+      // 最小窗口硬限制：拖过界立即拉回（--app 软件窗口生效，普通浏览器标签忽略降级）
+      if (window.outerWidth < WIN_MIN_W || window.outerHeight < WIN_MIN_H) {
+        try {
+          window.resizeTo(Math.max(WIN_MIN_W, window.outerWidth || WIN_MIN_W), Math.max(WIN_MIN_H, window.outerHeight || WIN_MIN_H));
+        } catch (e) { /* 浏览器拒绝时降级：内容层 min-width 保证不畸形 */ }
+      }
+      clearTimeout(winSizeTimer);
+      winSizeTimer = setTimeout(function () {
+        const w = window.outerWidth, h = window.outerHeight;
+        if (!w || !h || w < WIN_MIN_W || h < WIN_MIN_H) return;
+        try {
+          fetch('/api/window-size', { method: 'POST', body: JSON.stringify({ width: w, height: h }) }).catch(function () {});
+        } catch (e) { /* 忽略 */ }
+      }, 600);
+    });
+    // 关闭前最后记一次（resize 防抖未到就关窗口也不丢）
+    window.addEventListener('beforeunload', function () {
+      const w = window.outerWidth, h = window.outerHeight;
+      if (!w || !h || w < WIN_MIN_W || h < WIN_MIN_H) return;
+      try {
+        if (navigator.sendBeacon) {
+          navigator.sendBeacon('/api/window-size', JSON.stringify({ width: w, height: h }));
+        } else {
+          fetch('/api/window-size', { method: 'POST', body: JSON.stringify({ width: w, height: h }), keepalive: true }).catch(function () {});
+        }
+      } catch (e) { /* 忽略 */ }
+    });
   });
 
   return {
     go: go, refresh: refresh, render: render,
     showAccountPicker: showAccountPicker,
     avatarPickerHTML: avatarPickerHTML, bindAvatarPicker: bindAvatarPicker,
-    AVATARS: AVATARS, FRONTEND_VERSION: FRONTEND_VERSION
+    AVATARS: AVATARS, FRONTEND_VERSION: FRONTEND_VERSION, NAV: NAV, navOrdered: navOrdered
   };
 })();
