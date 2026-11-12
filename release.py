@@ -19,7 +19,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 DIST = os.path.join(ROOT, "dist")
 VERSION_FILE = os.path.join(ROOT, "version.json")
 
-INCLUDE = ["app", "lovelife.bat", "lovelife-server.exe", "README.md", "LICENSE", "CHANGELOG.md", "version.json", "首次使用说明.txt", "NON-COMMERCIAL.md"]
+INCLUDE = ["app", "lovelife.bat", "lovelife-widget.bat", "lovelife-server.exe", "README.md", "LICENSE", "CHANGELOG.md", "version.json", "首次使用说明.txt", "NON-COMMERCIAL.md"]
 EXCLUDE_DIRS = {"__pycache__", ".browser-profile", "update-staging"}
 
 

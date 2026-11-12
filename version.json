@@ -1,16 +1,14 @@
 {
-  "version": "1.2.1",
+  "version": "1.2.2",
   "minSchema": 3,
   "publishedAt": "2026-11-12",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "时间日历（新模块）：周视图时间轴，时间段+时间点+待办同屏聚合",
-    "两套自定义类型（颜色盘/图标点选），类型必选，可固定关联习惯打卡",
-    "待办截止时刻自动落时间轴，点击勾完成双向同步；计时器/拖拽/hover 预览",
-    "我的统计新分类「时间统计」：类型时长排行+每日记录时长",
-    "侧栏导航可排序/屏蔽（实时生效），拖窄吸成纯图标模式",
-    "分类聚类：分类统计自由归组合并看大类（仅该模块生效）",
-    "主页今日概览挪至倒计时下方；统计口径类说明小字清理"
+    "桌面小窗 Widget：今日待办置顶悬浮，与主窗互斥切换（开关窗口不丢尺寸记忆）",
+    "主页待办改 7 列周视图：两行条目、hover 划入完成/跳过、预览卡详情、翻周",
+    "待办循环截止（到期即停、历史保留）；点击条目直接编辑",
+    "习惯管理排序就地重排无闪烁；侧栏新模块按默认位置插入",
+    "时间日历（1.2.1）：周视图时间段+时间点+待办同屏、两套类型、习惯联动、计时器、时间统计"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -18,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.1/lovelife-v1.2.1-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.2/lovelife-v1.2.2-win64.zip"
   }
 }
