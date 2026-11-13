@@ -80,7 +80,14 @@ function storeWindow(opts) {
 async function home(w, ms) {
   w.App.go('home');
   await sleep(ms || 320);
-  return w.document.querySelector('#home-habits');
+  // v1.2.3 默认周视图——本套件以月视图卡片断言为主，home() 统一切月（个别周用例自行切回）
+  const doc = w.document;
+  const seg = doc.querySelector('[data-hb-view="month"]');
+  if (seg && !seg.classList.contains('on')) {
+    seg.click();
+    await sleep(120);
+  }
+  return doc.querySelector('#home-habits');
 }
 
 let cur = '';

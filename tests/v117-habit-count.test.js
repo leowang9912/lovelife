@@ -85,6 +85,9 @@ async function main() {
   await w.Storage.setHabitCount('h1', '2026-11-05', 3);
   w.App.go('home');
   await sleep(350);
+  // v1.2.3 默认周视图——本用例取当月过去日，切月后可见
+  const segM = doc.querySelector('[data-hb-view="month"]');
+  if (segM && !segM.classList.contains('on')) { segM.click(); await sleep(150); }
   const cell = doc.querySelector('[data-hb-cell="h1"][data-date="2026-11-05"]');
   assert(cell, '历史格存在');
   cell.click();

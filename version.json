@@ -1,14 +1,13 @@
 {
-  "version": "1.2.2",
+  "version": "1.2.3",
   "minSchema": 3,
-  "publishedAt": "2026-11-12",
+  "publishedAt": "2026-11-13",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "桌面小窗 Widget：今日待办置顶悬浮，与主窗互斥切换（开关窗口不丢尺寸记忆）",
-    "主页待办改 7 列周视图：两行条目、hover 划入完成/跳过、预览卡详情、翻周",
-    "待办循环截止（到期即停、历史保留）；点击条目直接编辑",
-    "习惯管理排序就地重排无闪烁；侧栏新模块按默认位置插入",
-    "时间日历（1.2.1）：周视图时间段+时间点+待办同屏、两套类型、习惯联动、计时器、时间统计"
+    "习惯打卡周视图表格化：习惯名左列+周几列头，格子即打卡，默认周视图",
+    "行内连续打卡 x 天；习惯颜色盘自选；打卡一次型无渐变最深逻辑",
+    "格子正方、窄窗自缩宽窗封顶；表头/行共用模板（对齐固化）",
+    "桌面小窗互斥切换可靠化；小窗按钮挪到待办标题旁"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -16,6 +15,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.2/lovelife-v1.2.2-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.3/lovelife-v1.2.3-win64.zip"
   }
 }

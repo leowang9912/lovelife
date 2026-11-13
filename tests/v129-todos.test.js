@@ -70,15 +70,8 @@ async function main() {
     assert(rows.length >= 3, '应显示多条未决（含逾期/今天/未来），实为 ' + rows.length);
     const rowsBefore = rows.length;
     assert(doc.querySelector('#home-todos .tw-item'), '周视图应有待办条目');
-    // 倒计时文字进 hover 预览卡（v1.2.2：列内只留名称+时刻）
-    doc.querySelector('#home-todos .tw-item').dispatchEvent(new w.Event('mouseover', { bubbles: true }));
-    await waitFor(function () {
-      const pv = doc.getElementById('tw-preview');
-      return pv && pv.classList.contains('show') ? pv : null;
-    }, { label: 'hover 预览卡未出' });
-    const pvText = doc.getElementById('tw-preview').textContent;
-    assert(pvText.indexOf('还有') >= 0 || pvText.indexOf('已过期') >= 0 || pvText.indexOf('截止') >= 0,
-      '预览卡应有倒计时/截止详情: ' + pvText.slice(0, 80));
+    // hover 预览卡已按拍板移除（曾浮层滞留）——列内只留名称+时刻
+    assert(doc.querySelector('#home-todos .tw-time'), '列内应显示时刻');
     // 日循环昨日起未决=过期停留（红态+两按钮）
     const overRow = doc.querySelector('#home-todos .tw-item.tw-over');
     assert(overRow, '过期实例应停留红态（不消失）');
@@ -295,14 +288,7 @@ async function main() {
     assert(todayNames.indexOf('早的') < todayNames.indexOf('晚的'), '当日应按截止时刻升序: ' + todayNames);
     // 未来日进未来列（同屏 7 列）
     assert(doc.querySelector('#home-todos').textContent.indexOf('明天的事') >= 0, '周视图应含未来日实例（分列）');
-    // 循环详情进 hover 预览（列内只留名称+时刻）
-    todayCol.querySelector('.tw-item').dispatchEvent(new w.Event('mouseover', { bubbles: true }));
-    await waitFor(function () {
-      const pv = doc.getElementById('tw-preview');
-      return pv && pv.classList.contains('show') ? pv : null;
-    }, { label: '预览卡未出' });
-    assert(doc.getElementById('tw-preview').textContent.indexOf('每周') >= 0 ||
-      doc.getElementById('tw-preview').textContent.indexOf('每天') >= 0, '预览卡应含循环详情');
+    // hover 预览卡已按拍板移除（循环语义由用例 1 todoDueOn 数据锁覆盖）
     // 已决垫底：完成「晚的」后排当日最后
     const doneBtns = todayCol.querySelectorAll('[data-todo-done]');
     doneBtns[doneBtns.length - 1].click();

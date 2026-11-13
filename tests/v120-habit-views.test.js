@@ -164,7 +164,7 @@ async function main() {
   }
 
   /* ==================== 2 主页 周|月 视图（拍板 2） ==================== */
-  cur = '4. 主页 seg-toggle「周|月」：默认月视图（label/格数既有锁不破）';
+  cur = '4. 主页 seg-toggle「周|月」：默认周视图（v1.2.3 拍板）';
   {
     const s = storeWindow({
       habits: { defs: [{ id: 'h1', name: '运动', color: '#aecbfa', type: 'check', max: 5, showNum: true }], log: {} }
@@ -176,12 +176,11 @@ async function main() {
     const seg = hb.querySelector('.seg-toggle-head');
     assert(seg, 'panel-head 右上应有 seg-toggle（seg-toggle-head 同款）');
     assert(seg.querySelector('[data-hb-view="week"]') && seg.querySelector('[data-hb-view="month"]'), '应有 周|月 两档');
-    assert(seg.querySelector('[data-hb-view="month"]').classList.contains('on'), '默认应月视图');
-    assert(!seg.querySelector('[data-hb-view="week"]').classList.contains('on'), '周视图默认不选中');
-    assert(monthLabelText(doc) === Y + ' 年 ' + M + ' 月', '月标签格式「YYYY 年 M 月」，实为 ' + monthLabelText(doc));
-    assert(hb.querySelectorAll('[data-hb-cell="h1"]').length === DAYS_IN_M, '月视图格数应=当月天数');
-    // v1.2.0 工具簇统一：「今天」弱化链接仅在未锚定（翻走）时显示，当月不显示
-    assert(!hb.querySelector('[data-hb-today]'), '当月锚定不应显示「今天」链接');
+    // v1.2.3 拍板：默认周视图（周区间标签 + 表格 7 格）
+    assert(seg.querySelector('[data-hb-view="week"]').classList.contains('on'), '默认应周视图');
+    assert(/\d{1,2}\/\d{1,2} ~ \d{1,2}\/\d{1,2}/.test(monthLabelText(doc)), '周区间标签，实为 ' + monthLabelText(doc));
+    assert(hb.querySelectorAll('[data-hb-cell="h1"]').length === 7, '周视图 7 格');
+    assert(hb.querySelector('.hb-row'), '默认应为表格行');
     console.log('PASS ' + cur);
   }
 
@@ -209,10 +208,12 @@ async function main() {
       const cells = hb.querySelectorAll('[data-hb-cell="' + id + '"]');
       assert(cells.length === 7, id + ' 周视图应一行 7 格，实为 ' + cells.length);
     });
-    const grid = hb.querySelector('.hb-card-grid');
-    assert(grid.classList.contains('hb-week'), '周视图格容器应带 .hb-week');
-    hb.querySelectorAll('.hb-card').forEach(function (c) {
-      assert(c.querySelectorAll('.hb-card-week span').length === 7, '每卡周几标签应 7 个');
+    // v1.2.3 表格化：格子直接在行网格内（每行 7 格），列头=习惯+周几 7 列（只周几无日期）
+    assert(hb.querySelectorAll('.hb-row').length >= 2, '周视图应为表格行');
+    assert(hb.querySelectorAll('.hb-th').length === 8, '列头=习惯+周几 7 列');
+    assert(!/\d/.test(hb.querySelector('.hb-th:not(.hb-th-name)').textContent), '列头只周几不带日期');
+    hb.querySelectorAll('.hb-row').forEach(function (c) {
+      assert(c.querySelectorAll('.hb-cell').length === 7, '每行 7 格');
     });
     const tCell = hb.querySelector('[data-hb-cell="h1"][data-date="' + TODAY + '"]');
     assert(tCell.classList.contains('today'), '今日格应描边（today）');
@@ -246,9 +247,8 @@ async function main() {
     assert(S.habitCountOf('hc', TODAY) === 2, '周视图计数今日格 +1×2 应=2');
     const cardC = hb.querySelector('[data-hb-card="hc"]');
     assert(cardC.classList.contains('done'), '计数打卡后 done 应同步');
-    await waitFor(function () {
-      return cardC.querySelector('.hb-card-stat').textContent.indexOf('本月 2 次') >= 0 ? true : null;
-    }, { label: '数据行未同步本月 2 次' });
+    // v1.2.3 拍板：周视图不显示统计行（月视图才有）——数据由 habitCountOf 断言锁
+    assert(!cardC.querySelector('.hb-card-stat'), '周视图不应显示统计行');
     cellC.dispatchEvent(new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
     assert(S.habitCountOf('hc', TODAY) === 1, '周视图右键应 -1');
     // 二值今日 toggle
@@ -279,7 +279,9 @@ async function main() {
     let hb = await home(w);
     const cdPanel = doc.querySelector('#home-cd'); // 局部重绘哨兵（其他面板节点应保持同一节点）
     assert(cdPanel, '倒计时面板应存在（哨兵）');
-    // 月视图翻月
+    // 切月视图后翻月（v1.2.3 默认周）
+    hb.querySelector('[data-hb-view="month"]').click();
+    hb = doc.querySelector('#home-habits');
     hb.querySelector('[data-hb-mv="-1"]').click();
     const pm = shiftMonth(-1);
     assert(monthLabelText(doc) === pm.getFullYear() + ' 年 ' + (pm.getMonth() + 1) + ' 月',
@@ -548,7 +550,68 @@ async function main() {
     console.log('PASS ' + cur);
   }
 
-  console.log('========== v1.2.x 热力打卡 UI 改造（完成态+周/月/年视图）：13 项全部通过 ==========');
+  cur = '14. 周视图表格化（习惯名左列 + 周几列头，功能不变）';
+  {
+    const w = makeWindow({
+      data: {
+        habits: {
+          defs: [
+            { id: 'h1', name: '运动', type: 'check', color: '#aecbfa' },
+            { id: 'h2', name: '阅读', type: 'count', color: '#d7aefb' }
+          ],
+          log: { h1: {} }
+        }
+      }
+    });
+    if (!(await waitMain(w))) throw new Error('no main');
+    const doc = w.document;
+    await waitFor(function () { return doc.querySelector('[data-hb-view=week]') ? true : null; }, { label: '周月切换未渲染' });
+    doc.querySelector('[data-hb-view=week]').click();
+    await waitFor(function () {
+      return doc.querySelector('#home-habits .hb-row') ? true : null;
+    }, { label: '周视图表格未渲染' });
+    const rows = doc.querySelectorAll('#home-habits .hb-row');
+    assert(rows.length === 2, '应两行（每习惯一行）: ' + rows.length);
+    assert(doc.querySelectorAll('#home-habits .hb-th').length === 8, '列头=习惯+7 天');
+    assert(rows[0].querySelectorAll('.hb-cell').length === 7, '每行 7 格');
+    assert(rows[0].querySelector('.hb-row-label').textContent === '运动', '左列=习惯名');
+    assert(doc.querySelectorAll('#home-habits .hb-card').length === 0, '周视图不出卡片');
+    // 点格子打卡（交互零改动）：check 型任意格=toggle（count 型历史格弹编辑是既有语义）
+    rows[0].querySelectorAll('.hb-cell')[2].click();
+    await waitFor(function () {
+      const lg = w.Storage.getDB().habits.log.h1 || {};
+      return Object.keys(lg).length > 0 ? true : null;
+    }, { label: '表格格子打卡未生效' });
+    // 切月视图仍是卡片
+    doc.querySelector('[data-hb-view=month]').click();
+    await waitFor(function () {
+      return doc.querySelector('#home-habits .hb-card') ? true : null;
+    }, { label: '月视图卡片未渲染' });
+    console.log('PASS 14. ' + cur);
+  }
+
+  cur = '15. 对齐固化：表头/行共用 .hb-tr 模板 + 格子正方 + 连续打卡';
+  {
+    const css = require('fs').readFileSync(require('path').join(__dirname, '..', 'app', 'css', 'extra.css'), 'utf8');
+    // 单源模板锁：只允许一条含 clamp(≤+20%) 的 7 列网格模板（曾 5 条规则打架致对齐反复坏）
+    const m = css.match(/grid-template-columns:[^;]*repeat\(7, clamp[^;]*;/g) || [];
+    assert(m.length === 1, '应仅一条定稿网格模板，实为 ' + m.length);
+    assert(/\.hb-row \.hb-cell \{[^}]*aspect-ratio: 1/.test(css), '格子应正方（aspect-ratio:1）');
+    assert(/\.hb-row-streak/.test(css), '连续打卡样式存在');
+    const w = makeWindow({
+      data: { habits: { defs: [{ id: 'h1', name: '运动健身打卡', type: 'check', color: '#aecbfa' }], log: { h1: {} } } }
+    });
+    if (!(await waitMain(w))) throw new Error('no main');
+    const doc = w.document;
+    await waitFor(function () { return doc.querySelector('[data-hb-view=week]') ? true : null; }, { label: 'x' });
+    doc.querySelector('[data-hb-view=week]').click();
+    await waitFor(function () { return doc.querySelector('.hb-row') ? true : null; }, { label: 'x' });
+    assert(doc.querySelector('.hb-thead').classList.contains('hb-tr'), '表头应带 hb-tr（共用模板）');
+    assert(doc.querySelector('.hb-row').classList.contains('hb-tr'), '数据行应带 hb-tr（共用模板）');
+    console.log('PASS 15. ' + cur);
+  }
+
+  console.log('========== v1.2.x 热力打卡 UI 改造（完成态+周/月/年视图+周表格化）：15 项全部通过 ==========');
   process.exit(0);
 }
 

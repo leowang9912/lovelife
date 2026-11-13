@@ -2428,3 +2428,124 @@ input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2
 }
 .tw-title-wrap .card-title { grid-area: auto; }
 .tw-widget-btn { width: 24px; height: 24px; flex: none; }
+
+/* ===== v1.2.3 习惯打卡周视图表格化（习惯名左列 + 周几列头，功能不变） ===== */
+.hb-table { display: flex; flex-direction: column; gap: 4px; }
+.hb-thead { margin-bottom: 2px; }
+.hb-th {
+  text-align: center; font-size: 10px; color: var(--text-3);
+  display: flex; flex-direction: column; align-items: center; gap: 1px;
+}
+.hb-th b {
+  font-size: 12px; font-weight: 600; color: var(--text-2); line-height: 1.2;
+  min-width: 22px; text-align: center; border-radius: 999px;
+}
+.hb-th.today b { background: var(--accent); color: #fff; }
+.hb-th-name { font-size: 11px; color: var(--text-3); align-items: flex-start; padding-left: 2px; }
+.hb-row {
+  border-radius: 10px; padding: 3px 4px; background: #fff;
+  border: 1px solid var(--line-soft);
+}
+.hb-row.done { background: #f0faf2; border-color: rgba(52, 199, 89, .25); }
+.hb-row-name {
+  display: flex; align-items: center; gap: 6px; min-width: 0;
+  border: none; background: none; cursor: pointer; padding: 4px 6px;
+  font: var(--f-body-2-m); text-align: left; border-radius: 8px;
+}
+.hb-row-name:hover { background: rgba(0, 0, 0, .04); }
+.hb-row-label {
+  font-size: 12.5px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 8.5em;
+}
+.hb-row .hb-card-stat {
+  font-size: 10px; color: var(--text-3); white-space: nowrap; flex: none;
+}
+.hb-row-cells {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+}
+.hb-row-cells .hb-cell { height: 22px; width: 100%; border-radius: 4px; }
+
+/* v1.2.3 精修：行=名称列+7 格同网格；格子描边可见；列头只周几（当天标蓝） */
+.hb-row-cells { display: contents; }
+.hb-row-name { grid-column: 1; }
+.hb-row .hb-cell {
+  height: 24px; width: 100%; border-radius: 5px;
+  border: 1px solid var(--line-soft); background: #fff;
+}
+.hb-row .hb-cell.on { border-color: transparent; }
+.hb-th.today {
+  color: var(--accent); font-weight: 600;
+}
+
+/* v1.2.3 精修②：列头/行同宽模板对齐；名称列收窄；格子去边框（恢复原浅底）；末行防裁 */
+.hb-row-name { grid-column: 1; padding: 4px 2px; background: none !important; }
+.hb-row-label { max-width: 6.5em; }
+.hb-row .hb-cell {
+  height: 24px; width: 100%; border-radius: 5px;
+  border: none; background: #f2f2f4;
+}
+.hb-row .hb-cell.on { border: none; }
+.hb-table { padding-bottom: 4px; }
+.hb-color-row { display: flex; align-items: center; gap: 10px; }
+.hb-color-row input[type="color"] {
+  width: 42px; height: 34px; padding: 1px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; cursor: pointer; flex: none;
+}
+.hb-row-name {
+  border: none !important; outline: none;
+  width: auto; max-width: 100%; justify-self: start;
+  box-shadow: none;
+}
+.hb-table { width: 100%; }
+
+/* v1.2.3 精修③：格子列封顶（≤+20%），名称列吸收剩余宽度（露更多字），表头同行同步 */
+.hb-row-label {
+  max-width: none; flex: 1 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* ===== 习惯周视图网格【定稿单源】：表头/行共用 .hb-tr 模板——对齐只此一处 =====
+   格子正方（aspect-ratio:1）；列宽 clamp(24px,随窗,29px)=≤+20% 封顶；名称列吃剩余 */
+.hb-tr {
+  display: grid;
+  gap: 6px; align-items: center; width: 100%; box-sizing: border-box;
+}
+.hb-row .hb-cell {
+  width: 100%; height: auto; aspect-ratio: 1; border-radius: 5px;
+  border: none; background: #f2f2f4;
+}
+.hb-row .hb-cell.on { border: none; }
+.hb-row-label {
+  max-width: none; flex: 1 1 auto;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+/* 连续打卡：行空间足够（宽屏）显示；名称列已预留宽度，窄屏隐藏防挤 */
+.hb-row-streak {
+  flex: none; font-size: 10px; color: var(--text-3); white-space: nowrap;
+}
+@media (max-width: 1180px) {
+  .hb-row-streak { display: none; }
+}
+
+/* 格子尺寸定稿：窄窗自动缩（18px）→ 宽窗封顶 29px（≤+20%）；名称列弹性吃剩余，保右侧列不被裁 */
+.hb-tr {
+  grid-template-columns: minmax(88px, 1.4fr) repeat(7, clamp(18px, 2.6vw, 29px));
+}
+
+/* 次数字加大 + 周视图末行留白（防底部 UI 遮挡） */
+.hb-n { font-size: 9.5px; }
+.hb-table { padding-bottom: 16px; }
+
+/* 习惯周表【隔离定稿】：覆盖统计页同名 .hb-row 旧规则（padding/border/flex 曾打架）；
+   面板去横滚裁切（overflow-x:auto 会把纵向一起裁，末行绿底被切） */
+#home-habits .panel-body { overflow: visible; padding-bottom: 0; }
+#home-habits .hb-tr.hb-row {
+  padding: 0; border: none; border-radius: 10px;
+}
+#home-habits .hb-table { padding-bottom: 0; gap: 4px; }
+
+/* 行盒加高 ~10%（格子大小不动）；下留白=卡片常规 panel-body 18px */
+#home-habits .panel-body { overflow: visible; padding-bottom: 18px; }
+#home-habits .hb-tr.hb-row {
+  padding: 4px 2px;
+}

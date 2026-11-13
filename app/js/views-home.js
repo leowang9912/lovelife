@@ -658,7 +658,7 @@ window.HomeView = (function () {
      视图状态（v1.2.x 拍板 2）：habView='week'|'month'（会话态，默认月）；
      habAnchor='YYYY-MM-DD' 锚日（默认今天）——月=锚日所在月、周=锚日所在周；
      翻页移动锚日（月=±1 月、周=±7 天）、周/月切换保持锚日、「今天」跳回今天。 */
-  let habView = 'month';
+  let habView = 'week'; // v1.2.3 拍板：默认周视图
   let habAnchor = (function () {
     const d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
@@ -708,41 +708,67 @@ window.HomeView = (function () {
     const wDow = (aw.getDay() + 6) % 7;
     const wMon = new Date(aw.getFullYear(), aw.getMonth(), aw.getDate() - wDow);
     const wSun = new Date(wMon.getFullYear(), wMon.getMonth(), wMon.getDate() + 6);
-    // 卡片式月视图（v1.1.6 改版）：每习惯一卡 = 标题 + 数据行 + 7 列格 + 周几标签；
-    // 周视图（v1.2.x 拍板 2）= 同卡一行 7 格（锚定周），其余元素（标题/数据行/done 态）不变
-    const cards = defs.map(function (def) {
-      const log = ((S.getDB().habits || {}).log || {})[def.id] || {};
-      const isCount = def.type === 'count'; // 梯度式计数习惯（v1.1.5）
-      // 数据行：本月次数（计数=次数和 / 二值=打卡天数）· 当前连续（两视图同口径=锚日所在月）
+    // 卡片式月视图（v1.1.6）：每习惯一卡；周视图（v1.2.3 拍板）= **表格**——习惯名左列、周几列头，
+    // 行内 7 格（格子/统计/done 态与卡片完全同源，交互零改动）
+    function streakOnly(def) {
+      return (S.habitCurrentStreak ? S.habitCurrentStreak(def.id) : 0) || 0;
+    }
+    function statLine(def, log) {
+      const isCount = def.type === 'count';
       let monthSum = 0;
       for (let d = 1; d <= daysInMonth; d++) {
         monthSum += countOf(log[y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0')]);
       }
-      const cells = [];
-      if (isWeek) {
+      const streak = (S.habitCurrentStreak ? S.habitCurrentStreak(def.id) : 0) || 0;
+      return (isCount ? '本月 ' + monthSum + ' 次' : '本月 ' + monthSum + ' 天') +
+        (streak ? ' · 连续 ' + streak + ' 天' : '');
+    }
+    let cards = '';
+    if (isWeek) {
+      // 表头：周几 + 日期
+      const th = ['一', '二', '三', '四', '五', '六', '日'].map(function (w, i) {
+        const d = new Date(wMon.getFullYear(), wMon.getMonth(), wMon.getDate() + i);
+        const isToday = hfmt(d) === t;
+        return '<div class="hb-th' + (isToday ? ' today' : '') + '">' + w + '</div>';
+      }).join('');
+      const rows = defs.map(function (def) {
+        const log = ((S.getDB().habits || {}).log || {})[def.id] || {};
+        const done = countOf(log[t]) > 0;
+        const cells = [];
         for (let i = 0; i < 7; i++) {
           cells.push(habitCellHTML(def, log, hfmt(new Date(wMon.getFullYear(), wMon.getMonth(), wMon.getDate() + i)), t));
         }
-      } else {
+        return '<div class="hb-tr hb-row' + (done ? ' done' : '') + '" data-hb-card="' + esc(def.id) + '" style="--hc:' + esc(def.color || '#aecbfa') + '">' +
+          '<button type="button" class="hb-row-name" data-hb-edit="' + esc(def.id) + '" title="编辑习惯">' +
+          '<span class="hb-dot" style="background:' + esc(def.color || '#aecbfa') + '"></span>' +
+          '<span class="hb-row-label">' + esc(def.name) + '</span>' +
+          (streakOnly(def) ? '<span class="hb-row-streak">连续 ' + streakOnly(def) + ' 天</span>' : '') +
+          '</button>' +
+          cells.join('') + '</div>';
+      }).join('');
+      cards = defs.length
+        ? '<div class="hb-table"><div class="hb-tr hb-thead"><div class="hb-th hb-th-name">习惯</div>' + th + '</div>' + rows + '</div>'
+        : '';
+    } else {
+      cards = defs.map(function (def) {
+        const log = ((S.getDB().habits || {}).log || {})[def.id] || {};
+        const cells = [];
         for (let i = 0; i < pad; i++) cells.push('<span class="hb-cell empty"></span>');
         for (let d = 1; d <= daysInMonth; d++) {
           cells.push(habitCellHTML(def, log, y + '-' + String(m).padStart(2, '0') + '-' + String(d).padStart(2, '0'), t));
         }
-      }
-      const streak = (S.habitCurrentStreak ? S.habitCurrentStreak(def.id) : 0) || 0;
-      // 完成态（v1.2.x 拍板 1）：今日已打卡 → 绿卡（对齐 home-check.done 视觉，无文字提示）
-      const done = countOf(log[t]) > 0;
-      return '<div class="hb-card' + (done ? ' done' : '') + '" data-hb-card="' + esc(def.id) + '" style="--hc:' + esc(def.color || '#aecbfa') + '">' +
-        '<button type="button" class="hb-card-head" data-hb-edit="' + esc(def.id) + '" title="编辑习惯">' +
-        '<span class="hb-dot" style="background:' + esc(def.color || '#aecbfa') + '"></span>' + esc(def.name) + '</button>' +
-        '<div class="hb-card-stat">' + (isCount ? '本月 ' + monthSum + ' 次' : '本月 ' + monthSum + ' 天') +
-        (streak ? ' · 连续 ' + streak + ' 天' : '') + '</div>' +
-        '<div class="hb-card-grid' + (isWeek ? ' hb-week' : '') + '">' + cells.join('') + '</div>' +
-        '<div class="hb-card-week">' + ['一', '二', '三', '四', '五', '六', '日'].map(function (w) {
-          return '<span>' + w + '</span>';
-        }).join('') + '</div>' +
-        '</div>';
-    }).join('');
+        const done = countOf(log[t]) > 0;
+        return '<div class="hb-card' + (done ? ' done' : '') + '" data-hb-card="' + esc(def.id) + '" style="--hc:' + esc(def.color || '#aecbfa') + '">' +
+          '<button type="button" class="hb-card-head" data-hb-edit="' + esc(def.id) + '" title="编辑习惯">' +
+          '<span class="hb-dot" style="background:' + esc(def.color || '#aecbfa') + '"></span>' + esc(def.name) + '</button>' +
+          '<div class="hb-card-stat">' + statLine(def, log) + '</div>' +
+          '<div class="hb-card-grid">' + cells.join('') + '</div>' +
+          '<div class="hb-card-week">' + ['一', '二', '三', '四', '五', '六', '日'].map(function (w) {
+            return '<span>' + w + '</span>';
+          }).join('') + '</div>' +
+          '</div>';
+      }).join('');
+    }
     const label = isWeek
       ? (wMon.getMonth() + 1) + '/' + wMon.getDate() + ' ~ ' + (wSun.getMonth() + 1) + '/' + wSun.getDate()
       : y + ' 年 ' + m + ' 月';
@@ -769,9 +795,11 @@ window.HomeView = (function () {
       '<button type="button" class="home-tool-btn" data-hb-add title="添加习惯">' + UI.icon('plus', 14) + '</button>' +
       '<button type="button" class="home-tool-btn" data-hb-manage title="管理（排序/编辑/删除）">' + UI.icon('settings', 14) + '</button>' +
       '</div></div>' +
-      '<div class="panel-body"><div class="hb-cards">' +
-      (cards || '<div class="empty-hint muted">还没有习惯项，点「添加」开始记录</div>') +
-      '</div></div></div>';
+      // 表格直出 panel-body（曾套 .hb-cards flex 容器→行宽被内容收缩，名称底框拖长）
+      '<div class="panel-body">' + (isWeek
+        ? (cards || '<div class="empty-hint muted">还没有习惯项，点「添加」开始记录</div>')
+        : '<div class="hb-cards">' + (cards || '<div class="empty-hint muted">还没有习惯项，点「添加」开始记录</div>') + '</div>') +
+      '</div></div>';
   }
 
   /* 习惯管理（v1.2.0）：排序（上移/下移）+ 编辑 + 删除 */
@@ -858,10 +886,12 @@ window.HomeView = (function () {
         '<label id="hb-max-row"' + (type === 'count' ? '' : ' hidden') + '><span class="f-label">多少次最深</span>' +
         '<input type="number" id="hb-max" min="1" max="99" value="' + Math.max(1, Number(def && def.max) || 5) + '">' +
         '<span class="muted small">色块随次数渐深，达到即满色</span></label>' +
-        '<label class="f-full"><span class="f-label">颜色</span><div class="chip-row" id="hb-colors">' +
+        '<label class="f-full"><span class="f-label">颜色</span>' +
+        '<div class="hb-color-row"><input type="color" id="hb-colorpick" value="' + esc(/^#[0-9a-fA-F]{6}$/.test(color) ? color : '#aecbfa') + '" title="颜色盘自选">' +
+        '<div class="chip-row" id="hb-colors">' +
         HABIT_COLORS.map(function (c) {
           return '<button type="button" class="hb-color-swatch' + (c === color ? ' on' : '') + '" data-hc="' + c + '" style="background:' + c + '"></button>';
-        }).join('') + '</div></label>' +
+        }).join('') + '</div></div></label>' +
         '<label class="f-full cd-repeat-row"><input type="checkbox" id="hb-shownum"' +
         // 默认勾选（域口径 showNum 默认 true）；编辑时按现值，显式 false 才不勾
         ((def ? def.showNum !== false : true) ? ' checked' : '') + '>' +
@@ -875,7 +905,15 @@ window.HomeView = (function () {
           el.addEventListener('click', function () {
             picked = el.getAttribute('data-hc');
             w.querySelectorAll('[data-hc]').forEach(function (x) { x.classList.toggle('on', x === el); });
+            const pk = w.querySelector('#hb-colorpick');
+            if (pk && /^#[0-9a-fA-F]{6}$/.test(picked)) pk.value = picked;
           });
+        });
+        // 颜色盘自选（时间日历同款）：选色即入 picked，快捷色块高亮联动
+        const pk = w.querySelector('#hb-colorpick');
+        if (pk) pk.addEventListener('input', function () {
+          picked = pk.value;
+          w.querySelectorAll('[data-hc]').forEach(function (x) { x.classList.remove('on'); });
         });
         // 计数型才显示「多少次最深」
         const typeSel = w.querySelector('#hb-type');
@@ -901,7 +939,8 @@ window.HomeView = (function () {
             ? { id: def.id, name: name, color: picked }
             : { id: U.uid(), name: name, color: picked };
           payload.type = typeSel.value === 'count' ? 'count' : 'check';
-          payload.max = Math.max(1, Math.floor(Number(w.querySelector('#hb-max').value) || 5));
+          // check 型无渐变最深概念（不写 max）
+          if (payload.type === 'count') payload.max = Math.max(1, Math.floor(Number(w.querySelector('#hb-max').value) || 5));
           payload.showNum = w.querySelector('#hb-shownum').checked;
           try {
             if (S.saveHabitDef) await S.saveHabitDef(payload);
@@ -1234,43 +1273,7 @@ window.HomeView = (function () {
       todoWeekStart = '';
       redrawTodos();
     });
-    // hover 预览卡（倒计时/循环详情，列内只留名称+时刻）
-    const twBox = root.querySelector('.todo-week');
-    if (twBox && !twBox.hasAttribute('data-twpv-bound')) {
-      twBox.setAttribute('data-twpv-bound', '1');
-      twBox.addEventListener('mouseover', function (e) {
-        const el = e.target && e.target.closest ? e.target.closest('.tw-item') : null;
-        if (el) twShowPreview(el); else twHidePreview();
-      });
-      twBox.addEventListener('mouseleave', twHidePreview);
-    }
-  }
-  function twHidePreview() {
-    const pv = document.getElementById('tw-preview');
-    if (pv) pv.classList.remove('show');
-  }
-  function twShowPreview(el) {
-    let pv = document.getElementById('tw-preview');
-    if (!pv) {
-      pv = document.createElement('div');
-      pv.id = 'tw-preview';
-      document.body.appendChild(pv);
-    }
-    const id = el.getAttribute('data-todo-edit');
-    const ds = el.getAttribute('data-tw-date');
-    const d = (((S.getDB().todos || {}).defs) || []).filter(function (x) { return x.id === id; })[0];
-    if (!d) return;
-    const now = new Date();
-    const t = todoLeftInfo(d, ds, now);
-    const rep = { none: '不循环', daily: '每天', workday: '工作日', weekly: '每周', monthly: '每月', ndays: '每 ' + (d.interval || 1) + ' 天' };
-    pv.innerHTML = '<div class="tl-pv-t">' + UI.icon('check-square', 15) + ' ' + esc(d.name) + '</div>' +
-      '<div class="tl-pv-s">截止 ' + esc(ds.slice(5)) + ' ' + esc(d.due || '23:59') + ' · ' + esc(rep[d.repeat] || '') + '</div>' +
-      '<div class="tl-pv-s">' + esc(t && t.txt ? t.txt : '') + '</div>' +
-      (d.note ? '<div class="tl-pv-n">' + esc(d.note) + '</div>' : '');
-    const r = el.getBoundingClientRect();
-    pv.style.left = Math.min(window.innerWidth - 230, r.left) + 'px';
-    pv.style.top = Math.max(8, r.top - 8) + 'px';
-    pv.classList.add('show');
+    // hover 预览卡已按拍板移除（曾固定浮层滞留左下角）
   }
 
   function bind(root, outfitDone, foodDone) {
@@ -1358,7 +1361,7 @@ window.HomeView = (function () {
     render: render,
     // 稽核修复：账号切换清习惯视图状态，防跨账号残留
     resetState: function () {
-      habView = 'month';
+      habView = 'week';
       habAnchor = U.todayStr();
       todoViewDate = '';
     }

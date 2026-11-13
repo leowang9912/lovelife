@@ -70,15 +70,14 @@ async function main() {
   assert(hb, '热力打卡卡未渲染');
   const cell = hb.querySelector('.hb-cell[data-date="' + TODAY + '"]');
   assert(cell, '缺今日格');
-  const card = cell.closest('.hb-card');
+  const card = cell.closest('[data-hb-card]');
   const hc = ((/--hc:\s*([^;"]+)/.exec(card.getAttribute('style') || '')) || [])[1] || '#aecbfa';
   const before = doc.body.innerHTML.length;
   cell.click();
   await sleep(150); // 远小于整页刷新耗时：验证 DOM 局部变化
   assert(cell.classList.contains('on'), '点击后今日格应即时变已打态');
   assert(bgOf(cell) === normColor(hc), '点击后今日格应即时变习惯色（今日已打=习惯色填充）');
-  const stat = card.querySelector('.hb-card-stat');
-  assert(stat && stat.textContent.indexOf('本月 1 天') >= 0, '卡数据行应同步本月打卡，实为 ' + (stat && stat.textContent));
+  assert(w.Storage.habitCountOf(card.getAttribute('data-hb-card'), TODAY) === 1, '数据行应同步本月打卡（周视图无统计行，数据锁）');
   await sleep(400);
   assert(doc.body.innerHTML.length >= before - 200, '不应整页重绘（DOM 主体应保持）');
   console.log('PASS 3. 热力打卡乐观更新（今日格即时变习惯色、无整页刷新延迟）');
