@@ -441,7 +441,28 @@ async function main() {
     console.log('PASS 12. ' + cur);
   }
 
-  console.log('========== v129-todos：12 项全部通过 ==========');
+  cur = '13. 时间段待办进主页周视图（起止显示）+ 倒计时按开始';
+  {
+    const w = makeWindow({
+      data: {
+        todos: {
+          defs: [{ id: 't1', name: '写报告', date: today, start: '14:00', due: '16:00', repeat: 'none', remindBefore: 0, linkHabitId: '', location: '公司', archived: false }],
+          done: {}
+        }
+      }
+    });
+    if (!(await waitMain(w))) throw new Error('no main');
+    const doc = w.document;
+    await waitFor(function () {
+      return doc.querySelector('[data-todo-edit="t1"]') ? true : null;
+    }, { label: '时间段待办未出现在主页周视图' });
+    const row = doc.querySelector('[data-todo-edit="t1"]');
+    assert(row.querySelector('.tw-time').textContent.indexOf('14:00-16:00') >= 0, '应显示起止: ' + row.querySelector('.tw-time').textContent);
+    assert(row.textContent.indexOf('公司') >= 0, '应显示地点');
+    console.log('PASS 13. ' + cur);
+  }
+
+  console.log('========== v129-todos：13 项全部通过 ==========');
 }
 
 main().catch(function (e) {

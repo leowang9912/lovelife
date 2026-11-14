@@ -196,14 +196,14 @@ window.Storage = (function () {
     });
   }
 
-  async function persist(scope) {
+  async function persist(scope, opts) {
     if (!db) return;
     const acc = accId();
     const jobs = [];
-    const push = function (target, data) {
+    const push = function (target, data, extra) {
       jobs.push({
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ target: target, data: data, acc: acc })
+        body: JSON.stringify(Object.assign({ target: target, data: data, acc: acc }, extra || {}))
       });
     };
     if (!scope || scope === 'items') push('items', db.items);
@@ -212,8 +212,14 @@ window.Storage = (function () {
     if (!scope || scope === 'events') push('events', db.events);
     // habits 域载荷过滤（v1.1.9 拍板 5）：预设建议（__seed）不落盘，只写被交互转正的 def
     if (!scope || scope === 'habits') push('habits', habitsPayload());
-    // todos 域（v1.2.0 稽核修复）：此前漏 push 导致 persist('todos') 空转假成功、重启全丢
-    if (!scope || scope === 'todos') push('todos', { defs: (db.todos || {}).defs || [], done: (db.todos || {}).done || {} });
+    // todos 域（v1.2.0 稽核修复）：此前漏 push 导致 persist('todos') 空转假成功、重启全丢。
+    // allowEmpty 放**请求顶层**（serve 空覆盖保护读 payload.get('allowEmpty')）——
+    // 此前塞进 data 里 serve 根本看不见（删光最后一个待办会被 409 拒绝），
+    // 还会被 _sanitize_todos 原样写进 todos.json 污染数据
+    if (!scope || scope === 'todos') {
+      push('todos', { defs: (db.todos || {}).defs || [], done: (db.todos || {}).done || {} },
+        (opts && opts.allowEmpty) ? { allowEmpty: true } : null);
+    }
     // timeline 域（v1.2.01 时间日历）：时间段 + 记录类时间点 + 自定义类型 + 计时器
     if (!scope || scope === 'timeline') {
       const tl = db.timeline || {};
@@ -743,9 +749,11 @@ window.Storage = (function () {
   function todoDef(id) {
     return ((db.todos || {}).defs || []).filter(function (d) { return d.id === id; })[0];
   }
-  /* 该日是否到期（none=仅起始当天；循环=起始日起按规则；短月按月末夹紧） */
+  /* 该日是否到期（none=仅起始当天；循环=起始日起按规则；短月按月末夹紧）。
+     due 允许为空（旧数据缺字段）：按全天 23:59 兜底（与各显示/逾期口径一致），
+     不再让缺 due 的待办整体消失 */
   function todoDueOn(def, dateStr) {
-    if (!def || def.archived || !def.due) return false;
+    if (!def || def.archived) return false;
     const start = def.date || '';
     if (def.repeat === 'none') return dateStr === start;
     if (!start || dateStr < start) return false;
@@ -777,35 +785,130 @@ window.Storage = (function () {
     return U.todayStr(now) + ' ' + String(now.getHours()).padStart(2, '0') + ':' +
       String(now.getMinutes()).padStart(2, '0');
   }
-  /* 标记完成/跳过（status='done'|'skipped'|''=恢复未决）；done 时联动习惯打卡 */
+  /* 标记完成/跳过（status='done'|'skipped'|''=恢复未决）；done 时联动习惯打卡。
+     v1.2.4 状态机：时间段待办（def.start）done=物化 timeline.block（todoId 链接）；
+     撤销=回计划态（删物化块）；跳过=计划段保留（待手工删除，拍板 3）。
+     v1.2.5 修复：按**状态迁移差分**物化/删物化、记/回退习惯——
+     · 连点「完成」（done→done）幂等，不重复物化、不重复计习惯
+     · done→skipped 也删物化块（否则跳过后计划段与事实段双显）
+     · 撤销/跳过（离开 done）对称回退习惯（此前只加不减） */
   function setTodoDone(defId, dateStr, status) {
+    return applyTodoStatus(defId, dateStr, status, true);
+  }
+  /* HH:MM → 分钟（越界夹紧；非法=0） */
+  function hmMin(s) {
+    const m = /^(\d{1,2}):(\d{2})$/.exec(String(s || '').trim());
+    return m ? Math.min(24 * 60, Number(m[1]) * 60 + Number(m[2])) : 0;
+  }
+  /* 日期串加减天（'YYYY-MM-DD'） */
+  function addDaysStr(ds, n) {
+    const p = String(ds || '').split('-');
+    const d = new Date(Number(p[0] || 1970), (Number(p[1]) || 1) - 1, (Number(p[2]) || 1) + n);
+    return U.todayStr(d);
+  }
+  /* 物化块实例锚（v1.2.5）：同一次实例的块共用确定性 gid 'todo:<defId>:<实例日>'——
+     过夜拆分段同组；循环逐日实例互不误判（昨天的夜尾段不会挡住今天实例的物化）；
+     兼容旧数据：无该前缀的块按「当天 + todoId」兜底识别 */
+  function todoBlockGid(defId, dateStr) { return 'todo:' + defId + ':' + dateStr; }
+  function todoBlocksOf(defId, dateStr) {
+    const tl = timeline();
+    const gid = todoBlockGid(defId, dateStr);
+    return (tl.blocks || []).filter(function (b) {
+      return b.todoId === defId &&
+        (b.gid === gid || (b.date === dateStr && String(b.gid || '').indexOf('todo:') !== 0));
+    });
+  }
+  /* 待办完成 ↔ 习惯打卡差分（计次 +1/-1、二值置/清）。
+     直接写 log（不走 toggleHabit/setHabitCount）：习惯侧反向同步会回串待办完成态，
+     从这里绕开避免把刚写完的状态又改回去（死循环）；仅真实状态迁移才调，连点不重复计。 */
+  function todoHabitDelta(habitId, dateStr, on) {
+    if (!habitId) return false;
+    const h = db.habits || (db.habits = { defs: [], log: {} });
+    materializeHabit(habitId); // 联动打卡=被交互 → 预设建议转正随落盘（拍板 5）
+    const def = (h.defs || []).filter(function (x) { return x.id === habitId; })[0];
+    if (!def) return false; // 习惯已删：不写孤儿 log 键
+    const map = h.log[habitId] || (h.log[habitId] = {});
+    const cur = Object.prototype.hasOwnProperty.call(map, dateStr) ? map[dateStr] : undefined;
+    const n = typeof cur === 'number' ? cur : (cur ? 1 : 0);
+    if (def.type === 'count') {
+      const nv = on ? n + 1 : n - 1;
+      if (nv > 0) map[dateStr] = nv;
+      else {
+        delete map[dateStr];
+        if (!Object.keys(map).length) delete h.log[habitId];
+      }
+    } else {
+      if (on) map[dateStr] = true;
+      else {
+        delete map[dateStr];
+        if (!Object.keys(map).length) delete h.log[habitId];
+      }
+    }
+    return true;
+  }
+  /* 状态机核心：写完成态 + 计划段物化/回退 + 习惯差分（syncHabit=false=习惯侧反向同步入口，
+     不回写习惯——习惯变化已是事实源，回写即死循环） */
+  function applyTodoStatus(defId, dateStr, status, syncHabit) {
     db.todos = db.todos || { defs: [], done: {} };
     const m = (db.todos.done = db.todos.done || {})[defId] = (db.todos.done || {})[defId] || {};
+    const prev = m[dateStr] && m[dateStr].s ? m[dateStr].s : '';
     if (!status) delete m[dateStr];
     else m[dateStr] = { t: new Date().toISOString(), s: status };
     const def = todoDef(defId);
     const jobs = [persist('todos')];
-    if (def && def.linkHabitId && status === 'done') {
-      db.habits = db.habits || { defs: [], log: {} };
-      const lg = (db.habits.log = db.habits.log || {})[def.linkHabitId] = (db.habits.log || {})[def.linkHabitId] || {};
-      lg[dateStr] = true;
-      jobs.push(persist('habits'));
+    // 计划段 ↔ 事实段（完成才物化 / 离开完成态删物化回计划）
+    if (def && def.start) {
+      if (status === 'done') {
+        if (!todoBlocksOf(defId, dateStr).length) {
+          const gid = todoBlockGid(defId, dateStr);
+          const base = {
+            gid: gid, typeId: 'other', note: def.name, location: def.location || '',
+            todoId: defId, linkHabitId: '', habitSynced: true, source: 'manual'
+          };
+          // 过夜（start>due）按天拆两段（与手工跨天录入同构、同 gid 同组）；
+          // 无 due 的旧数据兜底 end=start（不拆）
+          if (!def.due || hmMin(def.due) > hmMin(def.start)) {
+            jobs.push(saveTimelineBlock(Object.assign({}, base, {
+              date: dateStr, start: def.start, end: def.due || def.start
+            })));
+          } else {
+            jobs.push(saveTimelineBlock(Object.assign({}, base, {
+              date: dateStr, start: def.start, end: '24:00'
+            })));
+            jobs.push(saveTimelineBlock(Object.assign({}, base, {
+              date: addDaysStr(dateStr, 1), start: '00:00', end: def.due
+            })));
+          }
+        }
+      } else if (prev === 'done') {
+        // 撤销/改跳过：删该实例物化块（含过夜拆分段，按实例 gid 整组）
+        todoBlocksOf(defId, dateStr).slice().forEach(function (b) {
+          jobs.push(removeTimelineGroup(b.id));
+        });
+      }
+    }
+    // 习惯联动（v1.2.5 差分）：进入 done 记一次、离开 done 回退一次
+    if (syncHabit && def && def.linkHabitId && prev !== status) {
+      if (status === 'done' || prev === 'done') {
+        if (todoHabitDelta(def.linkHabitId, dateStr, status === 'done')) jobs.push(persist('habits'));
+      }
     }
     return Promise.all(jobs);
   }
-  /* 习惯打卡 → 待办反向同步（双向联动，勾选「同步到习惯打卡」的待办） */
+  /* 习惯打卡 → 待办反向同步（双向联动，勾选「同步到习惯打卡」的待办）
+     v1.2.5：走同一状态机（含计划段物化/回退），syncHabit=false 不回写习惯 */
   function syncTodoFromHabit(habitId, dateStr, on) {
     const defs = ((db.todos || {}).defs || []).filter(function (d) {
-      return d.linkHabitId === habitId && todoDueOn(d, dateStr);
+      return d && d.linkHabitId === habitId && todoDueOn(d, dateStr);
     });
     if (!defs.length) return null;
-    const doneMap = (db.todos.done = db.todos.done || {});
+    const jobs = [];
     defs.forEach(function (d) {
-      const m = doneMap[d.id] = doneMap[d.id] || {};
-      if (on) m[dateStr] = { t: new Date().toISOString(), s: 'done' };
-      else if (m[dateStr] && m[dateStr].s === 'done') delete m[dateStr];
+      const cur = todoStatus(d.id, dateStr);
+      if (on) { if (cur !== 'done') jobs.push(applyTodoStatus(d.id, dateStr, 'done', false)); }
+      else if (cur === 'done') { jobs.push(applyTodoStatus(d.id, dateStr, '', false)); }
     });
-    return persist('todos');
+    return jobs.length ? Promise.all(jobs) : null;
   }
   function saveTodoDef(def) {
     db.todos = db.todos || { defs: [], done: {} };
@@ -816,10 +919,12 @@ window.Storage = (function () {
     return persist('todos');
   }
   function removeTodoDef(id) {
+    // 删到最后一条=defs 空：显式 allowEmpty 过 serve 空覆盖保护
+
     db.todos = db.todos || { defs: [], done: {} };
     db.todos.defs = (db.todos.defs || []).filter(function (d) { return d.id !== id; });
     if (db.todos.done) delete db.todos.done[id];
-    return persist('todos');
+    return persist('todos', { allowEmpty: true });
   }
   /* 未决实例：近 7 天逾期 + 今天 + 未来 3 天（提前展示后续日期），按 逾期→优先级→时间 排序 */
   function todoOpenInstances(now) {
@@ -885,6 +990,7 @@ window.Storage = (function () {
           id: String(b.id || U.uid()), gid: String(b.gid || ''), date: String(b.date || ''),
           start: String(b.start || '00:00'), end: String(b.end || '00:00'),
           typeId: String(b.typeId || 'other'), note: String(b.note || ''),
+          location: String(b.location || ''), todoId: String(b.todoId || ''),
           linkHabitId: String(b.linkHabitId || ''), habitSynced: !!b.habitSynced,
           source: b.source === 'timer' ? 'timer' : 'manual'
         };
@@ -893,6 +999,7 @@ window.Storage = (function () {
         return {
           id: String(p.id || U.uid()), date: String(p.date || ''), time: String(p.time || '00:00'),
           typeId: String(p.typeId || 'pt_water'), name: String(p.name || '时间点'), note: String(p.note || ''),
+          location: String(p.location || ''),
           linkHabitId: String(p.linkHabitId || ''), habitSynced: !!p.habitSynced
         };
       }) : [],
@@ -934,19 +1041,30 @@ window.Storage = (function () {
     const rec = {
       id: bl.id || U.uid(), gid: String(bl.gid || ''), date: String(bl.date || ''), start: String(bl.start || '00:00'),
       end: String(bl.end || '00:00'), typeId: String(bl.typeId || 'other'), note: String(bl.note || ''),
+      location: String(bl.location || ''), todoId: String(bl.todoId || ''),
       linkHabitId: String(bl.linkHabitId || ''), habitSynced: !!bl.habitSynced,
       source: bl.source === 'timer' ? 'timer' : 'manual'
     };
     const i = tl.blocks.findIndex(function (x) { return x.id === rec.id; });
     const prev = i >= 0 ? tl.blocks[i] : null;
-    // 习惯联动差分：关联变化时回退旧的、记新的（防重复计）
+    // 习惯联动差分（v1.2.5）：
+    // · 同一条记录同习惯同日 → 继承已计标记（调用方传 habitSynced:false 也不重复计）
+    // · 关联变了或**日期变了** → 回退旧的（旧日期）、记新的（新日期）——改期不迁移会把打卡留在旧日
     const jobs = [];
-    if (prev && prev.habitSynced && prev.linkHabitId && prev.linkHabitId !== rec.linkHabitId) {
+    let added = null, reverted = null;
+    if (prev && prev.habitSynced && prev.linkHabitId &&
+      prev.linkHabitId === rec.linkHabitId && prev.date === rec.date) {
+      rec.habitSynced = true;
+    }
+    if (prev && prev.habitSynced && prev.linkHabitId &&
+      (prev.linkHabitId !== rec.linkHabitId || prev.date !== rec.date)) {
+      reverted = { linkHabitId: prev.linkHabitId, date: prev.date };
       jobs.push(timelineHabitSync(prev.linkHabitId, prev.date, false));
       rec.habitSynced = false;
     }
     if (rec.linkHabitId && !rec.habitSynced) {
       rec.habitSynced = true;
+      added = { linkHabitId: rec.linkHabitId, date: rec.date };
       jobs.push(timelineHabitSync(rec.linkHabitId, rec.date, true));
     }
     if (!rec.linkHabitId) rec.habitSynced = false;
@@ -954,13 +1072,15 @@ window.Storage = (function () {
     if (i >= 0) tl.blocks[i] = rec; else tl.blocks.push(rec);
     return Promise.all(jobs).then(function () { return persist('timeline'); }).then(function () { return rec; })
       .catch(function (e) {
-        // 落盘失败回滚内存（同 toggleHabit 口径，v1.2.01 边界锁）：防"失败后刷新出幽灵记录"
+        // 落盘失败回滚内存（同 toggleHabit 口径，v1.2.01 边界锁）：防"失败后刷新出幽灵记录"；
+        // 习惯只回退本次真正动过的（此前无条件回退会把没加过的打卡误清）
         const cur = tl.blocks.findIndex(function (x) { return x.id === rec.id; });
         if (cur >= 0) {
           if (prevSnap) tl.blocks[cur] = prevSnap;
           else tl.blocks.splice(cur, 1);
         }
-        if (rec.habitSynced && rec.linkHabitId) timelineHabitSync(rec.linkHabitId, rec.date, false);
+        if (added) timelineHabitSync(added.linkHabitId, added.date, false);
+        if (reverted) timelineHabitSync(reverted.linkHabitId, reverted.date, true);
         throw e;
       });
   }
@@ -995,17 +1115,28 @@ window.Storage = (function () {
     const rec = {
       id: pt.id || U.uid(), date: String(pt.date || ''), time: String(pt.time || '00:00'),
       typeId: String(pt.typeId || 'pt_water'), name: String(pt.name || '时间点'), note: String(pt.note || ''),
+      location: String(pt.location || ''),
       linkHabitId: String(pt.linkHabitId || ''), habitSynced: !!pt.habitSynced
     };
     const i = tl.points.findIndex(function (x) { return x.id === rec.id; });
     const prev = i >= 0 ? tl.points[i] : null;
+    // 习惯联动差分（v1.2.5，与 saveTimelineBlock 同口径）：同记录同习惯同日继承已计；
+    // 关联/日期变化回退旧的记新的；失败只回退本次动过的
     const jobs = [];
-    if (prev && prev.habitSynced && prev.linkHabitId && prev.linkHabitId !== rec.linkHabitId) {
+    let added = null, reverted = null;
+    if (prev && prev.habitSynced && prev.linkHabitId &&
+      prev.linkHabitId === rec.linkHabitId && prev.date === rec.date) {
+      rec.habitSynced = true;
+    }
+    if (prev && prev.habitSynced && prev.linkHabitId &&
+      (prev.linkHabitId !== rec.linkHabitId || prev.date !== rec.date)) {
+      reverted = { linkHabitId: prev.linkHabitId, date: prev.date };
       jobs.push(timelineHabitSync(prev.linkHabitId, prev.date, false));
       rec.habitSynced = false;
     }
     if (rec.linkHabitId && !rec.habitSynced) {
       rec.habitSynced = true;
+      added = { linkHabitId: rec.linkHabitId, date: rec.date };
       jobs.push(timelineHabitSync(rec.linkHabitId, rec.date, true));
     }
     if (!rec.linkHabitId) rec.habitSynced = false;
@@ -1018,7 +1149,8 @@ window.Storage = (function () {
           if (prevSnap) tl.points[cur] = prevSnap;
           else tl.points.splice(cur, 1);
         }
-        if (rec.habitSynced && rec.linkHabitId) timelineHabitSync(rec.linkHabitId, rec.date, false);
+        if (added) timelineHabitSync(added.linkHabitId, added.date, false);
+        if (reverted) timelineHabitSync(reverted.linkHabitId, reverted.date, true);
         throw e;
       });
   }
@@ -1061,15 +1193,19 @@ window.Storage = (function () {
   function removeTimelineType(id) {
     const tl = timeline();
     const snapTypes = tl.types.slice();
-    const snapBlocks = tl.blocks.map(function (b) { return { id: b.id, typeId: b.typeId }; });
+    const snapBlocks = tl.blocks.map(function (b) { return { id: b.id, typeId: b.typeId }; })
+      .concat((tl.points || []).map(function (p) { return { id: 'P:' + p.id, typeId: p.typeId }; }));
     tl.types = tl.types.filter(function (x) { return x.id !== id; });
-    // 引用该类型的记录归入 other（不删用户记录）
+    // 引用该类型的记录归入 other（不删用户记录；points 曾漏迁移致画布显裸 id）
     tl.blocks.forEach(function (b) { if (b.typeId === id) b.typeId = 'other'; });
+    (tl.points || []).forEach(function (p) { if (p.typeId === id) p.typeId = 'pt_water'; });
     return persist('timeline').catch(function (e) {
       tl.types = snapTypes;
       snapBlocks.forEach(function (s) {
-        const b = tl.blocks.filter(function (x) { return x.id === s.id; })[0];
-        if (b) b.typeId = s.typeId;
+        const isPoint = String(s.id).indexOf('P:') === 0;
+        const pool = isPoint ? (tl.points || []) : tl.blocks;
+        const rec = pool.filter(function (x) { return x.id === String(s.id).replace(/^P:/, ''); })[0];
+        if (rec) rec.typeId = s.typeId;
       });
       throw e;
     });
@@ -2018,7 +2154,9 @@ window.Storage = (function () {
       bills: [], accounts: [], cats: M.defaultWalletCats(), tags: [], imports: [],
       balances: [], syncMap: db.wallet && db.wallet.syncMap, catsVersion: 2
     };
-    return persist();
+    // allowEmpty：清空是显式意图——否则 serve 空覆盖保护会 409 拒绝 todos 清空，
+    // 变成"其他域已清、待办还在"的半清空状态
+    return persist(null, { allowEmpty: true });
   }
 
   return {

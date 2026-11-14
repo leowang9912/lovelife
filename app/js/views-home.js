@@ -118,12 +118,15 @@ window.HomeView = (function () {
 
   /* ---------- 待办事项（v1.2.0）：即将到期前 5 条 + 倒计时进度 + 过期确认 ---------- */
   function todoLeftInfo(def, dateStr, now) {
-    const due = new Date(dateStr + 'T' + (def.due || '23:59') + ':00');
+    // 时间段待办按**开始**倒计时（v1.2.4，与提醒锚点一致）；瞬时按截止
+    const anchor = def.start || def.due || '23:59';
+    const due = new Date(dateStr + 'T' + anchor + ':00');
     const ms = due - now;
     const abs = Math.abs(ms);
     const h = Math.floor(abs / 3600000);
     const m = Math.floor((abs % 3600000) / 60000);
-    const txt = (ms >= 0 ? '还有 ' : '已过期 ') + (h >= 24
+    const unit = def.start ? '开始' : '到期';
+    const txt = (ms >= 0 ? '还有 ' : (def.start ? '已开始 ' : '已过期 ')) + (h >= 24
       ? Math.floor(h / 24) + ' 天 ' + (h % 24) + ' 小时'
       : (h ? h + ' 小时 ' + m + ' 分' : m + ' 分'));
     return { txt: txt, ms: ms, prog: Math.max(0, Math.min(1, 1 - ms / 86400000)) };
@@ -185,13 +188,15 @@ window.HomeView = (function () {
       out.push({ def: d, dateStr: ds, s: S.todoStatus(d.id, ds) || '' });
     });
     const PRIO = { high: 0, mid: 1, low: 2 };
+    const keyOf = function (d) { return d.start || d.due || '23:59'; }; // 时间主序：起始早者在前
     out.sort(function (a, b) {
-      // 已决垫底；未决按优先级→截止时刻
+      // 已决垫底；未决按时间升序（起始/截止），同刻再按优先级
       if (!!a.s !== !!b.s) return a.s ? 1 : -1;
+      const ka = keyOf(a.def), kb = keyOf(b.def);
+      if (ka !== kb) return ka < kb ? -1 : 1;
       const pa = PRIO[a.def.priority] != null ? PRIO[a.def.priority] : 1;
       const pb = PRIO[b.def.priority] != null ? PRIO[b.def.priority] : 1;
-      if (pa !== pb) return pa - pb;
-      return (a.def.due || '23:59') < (b.def.due || '23:59') ? -1 : 1;
+      return pa - pb;
     });
     return out;
   }
@@ -214,7 +219,9 @@ window.HomeView = (function () {
           ' data-todo-edit="' + esc(it.def.id) + '" data-tw-date="' + ds + '" title="点击编辑">' +
           '<div class="tw-l1"><span class="todo-prio p-' + esc(it.def.priority || 'mid') + '"></span>' +
           '<span class="tw-name">' + esc(it.def.name) + '</span></div>' +
-          '<div class="tw-l2"><b class="tw-time">' + esc(it.def.due || '') + '</b>' +
+          '<div class="tw-l2"><b class="tw-time">' + (it.def.start
+            ? esc(it.def.start + '-' + (it.def.due || '')) : esc(it.def.due || '')) + '</b>' +
+          (it.def.location ? '<span class="tw-loc">' + UI.icon('map-pin', 11) + esc(it.def.location) + '</span>' : '') +
           '<span class="op-float tw-acts">' +
           (it.s
             ? '' // 已决无操作（撤销只进「管理」，v1.2.0 拍板）
@@ -307,7 +314,7 @@ window.HomeView = (function () {
   function openTodoEditor(def, onSaved) {
     const isNew = !def;
     def = def || {
-      id: U.uid(), name: '', date: U.todayStr(), due: '21:00', repeat: 'daily',
+      id: U.uid(), name: '', date: U.todayStr(), due: '21:00', repeat: 'none', location: '',
       repeatOn: [], interval: 1, remindBefore: 15, linkHabitId: '', repeatUntil: '', createdAt: Date.now(), archived: false
     };
     // 播种预设习惯（下拉可见可选）——预设纯内存不落盘，不播种时下拉常为空导致无法同步
@@ -316,13 +323,15 @@ window.HomeView = (function () {
     const repOpts = [['none', '不循环（一次性）'], ['daily', '每天'], ['workday', '工作日（周一~五）'],
       ['weekly', '每周'], ['monthly', '每月'], ['ndays', '每 N 天']];
     UI.modal({
-      title: isNew ? '新建待办' : '编辑待办', width: 560,
+      title: isNew ? '新建待办' : '编辑待办', width: 560, formGuard: true,
       bodyHTML: '<div class="form-grid">' +
         '<label class="f-full"><span class="f-label">名称 <span class="req-star">*</span></span>' +
         '<input id="td-name" value="' + esc(def.name) + '" placeholder="如：日报"></label>' +
+        '<label><span class="f-label">地点（可选）</span><input id="td-loc" value="' + esc(def.location || '') + '" placeholder="如：公司 / 医院"></label>' +
         '<label><span class="f-label" id="td-date-label">' + (def.repeat === 'none' ? '截止日期' : '起始日期') + '</span>' +
         '<input type="date" id="td-date" value="' + esc(def.date) + '"></label>' +
         '<label><span class="f-label">截止时刻</span><input type="time" id="td-due" value="' + esc(def.due) + '"></label>' +
+        '<label><span class="f-label">开始时刻（可选，留空=瞬时）</span><input type="time" id="td-start" value="' + esc(def.start || '') + '"></label>' +
         '<label><span class="f-label">循环截止（可空 = 长期）</span><input type="date" id="td-until" value="' + esc(def.repeatUntil || '') + '"></label>' +
         '<label><span class="f-label">优先级</span><select id="td-prio">' +
         ['high', 'mid', 'low'].map(function (p) {
@@ -389,8 +398,10 @@ window.HomeView = (function () {
           const linkRaw = w.querySelector('#td-habit').value || '';
           const d = Object.assign({}, def, {
             name: name,
+            location: (w.querySelector('#td-loc') ? w.querySelector('#td-loc').value.trim() : ''),
             date: w.querySelector('#td-date').value || U.todayStr(),
             due: w.querySelector('#td-due').value || '21:00',
+            start: w.querySelector('#td-start') ? w.querySelector('#td-start').value : '',
             repeat: v,
             repeatOn: v === 'weekly'
               ? Array.prototype.map.call(w.querySelectorAll('[data-td-dow]:checked'), function (c) {
@@ -1359,6 +1370,7 @@ window.HomeView = (function () {
 
   return {
     render: render,
+    openTodoEditor: openTodoEditor, // 时间日历计划段编辑复用
     // 稽核修复：账号切换清习惯视图状态，防跨账号残留
     resetState: function () {
       habView = 'week';

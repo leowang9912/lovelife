@@ -75,7 +75,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.2.3"
+SERVER_BUILD = "1.2.4"
 
 _lock = threading.Lock()
 
@@ -647,6 +647,17 @@ def _write_json(path, obj):
     if path in _read_unisolated:
         raise OSError("%s 数据损坏且无法隔离，已阻止写入以免覆盖原文件（请先手工修复或改名该文件）"
                       % os.path.basename(path))
+    # 写前滚动 .bak（保留 3 份）：任何误覆盖/空写可从 .bak.1 回滚（v1.2.4 数据事故防护）
+    try:
+        if os.path.isfile(path):
+            for i in range(3, 0, -1):
+                src = path + (".bak" if i == 1 else ".bak.%d" % (i - 1))
+                dst = path + ".bak.%d" % i
+                if os.path.isfile(src):
+                    os.replace(src, dst)
+            shutil.copy2(path, path + ".bak")
+    except Exception:
+        pass
     # tmp 名带 pid+随机后缀：多线程/多实例不互踩
     tmp = "%s.tmp-%d-%04x" % (path, os.getpid(), int.from_bytes(os.urandom(2), "little"))
     with open(tmp, "w", encoding="utf-8") as f:
@@ -1157,6 +1168,16 @@ def _sanitize_habits(raw, warnings):
     return out
 
 
+def _time_ok(v, default):
+    """HH:MM 归一（timeline/todos 共用，曾嵌套在 _sanitize_timeline 致 todos 保存 NameError）"""
+    sv = str(v or "")
+    if len(sv) == 5 and sv[2] == ":" and sv[:2].isdigit() and sv[3:].isdigit():
+        hh, mm = int(sv[:2]), int(sv[3:])
+        if 0 <= hh <= 24 and 0 <= mm <= 59 and not (hh == 24 and mm != 0):  # 24:30 非法（仅 24:00 合法）
+            return sv
+    return default
+
+
 def _sanitize_todos(raw, warnings):
     """待办域（todos.json）类型防御 + 主键归一（v1.2.0，与 _sanitize_habits 同级）"""
     if raw is None:
@@ -1195,6 +1216,8 @@ def _sanitize_todos(raw, warnings):
             d["remindBefore"] = 0
         d["linkHabitId"] = str(d.get("linkHabitId") or "")
         d["repeatUntil"] = str(d.get("repeatUntil") or "")
+        d["location"] = str(d.get("location") or "")
+        d["start"] = _time_ok(d.get("start"), "") if d.get("start") else ""
         pr = str(d.get("priority") or "mid")
         d["priority"] = pr if pr in ("high", "mid", "low") else "mid"
         d["archived"] = bool(d.get("archived"))
@@ -1203,9 +1226,7 @@ def _sanitize_todos(raw, warnings):
     if done is not None and not isinstance(done, dict):
         warnings.append("todos.done 数据结构异常（不是对象），已按空对象")
         done = {}
-    out = dict(raw)
-    out["defs"] = cleaned
-    out["done"] = done or {}
+    out = {"defs": cleaned, "done": done or {}}  # 只保留已知键（allowEmpty 等不得进盘）
     return out
 
 
@@ -1219,14 +1240,6 @@ def _sanitize_timeline(raw, warnings):
         return empty
     out = dict(empty)
 
-    def _time_ok(v, default):
-        s = str(v or "")
-        if len(s) == 5 and s[2] == ":" and s[:2].isdigit() and s[3:].isdigit():
-            hh, mm = int(s[:2]), int(s[3:])
-            if 0 <= hh <= 24 and 0 <= mm <= 59:
-                return s
-        return default
-
     blocks, _ = normalize_records(_sanitize_list(raw.get("blocks"), "timeline.blocks", warnings),
                                   "timeline.blocks", warnings)
     cleaned_b = []
@@ -1238,6 +1251,8 @@ def _sanitize_timeline(raw, warnings):
         b["end"] = _time_ok(b.get("end"), "00:00")
         b["typeId"] = str(b.get("typeId") or "other")
         b["note"] = str(b.get("note") or "")
+        b["location"] = str(b.get("location") or "")
+        b["todoId"] = str(b.get("todoId") or "")
         b["linkHabitId"] = str(b.get("linkHabitId") or "")
         b["habitSynced"] = bool(b.get("habitSynced"))
         b["source"] = "timer" if b.get("source") == "timer" else "manual"
@@ -1253,6 +1268,7 @@ def _sanitize_timeline(raw, warnings):
         p["time"] = _time_ok(p.get("time"), "00:00")
         p["typeId"] = str(p.get("typeId") or "pt_water")
         p["name"] = str(p.get("name") or "时间点")
+        p["location"] = str(p.get("location") or "")
         p["note"] = str(p.get("note") or "")
         p["linkHabitId"] = str(p.get("linkHabitId") or "")
         p["habitSynced"] = bool(p.get("habitSynced"))
@@ -1818,8 +1834,15 @@ class Handler(BaseHTTPRequestHandler):
             elif target == "todos":
                 # 待办事项（todos 域，v1.2.0）：进盘前类型防御 + 主键归一
                 data = _sanitize_todos(data, norm_warnings)
-                _write_json(os.path.join(d, "todos.json"), {**data, "schemaVersion": SCHEMA_VERSION})
-                count = len(data.get("defs") or [])
+                # 空覆盖保护（v1.2.4 数据事故）：defs 空但现盘非空 → 409（除非显式 allowEmpty）
+                _tpath = os.path.join(d, "todos.json")
+                _cur = _read_json(_tpath, {})
+                _cur_n = len((_cur.get("defs") if isinstance(_cur, dict) else []) or [])
+                _new_n = len(data.get("defs") or [])
+                if _new_n == 0 and _cur_n > 0 and not payload.get("allowEmpty"):
+                    return self._json({"error": "todos defs 空与现盘 %d 条冲突，已拒绝（防误清；如确要清空请勾选确认）" % _cur_n}, 409)
+                _write_json(_tpath, {**data, "schemaVersion": SCHEMA_VERSION})
+                count = _new_n
             elif target == "timeline":
                 # 时间日历（timeline 域，v1.2.01）：进盘前类型防御 + 主键归一
                 data = _sanitize_timeline(data, norm_warnings)
@@ -2546,8 +2569,28 @@ def _updater_cmd_lines():
     ]
 
 
+def _backup_data_root(tag):
+    """更新前把 dataRoot 全量备份到 <dataRoot>/backups/pre-<tag>-<ts>（v1.2.4 数据安全：
+    任何更新/换设备动作前数据先落一份；zip 不含 data/，但手动误删目录时这是唯一退路）"""
+    try:
+        root = data_root()
+        # 备份目标放程序目录 backups/（与 dataRoot 平级）：目标在源内部会 copytree 递归
+        bdir = os.path.join(ROOT, "backups")
+        os.makedirs(bdir, exist_ok=True)
+        snap = os.path.join(bdir, "data-pre-%s-%d" % (tag, int(time.time())))
+        shutil.copytree(root, snap, ignore=shutil.ignore_patterns("backups"))
+        # 轮转：data-pre-* 只留 5 份
+        pres = sorted([n for n in os.listdir(bdir) if n.startswith("data-pre-")])
+        for nm in pres[:-5]:
+            shutil.rmtree(os.path.join(bdir, nm), ignore_errors=True)
+        return snap
+    except Exception:
+        return ""
+
+
 def _stage_and_install(data):
     """解压到 update-staging，校验通过后交给 updater.cmd 做替换（现网文件不动到最后一刻）"""
+    _backup_data_root("update")
     staging = os.path.join(ROOT, "update-staging")
     if os.path.isdir(staging):
         shutil.rmtree(staging, ignore_errors=True)

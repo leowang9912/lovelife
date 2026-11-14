@@ -2549,3 +2549,18 @@ input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2
 #home-habits .hb-tr.hb-row {
   padding: 4px 2px;
 }
+
+/* 待办地点外显（时间右侧，窄列截断） */
+.tw-loc {
+  display: inline-flex; align-items: center; gap: 2px;
+  font-size: 10px; color: var(--text-3); min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 7em;
+}
+
+/* 计划段（v1.2.4 状态机）：虚线浅底 ◻，与事实段实色对照 */
+.tl-block.tl-plan {
+  background: rgba(0, 113, 227, .05);
+  border: 1px dashed rgba(0, 113, 227, .45);
+  border-left: 3px dashed rgba(0, 113, 227, .55);
+}
+.tl-plan .tl-b-t { color: var(--text-2); }

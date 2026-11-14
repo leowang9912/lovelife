@@ -17,7 +17,8 @@ window.TimelineView = (function () {
   /* 卡头状态变化后局部刷新（容器是 #main-content——曾误用 #main 导致整 body 重置） */
   function refreshSelf() {
     const main = document.getElementById('main-content');
-    if (main && main.querySelector('#tl-card')) render(main);
+    // 数据操作后的自刷新：保持滚动（不回顶）
+    if (main && main.querySelector('#tl-card')) render(main, true);
   }
 
   /* ---------- 时间/日期小工具 ---------- */
@@ -108,10 +109,40 @@ window.TimelineView = (function () {
   function todoSpansOf(dateStr) {
     const defs = ((S.getDB().todos || {}).defs) || [];
     return defs.filter(function (d) {
-      return d && !d.archived && S.todoDueOn(d, dateStr);
+      return d && !d.archived && !d.start && S.todoDueOn(d, dateStr); // 时间段待办走计划段，不重复出菱形点
     }).map(function (d) {
       return { def: d, dateStr: dateStr, done: !!S.todoStatus(d.id, dateStr) };
     });
+  }
+  /* 过夜时间段待办（start > due）：显示/物化都按天拆两段（与手工跨天录入同构） */
+  function isOvernight(d) {
+    return !!(d && d.start && d.due && parseHM(d.due) < parseHM(d.start));
+  }
+  /* 计划段（v1.2.4 状态机）：时间段待办（def.start）未完成=计划态派生显示；
+     done 已物化为事实段（不再派生）；skipped 仍显示计划段（待手工删除，拍板 3）。
+     v1.2.5：过夜实例按天拆两段显示——本日列只出**属于本日**的段：
+     当天实例的头段（start→24:00）+ 前一天过夜实例的尾段（00:00→due）；
+     返回 {def, instDate, start, end, endLabel, isTail}——完成按钮带实例日，
+     在尾段（次日列）勾完成仍落回当天实例 */
+  function planSpansOf(dateStr) {
+    const defs = ((S.getDB().todos || {}).defs) || [];
+    const out = [];
+    defs.forEach(function (d) {
+      if (!d || d.archived || !d.start || !S.todoDueOn(d, dateStr)) return;
+      if (S.todoStatus(d.id, dateStr) === 'done') return;
+      const end = d.due || d.start;
+      out.push({
+        def: d, instDate: dateStr, start: d.start,
+        end: isOvernight(d) ? '24:00' : end, endLabel: end, isTail: false
+      });
+    });
+    const prev = addDays(dateStr, -1);
+    defs.forEach(function (d) {
+      if (!d || d.archived || !d.start || !isOvernight(d)) return;
+      if (!S.todoDueOn(d, prev) || S.todoStatus(d.id, prev) === 'done') return;
+      out.push({ def: d, instDate: prev, start: '00:00', end: d.due || d.start, endLabel: d.due || d.start, isTail: true });
+    });
+    return out;
   }
 
   /* ---------- 卡头（两行 grid：icon/title/tools + nav 居中） ---------- */
@@ -150,9 +181,14 @@ window.TimelineView = (function () {
   }
 
   /* ---------- 周视图 ---------- */
-  function renderWeek() {
+  /* mode='now'：定位当前时刻（打开/翻周，拍板 10）；'keep'：保持原滚动（数据局部重绘不回顶，
+     交互铁律——保存/删除/勾完成后弹回页首是用户多次返工点） */
+  function renderWeek(mode, scroll) {
     const box = document.getElementById('tl-week');
     if (!box) return;
+    const prevEl = box.querySelector('.tl-week');
+    let keep = null;
+    if (mode === 'keep') keep = (scroll != null ? scroll : (prevEl ? prevEl.scrollTop : 0));
     const days = weekDates();
     const today = U.todayStr();
     const tl = S.timeline();
@@ -169,21 +205,50 @@ window.TimelineView = (function () {
       const isToday = ds === today;
       let inner = '';
       if (isToday) inner += '<div class="tl-now" style="top:' + (nowMin / 60 * HOUR_H) + 'px"></div>';
-      // 时间段块（合并视图恒显）
-      const blocks = (tl.blocks || []).filter(function (b) { return b.date === ds; });
-      layoutBlocks(blocks).forEach(function (it) {
+      // 时间段块 + 计划段（v1.2.4）同池布局（重叠并排正确）；计划段=待办派生
+      const items = (tl.blocks || []).filter(function (b) { return b.date === ds; })
+        .map(function (b) { return Object.assign({ isPlan: false }, b); });
+      planSpansOf(ds).forEach(function (p) {
+        items.push({
+          isPlan: true, def: p.def,
+          id: 'plan:' + p.def.id + (p.isTail ? ':t' : ''),
+          date: ds, start: p.start, end: p.end, endLabel: p.endLabel,
+          typeId: 'other', note: p.def.name, location: p.def.location || '', todoId: p.def.id,
+          instDate: p.instDate
+        });
+      });
+      layoutBlocks(items).forEach(function (it) {
+        const meta = it.rec;
         const top = it.startMin / 60 * HOUR_H;
         const h = Math.max(16, (it.endMin - it.startMin) / 60 * HOUR_H);
-        const ty = typeOf(it.rec.typeId);
         const w = 100 / it.cols;
         const short = h < 38;
+        if (it.rec.isPlan) {
+          // 计划段：浅色虚线 + ◻（与事实段实色对照）
+          inner += '<div class="tl-block tl-plan' + (short ? ' tl-short' : '') + '"' +
+            ' data-tl-plan="' + U.escapeHtml(it.rec.def.id) + '" data-tl-kind="plan"' +
+            ' style="top:' + top + 'px;height:' + h + 'px;left:' + (it.col * w) + '%;width:calc(' + w + '% - 2px);">' +
+            '<div class="tl-b-t">◻ ' + U.escapeHtml(it.rec.def.name) +
+            (short ? '' : '（' + durText(it.endMin - it.startMin) + '）') + '</div>' +
+            (short ? '' : '<div class="tl-b-s">' + U.escapeHtml(it.rec.start) + ' - ' + U.escapeHtml(it.rec.endLabel != null ? it.rec.endLabel : it.rec.end) +
+              (it.rec.location ? ' · ' + U.escapeHtml(it.rec.location) : '') + '</div>') +
+            '<div class="tl-b-ops op-host"><span class="op-float">' +
+            '<button type="button" class="home-tool-btn" data-tl-plan-del="' + U.escapeHtml(it.rec.def.id) + '" title="删除该待办">' + UI.icon('x', 12) + '</button>' +
+            '<button type="button" class="home-tool-btn" data-tl-plan-done="' + U.escapeHtml(it.rec.def.id) + '" data-date="' + U.escapeHtml(it.rec.instDate || ds) + '" title="完成（转为时间记录）">' + UI.icon('check', 12) + '</button>' +
+            '</span></div></div>';
+          return;
+        }
+        const ty = typeOf(it.rec.typeId);
+        // 物化块（拍板 2A）：标题优先显示待办名（类型名次之）——完成前后可对照
+        const bTitle = it.rec.todoId ? (it.rec.note || ty.name) : ty.name;
         inner += '<div class="tl-block' + (short ? ' tl-short' : '') + '" data-tl-block="' + U.escapeHtml(it.rec.id) + '"' +
           ' data-tl-kind="block"' +
           ' style="top:' + top + 'px;height:' + h + 'px;left:' + (it.col * w) + '%;width:calc(' + w + '% - 2px);' +
           'background:' + U.escapeHtml(ty.color) + '1c;border-left-color:' + U.escapeHtml(ty.color) + '">' +
-          '<div class="tl-b-t">' + UI.iconOrEmoji(ty.icon, 12) + ' ' + U.escapeHtml(ty.name) +
+          '<div class="tl-b-t">' + UI.iconOrEmoji(ty.icon, 12) + ' ' + U.escapeHtml(bTitle) +
           (short ? '' : '（' + durText(it.endMin - it.startMin) + '）') + '</div>' +
-          (short ? '' : '<div class="tl-b-s">' + U.escapeHtml(it.rec.start) + ' - ' + U.escapeHtml(it.rec.end) + '</div>') +
+          (short ? '' : '<div class="tl-b-s">' + U.escapeHtml(it.rec.start) + ' - ' + U.escapeHtml(it.rec.end) +
+            (it.rec.location ? ' · ' + U.escapeHtml(it.rec.location) : '') + '</div>') +
           (short ? '' : '<div class="tl-b-ops op-host"><span class="op-float">' +
           '<button type="button" class="home-tool-btn" data-tl-again="' + U.escapeHtml(it.rec.id) + '" title="再来一条">' + UI.icon('copy', 12) + '</button>' +
           '</span></div>') +
@@ -245,9 +310,9 @@ window.TimelineView = (function () {
       cols +
       '</div>';
     bindWeek(box);
-    // 打开/翻周自动定位当前时刻（今天列附近，拍板 10）
+    // 打开/翻周自动定位当前时刻（今天列附近，拍板 10）；数据重绘保持原滚动不回顶
     const sc = box.querySelector('.tl-week');
-    if (sc) sc.scrollTop = Math.max(0, (nowMin / 60 * HOUR_H) - 140);
+    if (sc) sc.scrollTop = keep != null ? keep : Math.max(0, (nowMin / 60 * HOUR_H) - 140);
   }
 
   /* ---------- 交互 ---------- */
@@ -255,7 +320,7 @@ window.TimelineView = (function () {
     // 委托绑在整页容器（page-head 工具 + 周视图都盖住）
     // 幂等（同 views-plan data-eg-bound 先例）：#main-content 复用容器，render 重入会叠加监听，
     // 点一次「添加」弹 N 个窗（v1.2.01 真机 bug，JSDOM 全新窗口拦不住）
-    if (root.hasAttribute('data-tl-bound')) return;
+    if (root.hasAttribute('data-tl-bound')) { refreshTick(); return; } // 重进也要恢复读数（曾冻结）
     root.setAttribute('data-tl-bound', '1');
     root.addEventListener('click', function (e) {
       const t = e.target;
@@ -282,8 +347,11 @@ window.TimelineView = (function () {
     tickTimer = setInterval(function () {
       const el = document.getElementById('tl-timer-elapsed');
       if (!el) { clearInterval(tickTimer); tickTimer = null; return; }
-      const sec = Math.floor((Date.now() - t.startedAt) / 1000);
-      el.textContent = Math.floor(sec / 60) + ':' + String(sec % 60).padStart(2, '0');
+      const rt = timerRunning(); // 实时取（切计时/刷新后不冻结）
+      if (!rt) { clearInterval(tickTimer); tickTimer = null; return; }
+      const sec = Math.max(0, Math.floor((Date.now() - rt.startedAt) / 1000));
+      const hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60;
+      el.textContent = hh + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
     }, 1000);
   }
 
@@ -312,6 +380,15 @@ window.TimelineView = (function () {
       html = '<div class="tl-pv-t">' + UI.iconOrEmoji(ty.icon, 16) + ' ' + U.escapeHtml(p.name) + '</div>' +
         '<div class="tl-pv-s">' + U.escapeHtml(p.time) + ' · 时间点</div>' +
         (p.note ? '<div class="tl-pv-n">' + U.escapeHtml(p.note) + '</div>' : '');
+    } else if (kind === 'plan') {
+      // 计划段独立提示（曾误写「点击勾完成」——实际点击=编辑，hover ✓ 才完成）
+      const pid = el.getAttribute('data-tl-plan');
+      const def = (((S.getDB().todos || {}).defs) || []).filter(function (x) { return x.id === pid; })[0];
+      if (!def) return;
+      html = '<div class="tl-pv-t">' + UI.icon('square', 15) + ' ' + U.escapeHtml(def.name) + '</div>' +
+        '<div class="tl-pv-s">◻ 计划段 · ' + U.escapeHtml((def.start || '') + '-' + (def.due || '')) +
+        (def.location ? ' · ' + U.escapeHtml(def.location) : '') + '</div>' +
+        '<div class="tl-pv-n">点击编辑 · hover ✓ 完成（转为时间记录）</div>';
     } else {
       const name = el.querySelector('.tl-td-name');
       html = '<div class="tl-pv-t">' + UI.icon('check-square', 16) + ' ' + U.escapeHtml(name ? name.textContent : '待办') + '</div>' +
@@ -343,6 +420,38 @@ window.TimelineView = (function () {
         if (body._dragMoved) { body._dragMoved = false; return; }
         const col = body.closest('.tl-col');
         const date = col ? col.getAttribute('data-tl-date') : U.todayStr();
+        // 计划段：hover ✓=完成物化；点主体=待办编辑
+        const pd = e.target.closest ? e.target.closest('[data-tl-plan-done]') : null;
+        if (pd) {
+          e.stopPropagation();
+          S.setTodoDone(pd.getAttribute('data-tl-plan-done'), pd.getAttribute('data-date'), 'done').then(function () {
+            UI.toast('已转为时间记录', 'success');
+            renderWeek('keep');
+          }).catch(function (err) { UI.toast('操作失败：' + ((err && err.message) || err), 'error'); });
+          return;
+        }
+        const pdel = e.target.closest ? e.target.closest('[data-tl-plan-del]') : null;
+        if (pdel) {
+          e.stopPropagation();
+          // 拍板 1A：✕=跳过今天（非破坏，对齐主页语义）；删除只留待办编辑弹窗
+          const did = pdel.getAttribute('data-tl-plan-del');
+          const ds = pdel.getAttribute('data-date') || U.todayStr();
+          S.setTodoDone(did, ds, 'skipped').then(function () {
+            UI.toast('已跳过今天（计划段保留）', 'info');
+            renderWeek('keep');
+          }).catch(function (err) { UI.toast('操作失败：' + ((err && err.message) || err), 'error'); });
+          return;
+        }
+        const pl = e.target.closest ? e.target.closest('[data-tl-plan]') : null;
+        if (pl) {
+          const def = (((S.getDB().todos || {}).defs) || []).filter(function (x) {
+            return x.id === pl.getAttribute('data-tl-plan');
+          })[0];
+          if (def) window.HomeView && window.HomeView.openTodoEditor
+            ? window.HomeView.openTodoEditor(def, function () { renderWeek('keep'); })
+            : UI.toast('待办编辑不可用', 'error');
+          return;
+        }
         const bl = e.target.closest ? e.target.closest('[data-tl-block]') : null;
         if (bl) { openBlockEditor({ block: findBlock(bl.getAttribute('data-tl-block')) }); return; }
         const pt = e.target.closest ? e.target.closest('[data-tl-point]') : null;
@@ -381,6 +490,12 @@ window.TimelineView = (function () {
   }
   function findPoint(id) {
     return (S.timeline().points || []).filter(function (p) { return p.id === id; })[0] || null;
+  }
+  /* 物化块 → 待办实例（gid 'todo:<defId>:<实例日>'；旧数据无前缀按块日期兜底） */
+  function todoBlockInstance(b) {
+    if (!b || !b.todoId) return null;
+    const m = /^todo:(.+):(\d{4}-\d{2}-\d{2})$/.exec(String(b.gid || ''));
+    return { defId: m ? m[1] : b.todoId, date: m ? m[2] : b.date };
   }
 
   function bindDrag(el, body) {
@@ -429,9 +544,11 @@ window.TimelineView = (function () {
       // 拖拽限当天：过 24:00 clamp（跨天录入走弹窗自动拆分）
       if (parseHM(ns) >= 24 * 60) ns = fmtHM(23 * 60 + 45);
       if (parseHM(ne) <= parseHM(ns)) ne = fmtHM(Math.min(24 * 60, parseHM(ns) + 15));
-      S.saveTimelineBlock(Object.assign({}, base, { start: ns, end: ne })).then(renderWeek).catch(function (e) {
+      S.saveTimelineBlock(Object.assign({}, base, { start: ns, end: ne })).then(function () {
+        renderWeek('keep');
+      }).catch(function (e) {
         UI.toast('保存失败：' + ((e && e.message) || e) + '，已还原', 'error');
-        renderWeek();
+        renderWeek('keep');
       });
     }
     el.addEventListener('pointerdown', onDown);
@@ -476,7 +593,7 @@ window.TimelineView = (function () {
     opts = opts || {};
     const b = opts.block || null;
     UI.modal({
-      title: b ? '编辑时间记录' : '添加时间记录', width: 460,
+      title: b ? '编辑时间记录' : '添加时间记录', width: 460, formGuard: true,
       bodyHTML: '<div class="form-grid">' +
         '<label><span class="f-label">日期 <span class="req-star">*</span></span>' +
         '<input type="date" id="tl-date" value="' + U.escapeHtml(b ? b.date : (opts.date || U.todayStr())) + '"></label>' +
@@ -487,28 +604,60 @@ window.TimelineView = (function () {
         '<label><span class="f-label">结束 <span class="req-star">*</span></span>' +
         '<input id="tl-end" value="' + U.escapeHtml(b ? b.end : (opts.end || '10:00')) + '" placeholder="HH:MM"></label>' +
         '<label class="f-full"><span class="f-label">备注</span><input id="tl-note" value="' + U.escapeHtml(b ? b.note : (opts.note || '')) + '" placeholder="可选"></label>' +
+        '<label class="f-full"><span class="f-label">地点（可选）</span><input id="tl-loc" value="' + U.escapeHtml(b ? (b.location || '') : (opts.location || '')) + '" placeholder="如：公司 / 医院"></label>' +
         '<label class="f-full"><span class="f-label">关联习惯（保存即打卡 +1，可改/不绑）</span>' +
         '<select id="tl-habit">' + habitOptions(b ? b.linkHabitId : (opts.linkHabitId || habitOfType(opts.typeId || defaultTypeOf('block')))) + '</select></label>' +
+        (b && b.todoId ? '' : '<label class="f-full cd-repeat-row"><input type="checkbox" id="tl-astodo"><span>同时作为待办（计划段：进主页、可循环/提醒；完成后才转为时间记录）</span></label>' +
+          '<label class="f-full" id="tl-todo-name-row" hidden><span class="f-label">待办名称 <span class="req-star">*</span></span>' +
+          '<input id="tl-todo-name" placeholder="如：写报告"></label>') +
         '</div>' +
         '<p class="muted small">类型必选；类型绑了习惯时这里默认跟随，可改。结束早于开始视为跨到次日，自动按天拆分保存。</p>',
-      footerHTML: (b ? '<button type="button" class="btn btn-danger" data-x="del">删除</button>' : '') +
+      footerHTML: (b ? '<button type="button" class="btn btn-danger" data-x="del">删除</button>' +
+        (b.todoId ? '<button type="button" class="btn btn-ghost" data-x="undo" title="撤销完成，回到计划段">撤销完成</button>'
+          : '<button type="button" class="btn btn-ghost" data-x="todef" title="删除本记录并创建可勾完成的待办">转为待办</button>') : '') +
         '<div class="flex1"></div><button type="button" class="btn btn-ghost" data-x="c">取消</button>' +
         '<button type="button" class="btn btn-primary" data-x="s">保存</button>',
       onMount: function (w, close) {
         w.querySelector('[data-x=c]').addEventListener('click', close);
+        // 「作为待办」勾选 → 显示名称行（必填）
+        const asBox = w.querySelector('#tl-astodo');
+        if (asBox) asBox.addEventListener('change', function () {
+          const row = w.querySelector('#tl-todo-name-row');
+          if (row) row.hidden = !asBox.checked;
+        });
         // 切类型 → 习惯下拉默认跟随类型绑定（可改/不绑）
         w.querySelector('#tl-type').addEventListener('change', function (e) {
           const hid = habitOfType(e.target.value);
           const hs = w.querySelector('#tl-habit');
           if (hs) hs.value = hid;
         });
+        // 拍板 3A：物化块显式「撤销完成（回计划）」
+        const undoBtn = w.querySelector('[data-x=undo]');
+        if (undoBtn) undoBtn.addEventListener('click', function () {
+          const inst = todoBlockInstance(b);
+          if (!inst) { UI.toast('不是待办物化记录', 'error'); return; }
+          Promise.resolve(S.setTodoDone(inst.defId, inst.date, '')).then(function () {
+            close();
+            UI.toast('已回到计划段', 'success');
+            setTimeout(function () { renderWeek('keep'); }, 60);
+          }).catch(function (e) { UI.toast('操作失败：' + ((e && e.message) || e), 'error'); });
+        });
         const del = w.querySelector('[data-x=del]');
         if (del) del.addEventListener('click', function () {
-          S.removeTimelineGroup(b.id).then(function () {
-            close();
-            UI.toast('已删除', 'success');
-            setTimeout(renderWeek, 60);
-          }).catch(function (e) { UI.toast('删除失败：' + ((e && e.message) || e), 'error'); });
+          // 拍板 7：删除确认（UI.confirmDialog——window.confirm 在 --app 被禁）
+          UI.confirmDialog('删除时间记录', '删除这条记录？').then(function (ok) {
+            if (!ok) return;
+            // 待办物化块：删事实 = 撤销那次完成（回计划态）——保持「done ⇔ 物化块」不变量
+            const inst = todoBlockInstance(b);
+            const undo = (inst && S.todoDef(inst.defId))
+              ? S.setTodoDone(inst.defId, inst.date, '')
+              : Promise.resolve();
+            undo.then(function () { return S.removeTimelineGroup(b.id); }).then(function () {
+              close();
+              UI.toast('已删除', 'success');
+              setTimeout(function () { renderWeek('keep'); }, 60);
+            }).catch(function (e) { UI.toast('删除失败：' + ((e && e.message) || e), 'error'); });
+          });
         });
         w.querySelector('[data-x=s]').addEventListener('click', function () {
           const date = w.querySelector('#tl-date').value;
@@ -522,12 +671,57 @@ window.TimelineView = (function () {
           }
           const note = w.querySelector('#tl-note').value.trim();
           const linkHabitId = w.querySelector('#tl-habit').value;
-          saveSplitBlocks(b, date, start, end, typeId, note, linkHabitId).then(function () {
+          const location = w.querySelector('#tl-loc') ? w.querySelector('#tl-loc').value.trim() : '';
+          const asTodo = w.querySelector('#tl-astodo') && w.querySelector('#tl-astodo').checked;
+          if (asTodo) {
+            // 作为待办（计划段）：写 todos（start=起、due=止），不写事实块
+            const tname = (w.querySelector('#tl-todo-name') ? w.querySelector('#tl-todo-name').value.trim() : '') || note || '时间段待办';
+            S.saveTodoDef({
+              id: U.uid(), name: tname, date: date, due: end, start: start,
+              repeat: 'none', repeatOn: [], interval: 1, remindBefore: 0,
+              linkHabitId: linkHabitId, location: location, priority: 'mid',
+              repeatUntil: '', createdAt: Date.now(), archived: false
+            }).then(function () {
+              close();
+              UI.toast('已添加计划段（待办）', 'success');
+              setTimeout(function () { renderWeek('keep'); }, 60);
+            }).catch(function (e) {
+              UI.toast('保存失败：' + ((e && e.message) || e) + '，请重试', 'error');
+            });
+            return;
+          }
+          saveSplitBlocks(b, date, start, end, typeId, note, linkHabitId, 'manual', location).then(function () {
             close();
             UI.toast(b ? '已保存' : '已添加', 'success');
-            setTimeout(renderWeek, 60);
+            setTimeout(function () { renderWeek('keep'); }, 60);
           }).catch(function (e) {
             UI.toast('保存失败：' + ((e && e.message) || e) + '，请重试', 'error');
+          });
+        });
+        // 转为待办（事实段 → 计划段）
+        const todef = w.querySelector('[data-x=todef]');
+        if (todef) todef.addEventListener('click', function () {
+          const date = w.querySelector('#tl-date').value;
+          const start = w.querySelector('#tl-start').value.trim();
+          const end = w.querySelector('#tl-end').value.trim();
+          const note = w.querySelector('#tl-note').value.trim();
+          const location = w.querySelector('#tl-loc') ? w.querySelector('#tl-loc').value.trim() : '';
+          const linkHabitId = w.querySelector('#tl-habit').value;
+          const delJob = b ? S.removeTimelineGroup(b.id) : Promise.resolve();
+          const tname2 = (w.querySelector('#tl-todo-name') ? w.querySelector('#tl-todo-name').value.trim() : '') || note || '时间段待办';
+          delJob.then(function () {
+            return S.saveTodoDef({
+              id: U.uid(), name: tname2, date: date, due: end || start, start: start,
+              repeat: 'none', repeatOn: [], interval: 1, remindBefore: 0,
+              linkHabitId: linkHabitId, location: location, priority: 'mid',
+              repeatUntil: '', createdAt: Date.now(), archived: false
+            });
+          }).then(function () {
+            close();
+            UI.toast('已转为待办（计划段）', 'success');
+            setTimeout(function () { renderWeek('keep'); }, 60);
+          }).catch(function (e) {
+            UI.toast('操作失败：' + ((e && e.message) || e), 'error');
           });
         });
       }
@@ -536,7 +730,7 @@ window.TimelineView = (function () {
 
   /* 跨天自动拆分：end<=start 视为过夜；同组共用 gid（删除/编辑整组）。
      习惯联动只记在第一段（防跨天两段各 +1）；第二段 linkHabitId 留空 */
-  function saveSplitBlocks(orig, date, start, end, typeId, note, linkHabitId, source) {
+  function saveSplitBlocks(orig, date, start, end, typeId, note, linkHabitId, source, location) {
     const s = parseHM(start), e = parseHM(end);
     const src = (orig && orig.source) || source || 'manual';
     const gid = (orig && orig.gid) || U.uid();
@@ -548,7 +742,7 @@ window.TimelineView = (function () {
       return pre.then(function () {
         return S.saveTimelineBlock(Object.assign({}, orig && orig.id ? orig : {}, {
           id: orig && orig.id ? orig.id : U.uid(), gid: gid, date: date, start: fmtHM(s), end: fmtHM(e),
-          typeId: typeId, note: note, linkHabitId: linkHabitId,
+          typeId: typeId, note: note, location: location || (orig && orig.location) || '', linkHabitId: linkHabitId,
           habitSynced: false, // pre 删组已回退联动，重建重新计（-1 后 +1 对称）
           source: src
         }));
@@ -564,7 +758,7 @@ window.TimelineView = (function () {
           return S.saveTimelineBlock(Object.assign({}, (i === 0 && orig && orig.id) ? orig : {}, {
             id: (i === 0 && orig && orig.id) ? orig.id : U.uid(),
             gid: gid, date: part.date, start: part.start, end: part.end, typeId: typeId, note: note,
-            linkHabitId: part.link,
+            location: location || (orig && orig.location) || '', linkHabitId: part.link,
             habitSynced: false, // 组内只有第一段带 linkHabitId，重建对称计一次
             source: src
           }));
@@ -577,7 +771,7 @@ window.TimelineView = (function () {
     opts = opts || {};
     const p = opts.point || null;
     UI.modal({
-      title: p ? '编辑时间点' : '添加时间点', width: 420,
+      title: p ? '编辑时间点' : '添加时间点', width: 420, formGuard: true,
       bodyHTML: '<div class="form-grid">' +
         '<label><span class="f-label">日期 <span class="req-star">*</span></span>' +
         '<input type="date" id="tp-date" value="' + U.escapeHtml(p ? p.date : (opts.date || U.todayStr())) + '"></label>' +
@@ -609,11 +803,14 @@ window.TimelineView = (function () {
         });
         const del = w.querySelector('[data-x=del]');
         if (del) del.addEventListener('click', function () {
+          UI.confirmDialog('删除时间点', '删除这条时间点记录？').then(function (ok) {
+          if (!ok) return;
           S.removeTimelinePoint(p.id).then(function () {
             close();
             UI.toast('已删除', 'success');
-            setTimeout(renderWeek, 60);
+            setTimeout(function () { renderWeek('keep'); }, 60);
           }).catch(function (e) { UI.toast('删除失败：' + ((e && e.message) || e), 'error'); });
+          });
         });
         w.querySelector('[data-x=s]').addEventListener('click', function () {
           const date = w.querySelector('#tp-date').value;
@@ -634,7 +831,7 @@ window.TimelineView = (function () {
           }).then(function () {
             close();
             UI.toast(p ? '已保存' : '已添加', 'success');
-            setTimeout(renderWeek, 60);
+            setTimeout(function () { renderWeek('keep'); }, 60);
           }).catch(function (e) {
             UI.toast('保存失败：' + ((e && e.message) || e) + '，请重试', 'error');
           });
@@ -672,13 +869,32 @@ window.TimelineView = (function () {
   function stopTimer() {
     const t = timerRunning();
     if (!t) return;
-    const now = new Date();
-    const startDate = U.todayStr(new Date(t.startedAt));
-    const start = fmtHM(new Date(t.startedAt).getHours() * 60 + new Date(t.startedAt).getMinutes());
-    const end = fmtHM(now.getHours() * 60 + now.getMinutes());
+    const startedAt = Number(t.startedAt) || Date.now();
+    // 按真实时长逐日切段（v1.2.5）：跨天/超 24 小时计时完整落盘——
+    // 此前只按起止 HH:MM 对比，昨天 10:00 开、今天 11:00 停会被压成 1 小时
+    const totalMin = Math.max(1, Math.round((Date.now() - startedAt) / 60000));
     const note = t.note || '';
     const typeId = t.typeId || 'other';
-    saveSplitBlocks(null, startDate, start, (parseHM(end) > parseHM(start)) ? end : fmtHM(parseHM(start) + 1), typeId, note, '', 'timer')
+    const gid = U.uid();
+    const st = new Date(startedAt);
+    let segDate = U.todayStr(st);
+    let segStart = st.getHours() * 60 + st.getMinutes();
+    let remain = totalMin;
+    const chain = [];
+    while (remain > 0) {
+      (function (date, from, len) {
+        chain.push(function () {
+          return S.saveTimelineBlock({
+            gid: gid, date: date, start: fmtHM(from), end: fmtHM(from + len),
+            typeId: typeId, note: note, location: '', linkHabitId: '', habitSynced: false, source: 'timer'
+          });
+        });
+      })(segDate, segStart, Math.min(remain, 24 * 60 - segStart));
+      remain -= Math.min(remain, 24 * 60 - segStart);
+      segDate = addDays(segDate, 1);
+      segStart = 0;
+    }
+    chain.reduce(function (p, job) { return p.then(job); }, Promise.resolve())
       .then(function () { return S.setTimelineTimer(null); })
       .then(function () {
         UI.toast('已生成时间记录', 'success');
@@ -742,7 +958,17 @@ window.TimelineView = (function () {
         // 图标点选：行内展开网格（系统图标名不外显）
         list.addEventListener('click', function (e) {
           const del = e.target.closest ? e.target.closest('[data-tm-del]') : null;
-          if (del) { S.removeTimelineType(del.getAttribute('data-tm-del')).then(paint); return; }
+          if (del) {
+            // 拍板 12：删除确认（引用记录归 other/pt_water）
+            UI.confirmDialog('删除类型', '删除该类型？引用它的记录会归入默认类型').then(function (ok) {
+              if (!ok) return;
+              S.removeTimelineType(del.getAttribute('data-tm-del')).then(function () {
+                paint();
+                UI.toast('已删除，引用记录已归入默认类型', 'success');
+              });
+            });
+            return;
+          }
           const ib = e.target.closest ? e.target.closest('[data-tm-icon-btn]') : null;
           if (ib) {
             const row = ib.closest('[data-tm-id]');
@@ -819,11 +1045,14 @@ window.TimelineView = (function () {
 
   /* ---------- 入口 ---------- */
   // 卡头两行 grid 自适应（与待办卡同款 head-wide：宽屏标题/导航一行，窄屏两行居中）
-  function render(main) {
+  // keep=true：数据自刷新，保持滚动不回顶（交互铁律）；默认进入页面定位当前时刻
+  function render(main, keep) {
     if (!main) return;
+    const old = main.querySelector('.tl-week');
+    const saved = (keep && old) ? old.scrollTop : 0;
     main.innerHTML = cardHTML();
     bindCard(main);
-    renderWeek();
+    renderWeek(keep ? 'keep' : 'now', saved);
   }
 
   return {

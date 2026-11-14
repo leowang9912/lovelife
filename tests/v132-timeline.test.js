@@ -217,6 +217,12 @@ async function main() {
       const inp = r.querySelector('.tm-name');
       if (inp && inp.value === '我的类型') r.querySelector('[data-tm-del]').click();
     });
+    // 删除确认（拍板 12）
+    await waitFor(function () {
+      const cm = lastModal(doc);
+      return cm && cm.querySelector('[data-act=yes]') ? cm : null;
+    }, { label: '删除确认未弹' });
+    lastModal(doc).querySelector('[data-act=yes]').click();
     await waitFor(function () {
       return !w.Storage.timeline().types.some(function (t) { return t.name === '我的类型'; }) ? true : null;
     }, { label: '类型未删除' });

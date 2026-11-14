@@ -1,13 +1,14 @@
 {
-  "version": "1.2.3",
+  "version": "1.2.4",
   "minSchema": 3,
-  "publishedAt": "2026-11-13",
+  "publishedAt": "2026-11-14",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "习惯打卡周视图表格化：习惯名左列+周几列头，格子即打卡，默认周视图",
-    "行内连续打卡 x 天；习惯颜色盘自选；打卡一次型无渐变最深逻辑",
-    "格子正方、窄窗自缩宽窗封顶；表头/行共用模板（对齐固化）",
-    "桌面小窗互斥切换可靠化；小窗按钮挪到待办标题旁"
+    "时间段待办：起止时段+地点，倒计时/提醒按开始时间",
+    "计划段→事实段状态机：完成物化、撤销回计划、跳过保留（时间日历统一管理）",
+    "数据安全：写盘前 .bak 轮转、更新前自动备份、空覆盖 409 拒绝",
+    "修复 15+ 项：习惯计次对称、过夜时段、计时超 24h/读数冻结、旧数据兜底、确认弹窗",
+    "未完成待办按时间顺序排列；桌面小窗与主界面对齐"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -15,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.3/lovelife-v1.2.3-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.4/lovelife-v1.2.4-win64.zip"
   }
 }

@@ -40,6 +40,8 @@
   .w-item:hover { background: #eef0f4; }
   .w-item.over { background: #fff2f0; border-color: rgba(255, 59, 48, .18); }
   .w-item.done { background: #f0faf2; opacity: .7; }
+  .w-item.skipped { opacity: .45; }
+  .w-item.skipped .w-name { text-decoration: line-through; }
   .w-item.done .w-name { text-decoration: line-through; color: #6e6e73; }
   .w-check {
     width: 18px; height: 18px; flex: none; border-radius: 50%;
@@ -133,10 +135,23 @@
   }
   function render() {
     var list = [];
+    // 含近 7 天逾期未决（同主页"到时不消失"语义）+ 今日
     defs.forEach(function (d) {
-      if (!dueOn(d, today)) return;
-      var st = (done[d.id] || {})[today] || {};
-      list.push({ def: d, s: st.s || '' });
+      var added = false;
+      for (var off = -7; off <= 0; off++) {
+        var dd = new Date();
+        dd.setDate(dd.getDate() + off);
+        var ds = ymd(dd);
+        if (!dueOn(d, ds)) continue;
+        var st = (done[d.id] || {})[ds] || {};
+        if (st.s) { if (off === 0) list.push({ def: d, s: st.s, ds: ds }); continue; }
+        list.push({ def: d, s: '', ds: ds, over: off < 0 });
+        added = true;
+      }
+      if (!added && dueOn(d, today)) {
+        var st2 = (done[d.id] || {})[today] || {};
+        if (st2.s) list.push({ def: d, s: st2.s, ds: today });
+      }
     });
     var PRIO = { high: 0, mid: 1, low: 2 };
     list.sort(function (a, b) {
@@ -148,24 +163,27 @@
     });
     var nowHM = String(new Date().getHours()).padStart(2, '0') + ':' + String(new Date().getMinutes()).padStart(2, '0');
     var html = list.map(function (it) {
-      var over = !it.s && (it.def.due || '') < nowHM;
-      return '<div class="w-item' + (it.s === 'done' ? ' done' : it.s === 'skipped' ? ' done' : (over ? ' over' : '')) +
-        '" data-id="' + esc(it.def.id) + '" title="点击勾完成/取消">' +
-        '<div class="w-check">' + (it.s ? '✓' : '') + '</div>' +
+      var over = it.over || (!it.s && (it.def.due || '') < nowHM);
+      var cls = it.s === 'done' ? ' done' : it.s === 'skipped' ? ' skipped' : (over ? ' over' : '');
+      var tm = it.def.start ? (it.def.start + '-' + (it.def.due || '')) : (it.def.due || '');
+      return '<div class="w-item' + cls +
+        '" data-id="' + esc(it.def.id) + '" data-ds="' + esc(it.ds || today) + '" title="点击勾完成/取消">' +
+        '<div class="w-check">' + (it.s === 'done' ? '✓' : it.s === 'skipped' ? '—' : '') + '</div>' +
         '<div class="w-name">' + esc(it.def.name) + '</div>' +
-        '<div class="w-time">' + esc(it.def.due || '') + '</div></div>';
+        '<div class="w-time">' + esc(tm) + '</div></div>';
     }).join('');
     document.getElementById('w-list').innerHTML =
       html || '<div class="w-empty">今天没有待办 ✓</div>';
     document.querySelectorAll('.w-item').forEach(function (el) {
       el.addEventListener('click', function () {
         var id = el.getAttribute('data-id');
-        var st = (done[id] || {})[today] || {};
+        var ds = el.getAttribute('data-ds') || today;
+        var st = (done[id] || {})[ds] || {};
         var willDone = !st.s;
         // 本地乐观更新
         done[id] = done[id] || {};
-        if (willDone) done[id][today] = { t: new Date().toISOString(), s: 'done' };
-        else delete done[id][today];
+        if (willDone) done[id][ds] = { t: new Date().toISOString(), s: 'done' };
+        else delete done[id][ds];
         render();
         // 保存前重读最新 todos（防主程序期间改 defs/其他 done 被旧快照覆盖丢失）
         fetch('/api/db').then(function (r) { return r.json(); }).then(function (d) {
@@ -173,8 +191,8 @@
           defs = fresh.defs || [];
           var freshDone = fresh.done || {};
           freshDone[id] = freshDone[id] || {};
-          if (willDone) freshDone[id][today] = { t: new Date().toISOString(), s: 'done' };
-          else delete freshDone[id][today];
+          if (willDone) freshDone[id][ds] = { t: new Date().toISOString(), s: 'done' };
+          else delete freshDone[id][ds];
           done = freshDone;
           render();
           return fetch('/api/save', {

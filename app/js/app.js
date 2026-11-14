@@ -5,7 +5,7 @@ window.App = (function () {
 
   /* 前端资源版本：与 version.json 的程序版本分开校验。
      两者不一致 = 更新只换了一半（如 exe 新但 app/ 旧），设置页会提示手动覆盖。 */
-  const FRONTEND_VERSION = "1.2.3";
+  const FRONTEND_VERSION = "1.2.4";
 
   let current = 'home'; // 默认首屏=我的主页（v1.1.2）
   let booted = false;
@@ -463,12 +463,14 @@ window.App = (function () {
       insts.forEach(function (it) {
         const rb = Number(it.def.remindBefore) || 0;
         if (!rb) return;
-        const due = new Date(it.dateStr + 'T' + (it.def.due || '23:59') + ':00').getTime();
+        // 时间段待办按**开始**前提醒（v1.2.4）；瞬时待办按截止
+        const anchor = it.def.start || it.def.due || '23:59';
+        const due = new Date(it.dateStr + 'T' + anchor + ':00').getTime();
         const key = it.def.id + '@' + it.dateStr;
         if (todoNotified[key] || now < due - rb * 60000 || now > due) return;
         todoNotified[key] = true;
         const leftMin = Math.max(1, Math.round((due - now) / 60000));
-        const msg = '「' + it.def.name + '」还有 ' + leftMin + ' 分钟到期';
+        const msg = '「' + it.def.name + '」还有 ' + leftMin + ' 分钟' + (it.def.start ? '开始' : '到期');
         try { window.UI.toast(msg, 'warn'); } catch (e) {}
         try {
           if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
