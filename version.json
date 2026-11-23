@@ -1,14 +1,14 @@
 {
-  "version": "1.2.4",
+  "version": "1.2.5",
   "minSchema": 3,
-  "publishedAt": "2026-11-14",
+  "publishedAt": "2026-11-23",
   "repo": "leowang9912/lovelife",
   "changelog": [
-    "时间段待办：起止时段+地点，倒计时/提醒按开始时间",
-    "计划段→事实段状态机：完成物化、撤销回计划、跳过保留（时间日历统一管理）",
-    "数据安全：写盘前 .bak 轮转、更新前自动备份、空覆盖 409 拒绝",
-    "修复 15+ 项：习惯计次对称、过夜时段、计时超 24h/读数冻结、旧数据兜底、确认弹窗",
-    "未完成待办按时间顺序排列；桌面小窗与主界面对齐"
+    "我的票据（新板块）：票面三形态仿真（火车/登机牌/演唱会式），账单自动绑定、行程进时间日历",
+    "表单两区：基础三字段+专属按类型定序必填（车次/检票口/登机口等）",
+    "美食打卡四合一（早中晚加）；计时读数常驻；物品状态全外显",
+    "修复 15+ 项：编辑器崩溃/切类型丢输入/改期双份/重复建账单等（双 agent 稽核）",
+    "作废态移除（旧数据归未用）；今日概览打卡即时刷新"
   ],
   "updateManifest": [
     "https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json",
@@ -16,6 +16,6 @@
     "https://mirror.ghproxy.com/https://raw.githubusercontent.com/leowang9912/lovelife/main/version.json"
   ],
   "assets": {
-    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.4/lovelife-v1.2.4-win64.zip"
+    "win64": "https://github.com/leowang9912/lovelife/releases/download/v1.2.5/lovelife-v1.2.5-win64.zip"
   }
 }

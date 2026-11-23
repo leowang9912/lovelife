@@ -90,7 +90,7 @@ const APP_SCRIPTS = [
   'js/utils.js', 'js/models.js', 'js/storage.js', 'js/charts.js', 'js/cutout.js',
   'js/ui.js', 'js/weather.js',
   'js/views-plan.js', 'js/views-home.js', 'js/views-main.js', 'js/views-life.js',
-  'js/views-food.js', 'js/views-wallet.js', 'js/views-settings.js', 'js/views-timeline.js',
+  'js/views-food.js', 'js/views-wallet.js', 'js/views-settings.js', 'js/views-timeline.js', 'js/views-tickets.js',
   'js/updater.js', 'js/app.js'
 ];
 
@@ -164,6 +164,7 @@ function makeWindow(opts) {
         habits: JSON.parse(JSON.stringify(data.habits || { defs: [], log: {} })),
         todos: JSON.parse(JSON.stringify(data.todos || { defs: [], done: {} })),
         timeline: JSON.parse(JSON.stringify(data.timeline || { blocks: [], points: [], types: [], timer: null })),
+        tickets: JSON.parse(JSON.stringify(data.tickets || { items: [], types: [] })),
         dataRoot: 'm'
       });
     }

@@ -13,6 +13,7 @@ window.PlanView = (function () {
     { id: 'life', name: '我的生活' },
     { id: 'habit', name: '习惯打卡' },
     { id: 'time', name: '时间统计' },
+    { id: 'ticket', name: '我的票据' },
     { id: 'food', name: '我的美食' }
   ];
 
@@ -32,6 +33,7 @@ window.PlanView = (function () {
     streakRank: { name: '习惯连续排行', block: 'habit', size: 'm' },
     habitRate: { name: '习惯完成率', block: 'habit', size: 'm' },
     timeDist: { name: '时间分配排行', block: 'time', size: 'm' },
+    ticketSpend: { name: '票据花费', block: 'ticket', size: 'm' },
     timeTrend: { name: '每日记录时长', block: 'time', size: 'm' },
     wAssets: { name: '资产走势', block: 'overall', size: 'l' },
     game: { name: '游戏通关状态', block: 'digital', size: 's' },
@@ -205,7 +207,8 @@ window.PlanView = (function () {
     life: { icon: 'heart', label: '去添加美妆' },
     food: { icon: 'utensils', label: '去记美食' },
     wallet: { icon: 'wallet', label: '去记一笔' },
-    timeline: { icon: 'clock', label: '去记录时间' }
+    timeline: { icon: 'clock', label: '去记录时间' },
+    tickets: { icon: 'ticket', label: '去记票据' }
   };
   function emptyHint(text, goKey, btnLabel) {
     const g = EMPTY_GO[goKey] || EMPTY_GO.wallet;
@@ -1227,7 +1230,7 @@ window.PlanView = (function () {
   let editMode = false;
   /* v1.1.8：统计分类切换（与设置页 stabBar 同款体验）：会话内记忆当前分类 */
   let planStab = 'overall';
-  const BLOCK_ICONS = { overall: 'chart-column', digital: 'gamepad-2', clothing: 'shirt', life: 'heart', habit: 'flame', time: 'clock', food: 'utensils' };
+  const BLOCK_ICONS = { overall: 'chart-column', digital: 'gamepad-2', clothing: 'shirt', life: 'heart', habit: 'flame', time: 'clock', ticket: 'ticket', food: 'utensils' };
 
   /* 旧栏目 → 新栏目迁移映射 */
   const LEGACY_MAP = {
@@ -1241,7 +1244,7 @@ window.PlanView = (function () {
     'cPrice', 'cWearRank', 'cOutfitRank', 'cNoWear', 'cBuyTrend', 'cStreak', 'cCatPie',
     'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie',
     'wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat', 'wAssets', 'habitHeat',
-    'timeDist', 'timeTrend'];
+    'timeDist', 'timeTrend', 'ticketSpend'];
 
   /* 补齐/迁移栏目，保留用户已有顺序（块内相对顺序不变） */
   function normalizeSections(db) {
@@ -2219,6 +2222,24 @@ window.PlanView = (function () {
       body.innerHTML = hasAny ? C.bar(series.map(function (p, i) {
         return { label: p.label, value: p.value, valueText: p.value + ' 小时', color: '#007aff' };
       })) : emptyHint('去「时间日历」记录时间段后显示', 'timeline');
+      return;
+    }
+    if (id === 'ticketSpend') {
+      const items = ((db.tickets || {}).items) || [];
+      const byType = {};
+      items.forEach(function (x) {
+        if (x.status === 'void') return;
+        byType[x.type] = (byType[x.type] || 0) + (Math.abs(Number(x.price) || 0));
+      });
+      const tmap = {};
+      ((db.tickets || {}).types || []).forEach(function (t) { tmap[t.id] = t.name; });
+      const rows = Object.keys(byType).map(function (k) {
+        return { label: tmap[k] || k, value: Math.round(byType[k] * 100) / 100, valueText: U.formatMoney(byType[k]) };
+      }).sort(function (a, b) { return b.value - a.value; });
+      const total = rows.reduce(function (a, r) { return a + r.value; }, 0);
+      body.innerHTML = rows.length
+        ? C.rankBars(rows) + '<div class="muted small" style="margin-top:6px">票据总花费 ' + U.formatMoney(total) + ' · 共 ' + items.length + ' 张</div>'
+        : emptyHint('去「我的票据」记录车票、演唱会门票后显示', 'tickets');
       return;
     }
     /* ===== v1.1.8 P2-12：美食类加栏 ===== */

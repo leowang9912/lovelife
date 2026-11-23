@@ -73,9 +73,9 @@ window.HomeView = (function () {
       '</div>' +
 
       // 打卡区（完成态）
-      '<div class="home-check-row">' +
+      '<div class="home-check-row" id="home-checks">' +
       homeCheck('hc-outfit', 'shirt', '穿搭打卡', outfitDone.length) +
-      homeCheck('hc-food', 'utensils', '美食打卡', foodDone.length) +
+      homeCheckFood(foodDone) +
       '</div>' +
 
       // 待办周视图（v1.2.2 拍板）：打卡行下整宽 7 列周板（无时间轴，形态参考时间日历）
@@ -1188,6 +1188,83 @@ window.HomeView = (function () {
       UI.icon(icon, 20) + '<span>' + label + '</span>' +
       '<span class="home-check-state">' + (done ? '今日已打 ✓' : '去打卡') + '</span></button>';
   }
+  /* 美食四合一分餐打卡（v1.2.5 拍板 Q1）：早/中/晚/加绿色分餐格，可重复打卡（一顿一条记录），
+     状态行=已打卡 x 顿；hover 格出 −1（删该餐最近一条，只动本餐别） */
+  const MEAL_SLOTS = [['早', '早餐'], ['中', '午餐'], ['晚', '晚餐'], ['加', '加餐']];
+  function homeCheckFood(foodDone) {
+    const cnt = {};
+    (foodDone || []).forEach(function (f) { cnt[f.meal] = (cnt[f.meal] || 0) + 1; });
+    return '<div class="home-check' + ((foodDone || []).length ? ' done' : '') + '" id="hc-food">' +
+      '<button type="button" class="home-check-main" id="hc-food-main">' + UI.icon('utensils', 20) + '<span>美食打卡</span></button>' +
+      '<span class="home-check-meals">' + MEAL_SLOTS.map(function (p) {
+        const n = cnt[p[1]] || 0;
+        return '<span class="meal-slot' + (n ? ' on' : '') + '" data-meal="' + p[1] + '" title="' + p[1] + '（点击 +1；− 撤销最近一条）">' +
+          p[0] + (n > 1 ? '<i>' + n + '</i>' : '') +
+          (n ? '<button type="button" class="meal-del" data-meal-del="' + p[1] + '" title="撤销最近一条' + p[1] + '">−</button>' : '') +
+          '</span>';
+      }).join('') + '</span>' +
+      '<span class="home-check-state">已打卡 ' + (foodDone || []).length + ' 顿</span></div>';
+  }
+  function redrawChecks() {
+    const box = document.getElementById('home-checks');
+    if (!box) { window.App.refresh(); return; }
+    const db = S.getDB();
+    const t = U.todayStr();
+    const foodDone = (db.food || []).filter(function (f) { return f.date === t; });
+    const outfitDone = (db.outfits || []).filter(function (o) { return o.date === t; });
+    box.innerHTML =
+      homeCheck('hc-outfit', 'shirt', '穿搭打卡', outfitDone.length) +
+      homeCheckFood(foodDone);
+    bindChecks(box, outfitDone, foodDone);
+    // 今日概览同步刷新（拍板 2：打卡后即时，不等整页）
+    const ov = document.getElementById('home-overview');
+    if (ov) {
+      const todayBills = ((db.wallet || {}).bills || []).filter(function (b) { return b.date === t; });
+      let todayExp = 0, todayInc = 0;
+      todayBills.forEach(function (b) {
+        const a = Math.abs(Number(b.amount) || 0);
+        if (b.type === 'income') todayInc += a; else if (b.type === 'expense') todayExp += a;
+      });
+      ov.outerHTML = overviewHTML(todayBills, todayExp, todayInc, outfitDone, foodDone);
+    }
+  }
+  function bindChecks(root, outfitDone, foodDone) {
+    const oc = root.querySelector('#hc-outfit');
+    if (oc) oc.addEventListener('click', function () {
+      const rec = (outfitDone || [])[0] || null;
+      window.Views.openOutfitEditor(U.todayStr(), rec);
+    });
+    const fm = root.querySelector('#hc-food-main');
+    if (fm) fm.addEventListener('click', function () {
+      const rec = (foodDone || [])[0] || null;
+      window.FoodView.openFoodEditor(U.todayStr(), rec);
+    });
+    // 分餐格（拍板修正）：点=打开美食编辑器**添加该餐**（同美食日历语义），非直接打卡；
+    // hover − 撤销该餐最近一条（只动本餐别，防删错）
+    root.querySelectorAll('.meal-slot').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        if (e.target && e.target.closest && e.target.closest('.meal-del')) return; // − 钮不触发
+        const name = el.getAttribute('data-meal');
+        window.FoodView.openFoodEditor(U.todayStr(), null, name);
+      });
+    });
+    root.querySelectorAll('.meal-del').forEach(function (el) {
+      el.addEventListener('click', function (e) {
+        e.stopPropagation();
+        const name = el.getAttribute('data-meal-del');
+        const t = U.todayStr();
+        // 最近一条=本餐别当天最后录入的一条（数组序）；其他餐别/其他日子不碰
+        const food = S.getDB().food || [];
+        let idx = -1;
+        food.forEach(function (f, i) { if (f.date === t && f.meal === name) idx = i; });
+        if (idx < 0) { redrawChecks(); return; }
+        S.removeFood(food[idx].id).then(function () {
+          UI.toast('已撤销一条 ' + name, 'success');
+          redrawChecks();
+        }).catch(function (err) { UI.toast('撤销失败：' + ((err && err.message) || err), 'error'); });
+      });
+    });
+  }
 
   /* 卡头两态响应式（v1.2.0 拍板）：卡宽 ≥560px → head-wide（日期行回第一行靠右）。
      ResizeObserver 驱动（确定生效）；@container 规则同效兜底 */
@@ -1302,15 +1379,8 @@ window.HomeView = (function () {
     root.querySelector('#hq-bill').addEventListener('click', function () {
       window.WalletView.openBillForm(null);
     });
-    // 打卡：已有今日记录直接编辑那条，没有则新建（完成后按钮变已打）
-    root.querySelector('#hc-outfit').addEventListener('click', function () {
-      const rec = outfitDone[0] || null;
-      window.Views.openOutfitEditor(today(), rec);
-    });
-    root.querySelector('#hc-food').addEventListener('click', function () {
-      const rec = foodDone[0] || null;
-      window.FoodView.openFoodEditor(today(), rec);
-    });
+    // 打卡（v1.2.5：美食四合一分餐格 + 穿搭单打卡）——独立绑定，局部重渲复用
+    bindChecks(root, outfitDone, foodDone);
     // 天气穿搭推荐卡（沿用穿搭日历的推荐渲染）
     const weatherCard = root.querySelector('#home-weather');
     if (weatherCard && window.Views && window.Views.renderOutfitRec) {

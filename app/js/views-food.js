@@ -207,7 +207,9 @@ window.FoodView = (function () {
     const existing = rec ? [] : db.food.filter(function (f) { return f.date === dateStr; });
     const cuisines = db.categories.foodCuisine || [];
     const types = db.categories.foodType || [];
-    const meals = db.categories.meal || [];
+    // 餐别兜底（v1.2.5）：分类库无 meal 时用四餐默认（与首页分餐格同源）
+    const meals = (db.categories.meal && db.categories.meal.length)
+      ? db.categories.meal : ['早餐', '午餐', '晚餐', '加餐'];
     const tags = db.categories.foodTag || [];
     const isEdit = !!rec;
     rec = rec || {

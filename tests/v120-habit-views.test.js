@@ -148,7 +148,13 @@ async function main() {
     });
     const w = s.w;
     if (!(await waitMain(w))) throw new Error('no main');
-    const hb = await home(w);
+    let hb = await home(w);
+    // 默认周视图（v1.2.3）——本用例需月视图历史格，切月
+    const segM = hb.querySelector('[data-hb-view="month"]');
+    if (segM && !segM.classList.contains('on')) {
+      segM.click(); await sleep(150);
+      hb = w.document.querySelector('#home-habits') || hb; // 重渲脱钩：重查
+    }
     const card = hb.querySelector('[data-hb-card="h1"]');
     const yCell = hb.querySelector('[data-hb-cell="h1"][data-date="' + dayN(1) + '"]');
     yCell.click(); // 补打昨天
@@ -258,7 +264,9 @@ async function main() {
       '周视图二值 toggle + done 同步');
     cellK.click();
     assert(S.habitCountOf('hk', TODAY) === 0, '周视图二值再点应取消');
-    // 历史格：计数弹编辑（同月视图口径）
+    // 历史格：计数弹编辑（同月视图口径）——昨天可能在上周列（周一跨周），翻上一周
+    hb.querySelector('[data-hb-mv="-1"]').click();
+    hb = doc.querySelector('#home-habits');
     const yCell = hb.querySelector('[data-hb-cell="hc"][data-date="' + dayN(1) + '"]');
     yCell.click();
     const m = lastModal(doc);
@@ -576,8 +584,8 @@ async function main() {
     assert(rows[0].querySelectorAll('.hb-cell').length === 7, '每行 7 格');
     assert(rows[0].querySelector('.hb-row-label').textContent === '运动', '左列=习惯名');
     assert(doc.querySelectorAll('#home-habits .hb-card').length === 0, '周视图不出卡片');
-    // 点格子打卡（交互零改动）：check 型任意格=toggle（count 型历史格弹编辑是既有语义）
-    rows[0].querySelectorAll('.hb-cell')[2].click();
+    // 点格子打卡（交互零改动）：check 型今日格=toggle（避免日期脆弱：不点固定列）
+    rows[0].querySelector('.hb-cell.today').click();
     await waitFor(function () {
       const lg = w.Storage.getDB().habits.log.h1 || {};
       return Object.keys(lg).length > 0 ? true : null;

@@ -42,11 +42,11 @@ async function main() {
     return mc && mc.innerHTML.indexOf('总体统计') >= 0;
   }, { label: '缺少板块: 总体统计' });
   let html = doc.getElementById('main-content').innerHTML;
-  for (const t of ['总体统计', '我的数码', '我的衣橱', '我的生活', '习惯打卡', '时间统计', '我的美食']) {
+  for (const t of ['总体统计', '我的数码', '我的衣橱', '我的生活', '习惯打卡', '时间统计', '我的票据', '我的美食']) {
     if (html.indexOf(t) < 0) throw new Error('缺少板块: ' + t);
   }
   const blocks = doc.querySelectorAll('.plan-block');
-  if (blocks.length !== 7) throw new Error('板块数 ' + blocks.length);
+  if (blocks.length !== 8) throw new Error('板块数 ' + blocks.length);
   // 栏目归属抽查：KPI 在总体块、cpw 在衣橱块、foodStats 在美食块（v1.1.8 独立）、habitHeat 在习惯块、时间栏在 time 块
   const overallHTML = doc.querySelector('.plan-block[data-block=overall]').innerHTML;
   const clothHTML = doc.querySelector('.plan-block[data-block=clothing]').innerHTML;

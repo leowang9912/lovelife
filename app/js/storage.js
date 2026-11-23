@@ -139,6 +139,7 @@ window.Storage = (function () {
       habits: normHabits(raw.habits),
       todos: raw.todos && typeof raw.todos === 'object' ? raw.todos : { defs: [], done: {} },
       timeline: normTimeline(raw.timeline),
+      tickets: normTickets(raw.tickets),
       categories: raw.categories || M.defaultCategories(),
       settings: Object.assign(M.defaultSettings(), raw.settings || {}),
       wallet: Object.assign({
@@ -227,6 +228,11 @@ window.Storage = (function () {
         blocks: tl.blocks || [], points: tl.points || [],
         types: tl.types || [], timer: tl.timer || null
       });
+    }
+    // tickets 域（v1.2.5 我的票据）：票证 + 类型
+    if (!scope || scope === 'tickets') {
+      const tk = db.tickets || {};
+      push('tickets', { items: tk.items || [], types: tk.types || [] });
     }
     if (!scope || scope === 'settings') {
       jobs.push({
@@ -893,6 +899,11 @@ window.Storage = (function () {
         if (todoHabitDelta(def.linkHabitId, dateStr, status === 'done')) jobs.push(persist('habits'));
       }
     }
+    // 票据反向同步（v1.2.5）：票衍生待办勾完成/撤销 → 票标 已用/未用（幂等）
+    try {
+      const tkJob = typeof syncTicketFromTodo === 'function' ? syncTicketFromTodo(defId, dateStr, status === 'done') : null;
+      if (tkJob) jobs.push(tkJob);
+    } catch (e) { /* 联动失败不阻塞待办 */ }
     return Promise.all(jobs);
   }
   /* 习惯打卡 → 待办反向同步（双向联动，勾选「同步到习惯打卡」的待办）
@@ -1166,6 +1177,178 @@ window.Storage = (function () {
       throw e;
     });
   }
+
+  /* ===== 我的票据（tickets 域，v1.2.5）=====
+     items：票证（车票/演唱会/电影…）；types：预设+自定义类型。
+     账单双向绑定（对齐美食口径）：price>0 自动建支出账单（bill.ticketId）；票价改动账单金额跟随；
+     删票→账单保留（解绑）。时间日历联动（拍板 Q1:A）：票生成时间段待办（todoId 双向），
+     标已用=待办勾完成，待办勾完成反向标已用（幂等）。 */
+  const TICKET_TYPES = [
+    { id: 'train', name: '火车票', icon: 'train-front', cat: 'w_traffic' },
+    { id: 'flight', name: '飞机票', icon: 'plane', cat: 'w_traffic' },
+    { id: 'bus', name: '汽车票', icon: 'bus', cat: 'w_traffic' },
+    { id: 'concert', name: '演唱会', icon: 'mic', cat: 'w_fun' },
+    { id: 'movie', name: '电影', icon: 'film', cat: 'w_fun' },
+    { id: 'exhibition', name: '展览', icon: 'palette', cat: 'w_fun' },
+    { id: 'other', name: '其他', icon: 'ticket', cat: 'w_other_exp' }
+  ];
+  function normTickets(raw) {
+    const r = raw && typeof raw === 'object' ? raw : {};
+    return {
+      items: Array.isArray(r.items) ? r.items.filter(function (x) { return x && typeof x === 'object'; }).map(function (x) {
+        return {
+          id: String(x.id || U.uid()), type: String(x.type || 'other'), name: String(x.name || '未命名'),
+          date: String(x.date || ''), time: String(x.time || ''), endTime: String(x.endTime || ''),
+          location: String(x.location || ''), seat: String(x.seat || ''),
+          price: Number(x.price) || 0, ticketNo: String(x.ticketNo || ''), note: String(x.note || ''),
+          status: x.status === 'used' ? 'used' : 'unused', // 作废态已移除（拍板）：旧 void 归未用
+          images: Array.isArray(x.images) ? x.images.slice() : [],
+          buyDate: String(x.buyDate || ''), billId: String(x.billId || ''), todoId: String(x.todoId || ''),
+          ext: (x.ext && typeof x.ext === 'object') ? Object.assign({}, x.ext) : {},
+          createdAt: x.createdAt || Date.now()
+        };
+      }) : [],
+      types: Array.isArray(r.types) && r.types.length ? r.types.filter(function (x) { return x && typeof x === 'object'; }).map(function (x) {
+        return { id: String(x.id || U.uid()), name: String(x.name || '未命名'), icon: String(x.icon || 'ticket'), cat: String(x.cat || 'w_other_exp') };
+      }) : TICKET_TYPES.map(function (t) { return Object.assign({}, t); })
+    };
+  }
+  function tickets() { db.tickets = db.tickets || normTickets(null); return db.tickets; }
+  function ticketBillCat(typeId) {
+    const t = (tickets().types || []).filter(function (x) { return x.id === typeId; })[0];
+    return (t && t.cat) || 'w_other_exp';
+  }
+  /* 票 ↔ 时间段待办（Q1:A）：行程进时间日历/主页；双向状态同步 */
+  function ticketSyncTodo(tk) {
+    const due = tk.endTime || (function () {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(tk.time || '');
+      if (!m) return '23:59';
+      const mm = (Number(m[1]) * 60 + Number(m[2]) + 120) % (24 * 60);
+      return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0');
+    })();
+    const def = {
+      id: tk.todoId || U.uid(), name: tk.name || '行程', date: tk.date || U.todayStr(),
+      start: tk.time || '09:00', due: due,
+      repeat: 'none', repeatOn: [], interval: 1, remindBefore: 30,
+      linkHabitId: '', location: tk.location || '', priority: 'mid',
+      repeatUntil: '', createdAt: Date.now(), archived: false, ticketId: tk.id
+    };
+    return saveTodoDef(def).then(function () {
+      tk.todoId = def.id;
+      const cur = todoStatus(def.id, def.date);
+      if (tk.status === 'used' && cur !== 'done') return setTodoDone(def.id, def.date, 'done');
+      if (tk.status !== 'used' && cur === 'done') return setTodoDone(def.id, def.date, '');
+    });
+  }
+  function saveTicket(tk) {
+    const t = tickets();
+    tk = tk || {};
+    const rec = {
+      id: tk.id || U.uid(), type: String(tk.type || 'other'), name: String(tk.name || '未命名'),
+      date: String(tk.date || ''), time: String(tk.time || ''), endTime: String(tk.endTime || ''),
+      location: String(tk.location || ''), seat: String(tk.seat || ''),
+      price: Number(tk.price) || 0, ticketNo: String(tk.ticketNo || ''), note: String(tk.note || ''),
+      status: tk.status === 'used' ? 'used' : 'unused',
+      images: Array.isArray(tk.images) ? tk.images.slice() : [],
+      buyDate: String(tk.buyDate || '') || U.todayStr(),
+      billId: String(tk.billId || ''), todoId: String(tk.todoId || ''),
+      ext: (tk.ext && typeof tk.ext === 'object') ? Object.assign({}, tk.ext) : {},
+      createdAt: tk.createdAt || Date.now()
+    };
+    const i = t.items.findIndex(function (x) { return x.id === rec.id; });
+    const prev = i >= 0 ? t.items[i] : null;
+    if (i >= 0) t.items[i] = rec; else t.items.push(rec);
+    const jobs = [];
+    if (rec.date && rec.time) {
+      // 改期：先清旧实例（完成态+物化块）再在新日期同步（顺序执行防两份落盘竞态），
+      // 否则旧日期残留 done/物化块、新日期又物化一份
+      if (prev && prev.todoId && prev.date && rec.date !== prev.date) {
+        jobs.push(applyTodoStatus(prev.todoId, prev.date, '', true).then(function () {
+          return ticketSyncTodo(rec);
+        }));
+      } else {
+        jobs.push(ticketSyncTodo(rec));
+      }
+    } else if (rec.todoId) {
+      // 日期/时刻被清掉=不再占日历：删行程待办防悬空
+      const tid = rec.todoId;
+      rec.todoId = '';
+      jobs.push(removeTodoDef(tid).catch(function () {}));
+    }
+    jobs.push(ticketSyncBill(rec, prev));
+    return Promise.all(jobs).then(function () {
+      return persist('tickets');
+    }).then(function () {
+      return persist('todos').catch(function () {});
+    }).then(function () { return rec; }).catch(function (e) {
+      if (prev) t.items[t.items.indexOf(rec)] = prev;
+      else t.items.splice(t.items.indexOf(rec), 1);
+      throw e;
+    });
+  }
+  /* 票→账单：无 billId 且 price>0 自动建；已绑则金额跟随（拍板 10/11）。
+     跟随含 0 元：票价改 0 账单金额同步归 0（曾直接跳过，钱包留旧价）；0 元票仍不新建账单。 */
+  function ticketSyncBill(rec) {
+    const bills = db.wallet.bills;
+    const amt = Math.abs(Number(rec.price) || 0);
+    if (rec.billId) {
+      const bill = bills.filter(function (b) { return b.id === rec.billId; })[0];
+      if (!bill) { rec.billId = ''; }
+      else {
+        if (bill.amount !== amt) { bill.amount = amt; return persist('wallet'); }
+        return Promise.resolve();
+      }
+    }
+    // 幂等：同一票已建过账单（重复保存/并发）直接复用，不重复建
+    const ex = bills.filter(function (b) { return b.ticketId === rec.id; })[0];
+    if (ex) {
+      rec.billId = ex.id;
+      if (ex.amount !== amt) { ex.amount = amt; return persist('wallet'); }
+      return Promise.resolve();
+    }
+    if (!rec.price) return Promise.resolve(); // 0 元票不建账单
+    const bill = {
+      id: U.uid(), type: 'expense',
+      amount: amt,
+      date: rec.buyDate || rec.date || U.todayStr(), time: '',
+      catId: ticketBillCat(rec.type), subCatId: '',
+      accountId: '', note: rec.name || '',
+      tagIds: [], ticketId: rec.id, source: 'manual',
+      createdAt: new Date().toISOString()
+    };
+    bills.push(bill);
+    rec.billId = bill.id;
+    return persist('wallet');
+  }
+  function removeTicket(id) {
+    const t = tickets();
+    const i = t.items.findIndex(function (x) { return x.id === id; });
+    if (i < 0) return Promise.resolve();
+    const rec = t.items[i];
+    t.items.splice(i, 1);
+    const jobs = [persist('tickets')];
+    if (rec.billId) {
+      const bill = (db.wallet.bills || []).filter(function (b) { return b.id === rec.billId; })[0];
+      if (bill) { delete bill.ticketId; jobs.push(persist('wallet')); }
+    }
+    if (rec.todoId) jobs.push(removeTodoDef(rec.todoId).catch(function () {}));
+    return Promise.all(jobs).catch(function (e) {
+      t.items.splice(Math.min(i, t.items.length), 0, rec);
+      throw e;
+    });
+  }
+  /* 待办勾完成 → 票反向标已用（ticketId 关联，幂等） */
+  function syncTicketFromTodo(defId, dateStr, done) {
+    const t = db.tickets || { items: [] };
+    const rec = (t.items || []).filter(function (x) { return x.todoId === defId && x.date === dateStr; })[0];
+    if (!rec) return null;
+    // 作废是终态（拍板「作废后不可恢复为未用」）：待办勾/撤不复活作废票
+    const want = done ? 'used' : 'unused';
+    if (rec.status === want) return null;
+    rec.status = want;
+    return persist('tickets');
+  }
+
   function setTimelineTimer(t) {
     timeline().timer = t || null;
     return persist('timeline');
@@ -1439,9 +1622,14 @@ window.Storage = (function () {
       // 词条同步：自动生成的词条/美食随账单删除；合并/手动建的只解绑
       autoCleanupItemForBill(bill);
       autoCleanupFoodForBill(bill);
+      // 票据解绑（拍板 5B）：删账单清 ticket.billId——防"已绑定"悬空+下次存票静默重建
+      if (bill.ticketId) {
+        const tk = (db.tickets && db.tickets.items || []).filter(function (x) { return x.id === bill.ticketId; })[0];
+        if (tk) tk.billId = '';
+      }
     }
     db.wallet.bills = db.wallet.bills.filter(function (b) { return b.id !== id; });
-    return Promise.all([persist('wallet'), persist('items'), persist('food')]);
+    return Promise.all([persist('wallet'), persist('items'), persist('food'), persist('tickets')]);
   }
 
   function saveWalletAccount(acc) {
@@ -2187,6 +2375,10 @@ window.Storage = (function () {
     saveTimelinePoint: saveTimelinePoint, removeTimelinePoint: removeTimelinePoint,
     setTimelineTimer: setTimelineTimer,
     saveTimelineType: saveTimelineType, removeTimelineType: removeTimelineType,
+    /* 我的票据（tickets 域，v1.2.5） */
+    tickets: tickets, TICKET_TYPES: TICKET_TYPES, normTickets: normTickets,
+    saveTicket: saveTicket, removeTicket: removeTicket, syncTicketFromTodo: syncTicketFromTodo,
+    saveTickets: function () { return persist('tickets'); },
     saveTimeline: function () { return persist('timeline'); },
     toggleHabit: toggleHabit, setHabitCount: setHabitCount, habitCountOf: habitCountOf,
     habitColorScale: habitColorScale,

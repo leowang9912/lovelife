@@ -39,10 +39,10 @@ async function main() {
     const tabs = doc.querySelector('.settings-tabs.plan-tabs');
     assert(tabs, '应有分类 tab 栏（settings-tabs plan-tabs，与设置页同款）');
     const btns = tabBtns(doc);
-    assert(btns.length === 7, '7 个分类 tab（总体/数码/衣橱/生活/习惯/时间/美食）: ' + btns.length);
+    assert(btns.length === 8, '8 个分类 tab（总体/数码/衣橱/生活/习惯/时间/票据/美食）: ' + btns.length);
     const ids = btns.map(function (b) { return b.getAttribute('data-plan-stab'); });
-    assert(ids.join(',') === 'overall,digital,clothing,life,habit,time,food', 'tab 顺序/标识: ' + ids);
-    ['总体统计', '我的数码', '我的衣橱', '我的生活', '习惯打卡', '时间统计', '我的美食'].forEach(function (name, i) {
+    assert(ids.join(',') === 'overall,digital,clothing,life,habit,time,ticket,food', 'tab 顺序/标识: ' + ids);
+    ['总体统计', '我的数码', '我的衣橱', '我的生活', '习惯打卡', '时间统计', '我的票据', '我的美食'].forEach(function (name, i) {
       assert(btns[i].textContent.indexOf(name) >= 0, 'tab 文字缺 ' + name);
       assert(btns[i].querySelector('svg'), 'tab 应带图标: ' + name);
     });

@@ -33,6 +33,19 @@ window.TimelineView = (function () {
     min = ((min % (24 * 60)) + 24 * 60) % (24 * 60);
     return String(Math.floor(min / 60)).padStart(2, '0') + ':' + String(min % 60).padStart(2, '0');
   }
+  /* 计时读数 H:MM:SS（渲染即取实时值——重渲后读数续走，不再先闪 0:00 等首个 tick） */
+  function fmtElapsed(t) {
+    const sec = Math.max(0, Math.floor((Date.now() - (Number(t && t.startedAt) || Date.now())) / 1000));
+    return Math.floor(sec / 3600) + ':' + String(Math.floor((sec % 3600) / 60)).padStart(2, '0') + ':' +
+      String(sec % 60).padStart(2, '0');
+  }
+  /* type=time 只收 00:00-23:59：24:00（跨天拆分/计时生成的段）与老数据 9:00 等
+     回退 text 保值往返，避免输入框把值清洗成空、保存被卡（type=time 统一后的坑） */
+  function timeInputHTML(id, val) {
+    val = val == null ? '' : String(val);
+    const ok = val === '' || /^([01]\d|2[0-3]):[0-5]\d$/.test(val);
+    return '<input id="' + id + '" type="' + (ok ? 'time' : 'text') + '" value="' + U.escapeHtml(val) + '">';
+  }
   function addDays(ds, n) {
     const p = ds.split('-');
     const d = new Date(Number(p[0]), Number(p[1]) - 1, Number(p[2]) + n);
@@ -171,10 +184,14 @@ window.TimelineView = (function () {
       '<span class="op-host tl-add-block-host">' +
       '<button type="button" class="btn btn-primary btn-sm" id="tl-add-block">' + UI.icon('plus', 13) + ' 时间段</button>' +
       '<span class="op-float tl-timer-slot">' +
-      (t
-        ? '<button type="button" class="btn btn-danger btn-sm tl-timer-on" id="tl-timer-stop" title="结束计时并生成记录">' + UI.icon('square', 12) + ' <span id="tl-timer-elapsed">0:00</span></button>'
-        : '<button type="button" class="btn btn-ghost btn-sm" id="tl-timer" title="开始计时（自动生成时间段）">' + UI.icon('timer', 13) + '</button>') +
+      (t ? '' :
+        '<button type="button" class="btn btn-ghost btn-sm" id="tl-timer" title="开始计时（自动生成时间段）">' + UI.icon('timer', 13) + '</button>') +
       '</span></span>' +
+      // 计时运行态：读数常驻显眼（拍板 3）——红条读数 + 停止钮，不再藏 hover 槽
+      (t
+        ? '<button type="button" class="tl-timer-live" id="tl-timer-stop" title="结束计时并生成记录">' +
+          UI.icon('timer', 13) + ' 计时中 <b id="tl-timer-elapsed">' + fmtElapsed(t) + '</b> ' + UI.icon('square', 11) + '</button>'
+        : '') +
       '<button type="button" class="btn btn-ghost btn-sm" id="tl-types" title="记录类型管理">' + UI.icon('settings', 13) + '</button>' +
       '</div></div>' +
       '<div class="tl-card" id="tl-card"><div class="tl-week-wrap"><div id="tl-week"></div></div></div>';
@@ -233,7 +250,7 @@ window.TimelineView = (function () {
             (short ? '' : '<div class="tl-b-s">' + U.escapeHtml(it.rec.start) + ' - ' + U.escapeHtml(it.rec.endLabel != null ? it.rec.endLabel : it.rec.end) +
               (it.rec.location ? ' · ' + U.escapeHtml(it.rec.location) : '') + '</div>') +
             '<div class="tl-b-ops op-host"><span class="op-float">' +
-            '<button type="button" class="home-tool-btn" data-tl-plan-del="' + U.escapeHtml(it.rec.def.id) + '" title="删除该待办">' + UI.icon('x', 12) + '</button>' +
+            '<button type="button" class="home-tool-btn" data-tl-plan-del="' + U.escapeHtml(it.rec.def.id) + '" data-date="' + U.escapeHtml(it.rec.instDate || ds) + '" title="删除该待办">' + UI.icon('x', 12) + '</button>' +
             '<button type="button" class="home-tool-btn" data-tl-plan-done="' + U.escapeHtml(it.rec.def.id) + '" data-date="' + U.escapeHtml(it.rec.instDate || ds) + '" title="完成（转为时间记录）">' + UI.icon('check', 12) + '</button>' +
             '</span></div></div>';
           return;
@@ -349,9 +366,7 @@ window.TimelineView = (function () {
       if (!el) { clearInterval(tickTimer); tickTimer = null; return; }
       const rt = timerRunning(); // 实时取（切计时/刷新后不冻结）
       if (!rt) { clearInterval(tickTimer); tickTimer = null; return; }
-      const sec = Math.max(0, Math.floor((Date.now() - rt.startedAt) / 1000));
-      const hh = Math.floor(sec / 3600), mm = Math.floor((sec % 3600) / 60), ss = sec % 60;
-      el.textContent = hh + ':' + String(mm).padStart(2, '0') + ':' + String(ss).padStart(2, '0');
+      el.textContent = fmtElapsed(rt);
     }, 1000);
   }
 
@@ -459,10 +474,10 @@ window.TimelineView = (function () {
         const td = e.target.closest ? e.target.closest('[data-tl-todo]') : null;
         if (td) { toggleTodo(td.getAttribute('data-tl-todo'), td.getAttribute('data-date'), td); return; }
         if (e.target.closest && e.target.closest('.tl-b-ops')) return;
-        // 点空白 = 新建时间段（预填该时刻）
+        // 点空白 = 新建时间段（预填该时刻）；压到 23:45 为止（点到底不会出 24:00 起点）
         const rect = body.getBoundingClientRect();
         const y = e.clientY - rect.top + body.scrollTop;
-        const start = Math.round((y / HOUR_H * 60) / 15) * 15;
+        const start = Math.min(23 * 60 + 45, Math.max(0, Math.round((y / HOUR_H * 60) / 15) * 15));
         openBlockEditor({ date: date, start: fmtHM(start), end: fmtHM(start + 60) });
       });
     });
@@ -600,9 +615,9 @@ window.TimelineView = (function () {
         '<label><span class="f-label">类型 <span class="req-star">*</span></span><select id="tl-type">' +
         typeOptions('block', b ? b.typeId : (opts.typeId || defaultTypeOf('block'))) + '</select></label>' +
         '<label><span class="f-label">开始 <span class="req-star">*</span></span>' +
-        '<input id="tl-start" value="' + U.escapeHtml(b ? b.start : (opts.start || '09:00')) + '" placeholder="HH:MM"></label>' +
+        timeInputHTML('tl-start', b ? b.start : (opts.start || '09:00')) + '</label>' +
         '<label><span class="f-label">结束 <span class="req-star">*</span></span>' +
-        '<input id="tl-end" value="' + U.escapeHtml(b ? b.end : (opts.end || '10:00')) + '" placeholder="HH:MM"></label>' +
+        timeInputHTML('tl-end', b ? b.end : (opts.end || '10:00')) + '</label>' +
         '<label class="f-full"><span class="f-label">备注</span><input id="tl-note" value="' + U.escapeHtml(b ? b.note : (opts.note || '')) + '" placeholder="可选"></label>' +
         '<label class="f-full"><span class="f-label">地点（可选）</span><input id="tl-loc" value="' + U.escapeHtml(b ? (b.location || '') : (opts.location || '')) + '" placeholder="如：公司 / 医院"></label>' +
         '<label class="f-full"><span class="f-label">关联习惯（保存即打卡 +1，可改/不绑）</span>' +
@@ -665,8 +680,9 @@ window.TimelineView = (function () {
           const end = w.querySelector('#tl-end').value.trim();
           const typeId = w.querySelector('#tl-type').value;
           if (!typeId) { UI.toast('请先选择类型', 'error'); return; }
-          if (!date || !/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end)) {
-            UI.toast('请填写日期与 HH:MM 时间', 'error');
+          if (!date || !/^\d{1,2}:\d{2}$/.test(start) || !/^\d{1,2}:\d{2}$/.test(end) || parseHM(start) >= 24 * 60) {
+            // 开始不能是 24:00（当日尽头是 end 专属值；起点 24:00 会被跨天拆分拆出垃圾段）
+            UI.toast('请填写日期与时间（开始须在 00:00-23:59 内）', 'error');
             return;
           }
           const note = w.querySelector('#tl-note').value.trim();
@@ -776,7 +792,7 @@ window.TimelineView = (function () {
         '<label><span class="f-label">日期 <span class="req-star">*</span></span>' +
         '<input type="date" id="tp-date" value="' + U.escapeHtml(p ? p.date : (opts.date || U.todayStr())) + '"></label>' +
         '<label><span class="f-label">时刻 <span class="req-star">*</span></span>' +
-        '<input id="tp-time" value="' + U.escapeHtml(p ? p.time : (opts.time || fmtHM(new Date().getHours() * 60 + new Date().getMinutes()))) + '" placeholder="HH:MM"></label>' +
+        timeInputHTML('tp-time', p ? p.time : (opts.time || fmtHM(new Date().getHours() * 60 + new Date().getMinutes()))) + '</label>' +
         '<label><span class="f-label">类型 <span class="req-star">*</span></span><select id="tp-type">' +
         typeOptions('point', p ? p.typeId : (opts.typeId || defaultTypeOf('point'))) + '</select></label>' +
         '<label><span class="f-label">名称</span>' +
@@ -881,13 +897,14 @@ window.TimelineView = (function () {
     let segStart = st.getHours() * 60 + st.getMinutes();
     let remain = totalMin;
     const chain = [];
+    const created = [];
     while (remain > 0) {
       (function (date, from, len) {
         chain.push(function () {
           return S.saveTimelineBlock({
             gid: gid, date: date, start: fmtHM(from), end: fmtHM(from + len),
             typeId: typeId, note: note, location: '', linkHabitId: '', habitSynced: false, source: 'timer'
-          });
+          }).then(function (rec) { created.push(rec.id); return rec; });
         });
       })(segDate, segStart, Math.min(remain, 24 * 60 - segStart));
       remain -= Math.min(remain, 24 * 60 - segStart);
@@ -901,7 +918,12 @@ window.TimelineView = (function () {
         setTimeout(refreshSelf, 60);
       })
       .catch(function (e) {
-        UI.toast('生成失败：' + ((e && e.message) || e) + '，请重试', 'error');
+        // 生成失败：本次已建的段按 gid 整组回滚，计时保留可重试（重试不会重复生成）
+        const undo = created.length ? S.removeTimelineGroup(created[0]) : Promise.resolve();
+        Promise.resolve(undo).catch(function () {}).then(function () {
+          UI.toast('生成失败：' + ((e && e.message) || e) + '，计时已保留，请重试', 'error');
+          setTimeout(refreshSelf, 60);
+        });
       });
   }
 

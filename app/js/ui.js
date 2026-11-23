@@ -1497,9 +1497,18 @@ window.UI = (function () {
     const img = (item.images && item.images[0]) ? item.images[0] : '';
     const db = window.Storage.getDB();
     let badges = '';
-    if (item.status === 'sold') badges += '<span class="badge badge-sold">已售</span>';
-    else if (item.status === 'empty' || item.remainLevel === '空') badges += '<span class="badge badge-empty">空瓶</span>';
-    else if (item.status === 'idle') badges += '<span class="badge badge-idle">闲置</span>';
+    // 全状态外显（v1.2.5 拍板 4）：闲置曾独享徽章，其余状态同款显示
+    const ST_LABEL = {
+      in_use: '在用', idle: '闲置', borrowed: '借出', to_sell: '待出闲置',
+      broken: '损坏报废', sold: '已售出', gifted: '已转赠'
+    };
+    if (item.status === 'empty' || item.remainLevel === '空') {
+      badges += '<span class="badge badge-empty">空瓶</span>';
+    }
+    // 状态徽章与空瓶并显（全状态外显）：曾 else-if 互斥，空瓶把在用/借出等状态盖掉
+    if (ST_LABEL[item.status]) {
+      badges += '<span class="badge badge-status">' + ST_LABEL[item.status] + '</span>';
+    }
     if (item.kind === 'game' && item.gameStatus) {
       badges += '<span class="badge badge-game">' + { unopened: '未开坑', playing: '在玩', finished: '通关', dropped: '弃坑' }[item.gameStatus] + '</span>';
     }

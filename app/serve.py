@@ -75,7 +75,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.2.4"
+SERVER_BUILD = "1.2.5"
 
 _lock = threading.Lock()
 
@@ -1303,6 +1303,57 @@ def _sanitize_timeline(raw, warnings):
     return out
 
 
+def _sanitize_tickets(raw, warnings):
+    """票据域（tickets.json）类型防御 + 主键归一（v1.2.5，与 _sanitize_timeline 同级）"""
+    empty = {"items": [], "types": []}
+    if raw is None:
+        return empty
+    if not isinstance(raw, dict):
+        warnings.append("tickets.json 数据结构异常，已按空数据加载")
+        return empty
+    out = dict(empty)
+    items, _ = normalize_records(_sanitize_list(raw.get("items"), "tickets.items", warnings),
+                                 "tickets.items", warnings)
+    cleaned = []
+    for x in items:
+        x = dict(x)
+        x["type"] = str(x.get("type") or "other")
+        x["name"] = str(x.get("name") or "未命名")
+        x["date"] = str(x.get("date") or "")
+        x["time"] = _time_ok(x.get("time"), "")
+        x["endTime"] = _time_ok(x.get("endTime"), "")
+        x["location"] = str(x.get("location") or "")
+        x["seat"] = str(x.get("seat") or "")
+        try:
+            x["price"] = float(x.get("price") or 0)
+        except (TypeError, ValueError):
+            x["price"] = 0
+        x["ticketNo"] = str(x.get("ticketNo") or "")
+        x["note"] = str(x.get("note") or "")
+        st = x.get("status")
+        x["status"] = "used" if st == "used" else "unused"  # 作废态已移除
+        imgs = x.get("images")
+        x["images"] = imgs if isinstance(imgs, list) else []
+        x["buyDate"] = str(x.get("buyDate") or "")
+        x["billId"] = str(x.get("billId") or "")
+        x["todoId"] = str(x.get("todoId") or "")
+        ext = x.get("ext")
+        x["ext"] = ext if isinstance(ext, dict) else {}
+        cleaned.append(x)
+    out["items"] = cleaned
+    types, _ = normalize_records(_sanitize_list(raw.get("types"), "tickets.types", warnings),
+                                 "tickets.types", warnings)
+    ct = []
+    for t in types:
+        t = dict(t)
+        t["name"] = str(t.get("name") or "未命名")
+        t["icon"] = str(t.get("icon") or "ticket")
+        t["cat"] = str(t.get("cat") or "w_other_exp")
+        ct.append(t)
+    out["types"] = ct
+    return out
+
+
 def load_db(acc_id):
     warnings = []
     root = data_root()
@@ -1350,6 +1401,8 @@ def load_db(acc_id):
     todos = _sanitize_todos(todos_raw, warnings)
     timeline_raw = _read_json(os.path.join(d, "timeline.json"), None)
     timeline = _sanitize_timeline(timeline_raw, warnings)
+    tickets_raw = _read_json(os.path.join(d, "tickets.json"), None)
+    tickets = _sanitize_tickets(tickets_raw, warnings)
     # 分类迁移只在内存做（与既有口径一致：不主动改写磁盘上的分类字段）
     items["items"] = migrate_taxonomy(items_list)
     outfits["outfits"] = outfits_list
@@ -1443,7 +1496,8 @@ def load_db(acc_id):
                    ("food", len(food.get("records", []))), ("events", len(events.get("events", []))),
                    ("settings", 1), ("wallet", len(wallet.get("bills", []))),
                    ("habits", len(habits.get("defs", []))),
-                   ("timeline", len(timeline.get("blocks", [])) + len(timeline.get("points", [])))):
+                   ("timeline", len(timeline.get("blocks", [])) + len(timeline.get("points", []))),
+                   ("tickets", len(tickets.get("items", [])))):
         _log_change(d, _t, "load", _n)
 
     return {
@@ -1466,6 +1520,7 @@ def load_db(acc_id):
             "types": timeline.get("types", []),
             "timer": timeline.get("timer"),
         },
+        "tickets": {"items": tickets.get("items", []), "types": tickets.get("types", [])},
         "dataRoot": root,
         # 读取侧数据体检提示（P0-2/P0-3）：坏文件隔离/脏元素剔除等，前端 toast 提醒
         "warnings": warnings,
@@ -1794,7 +1849,7 @@ class Handler(BaseHTTPRequestHandler):
         # 类型防御：脏数据不让进盘（否则下次加载 /api/db 直接 500 全站不可用）
         if target in ("items", "outfits", "food", "events") and not isinstance(data, list):
             return self._json({"error": "data must be a list"}, 400)
-        if target in ("settings", "wallet", "habits", "todos", "timeline") and not isinstance(data, dict):
+        if target in ("settings", "wallet", "habits", "todos", "timeline", "tickets") and not isinstance(data, dict):
             return self._json({"error": "data must be an object"}, 400)
         root = data_root()
         accounts = migrate_old_layout(root)
@@ -1848,6 +1903,11 @@ class Handler(BaseHTTPRequestHandler):
                 data = _sanitize_timeline(data, norm_warnings)
                 _write_json(os.path.join(d, "timeline.json"), {**data, "schemaVersion": SCHEMA_VERSION})
                 count = len(data.get("blocks") or []) + len(data.get("points") or [])
+            elif target == "tickets":
+                # 我的票据（tickets 域，v1.2.5）
+                data = _sanitize_tickets(data, norm_warnings)
+                _write_json(os.path.join(d, "tickets.json"), {**data, "schemaVersion": SCHEMA_VERSION})
+                count = len(data.get("items") or [])
             else:
                 return self._json({"error": "bad target"}, 400)
             _log_change(d, target, "save", count)
