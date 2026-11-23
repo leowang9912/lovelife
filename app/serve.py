@@ -75,7 +75,7 @@ PORT = 8765
 # 服务端构建版本（release.py 发版时与 version.json 同步）。
 # 与 version.json 不一致 = 更新只换了 exe 没换 version.json（反之亦然），
 # 设置页据此提示"更新未完整落地"。
-SERVER_BUILD = "1.2.5"
+SERVER_BUILD = "1.2.6"
 
 _lock = threading.Lock()
 
@@ -1216,6 +1216,7 @@ def _sanitize_todos(raw, warnings):
             d["remindBefore"] = 0
         d["linkHabitId"] = str(d.get("linkHabitId") or "")
         d["repeatUntil"] = str(d.get("repeatUntil") or "")
+        d["dueDate"] = str(d.get("dueDate") or "")  # 到达日期（v1.2.6 跨天，票行程待办用）
         d["location"] = str(d.get("location") or "")
         d["start"] = _time_ok(d.get("start"), "") if d.get("start") else ""
         pr = str(d.get("priority") or "mid")
@@ -1320,6 +1321,7 @@ def _sanitize_tickets(raw, warnings):
         x["type"] = str(x.get("type") or "other")
         x["name"] = str(x.get("name") or "未命名")
         x["date"] = str(x.get("date") or "")
+        x["arriveDate"] = str(x.get("arriveDate") or x.get("date") or "")  # 到达日期（v1.2.6 跨天）
         x["time"] = _time_ok(x.get("time"), "")
         x["endTime"] = _time_ok(x.get("endTime"), "")
         x["location"] = str(x.get("location") or "")
@@ -1330,8 +1332,10 @@ def _sanitize_tickets(raw, warnings):
             x["price"] = 0
         x["ticketNo"] = str(x.get("ticketNo") or "")
         x["note"] = str(x.get("note") or "")
-        st = x.get("status")
-        x["status"] = "used" if st == "used" else "unused"  # 作废态已移除
+        # v1.2.6：已用/未用状态移除（拍板 5，旧 status 不再下发）；费用性质 none/pending/settled
+        x.pop("status", None)
+        rb = str(x.get("reimb") or "none")
+        x["reimb"] = rb if rb in ("pending", "settled") else "none"
         imgs = x.get("images")
         x["images"] = imgs if isinstance(imgs, list) else []
         x["buyDate"] = str(x.get("buyDate") or "")
@@ -1788,6 +1792,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_window_switch()
             if path == "/api/window-size":
                 return self._handle_window_size()
+            if path == "/api/ocr":
+                # 票面识别（v1.2.6 拍板 Q3）：Windows 本地 OCR（WinRT），离线不出机
+                return self._handle_ocr()
             if path == "/api/import/parse":
                 if bill_import is None:
                     return self._json({"error": "import module unavailable"}, 500)
@@ -1842,6 +1849,83 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, f.read(), ctype, extra)
 
     # ---------- 数据 ----------
+    # ---- 票面 OCR（v1.2.6 拍板 Q3）：Windows 本地 OCR（WinRT Windows.Media.Ocr）----
+    # 免安装免打包（系统自带引擎，中文 Windows 默认有语言包）、全程离线；
+    # 前端传 PNG dataURL（canvas 统一重编码，避开 webp 解码差异）；识别结果供表单预填人工核对
+    _OCR_PS = r'''
+param([string]$ImagePath)
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+$ErrorActionPreference = 'Stop'
+[Windows.Media.Ocr.OcrEngine,Windows.Foundation,ContentType=WindowsRuntime] | Out-Null
+[Windows.Graphics.Imaging.BitmapDecoder,Windows.Graphics.Imaging,ContentType=WindowsRuntime] | Out-Null
+[Windows.Storage.StorageFile,Windows.Storage,ContentType=WindowsRuntime] | Out-Null
+function Await($Task, $Type) {
+  $m = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+  })[0]
+  $t = $m.MakeGenericMethod($Type).Invoke($null, @($Task))
+  $t.Wait(-1) | Out-Null
+  $t.Result
+}
+try {
+  $file = Await ([Windows.Storage.StorageFile]::GetFileFromPathAsync($ImagePath)) ([Windows.Storage.StorageFile])
+  $stream = Await ($file.OpenAsync([Windows.Storage.FileAccessMode]::Read)) ([Windows.Storage.Streams.IRandomAccessStream])
+  $dec = Await ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($stream)) ([Windows.Graphics.Imaging.BitmapDecoder])
+  $bmp = Await ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+  $eng = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages()
+  if ($null -eq $eng) { Write-Output '__OCR_NO_ENGINE__'; exit 0 }
+  $res = Await ($eng.RecognizeAsync($bmp)) ([Windows.Media.Ocr.OcrResult])
+  Write-Output $res.Text
+} catch {
+  Write-Output ('__OCR_ERR__' + $_.Exception.Message)
+}
+'''
+
+    def _run_windows_ocr(self, png_path):
+        """本地调 WinRT OCR 返回文本；失败抛异常（调用方转 JSON）。"""
+        import subprocess
+        import tempfile
+        if os.name != "nt":
+            raise RuntimeError("OCR 仅支持 Windows")
+        td = tempfile.mkdtemp(prefix="ll-ocr-")
+        ps1 = os.path.join(td, "ocr.ps1")
+        with open(ps1, "w", encoding="utf-8") as f:
+            f.write(self._OCR_PS)
+        try:
+            p = subprocess.run(
+                ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", ps1, png_path],
+                capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError("OCR 超时")
+        out = (p.stdout or b"").decode("utf-8", "replace").strip()
+        if "__OCR_ERR__" in out:
+            raise RuntimeError(out.replace("__OCR_ERR__", "") or "OCR 失败")
+        if "__OCR_NO_ENGINE__" in out:
+            raise RuntimeError("系统 OCR 引擎不可用（需 Windows 10+ 中文语言包）")
+        return out
+
+    def _handle_ocr(self):
+        try:
+            if int(self.headers.get("Content-Length") or 0) > 20 * 1024 * 1024:
+                return self._json({"ok": False, "error": "图片过大"}, 413)
+            import base64
+            import tempfile
+            payload = json.loads(self._read_body().decode("utf-8"))
+            b64 = str(payload.get("b64") or "")
+            if "," in b64[:64]:
+                b64 = b64.split(",", 1)[1]
+            raw = base64.b64decode(b64)
+            if not raw:
+                return self._json({"ok": False, "error": "空图片"}, 400)
+            td = tempfile.mkdtemp(prefix="ll-ocr-")
+            png = os.path.join(td, "in.png")
+            with open(png, "wb") as f:
+                f.write(raw)
+            text = self._run_windows_ocr(png)
+            return self._json({"ok": True, "text": text})
+        except Exception as e:
+            return self._json({"ok": False, "error": str(e)}, 200)
+
     def _handle_save(self):
         payload = json.loads(self._read_body().decode("utf-8"))
         target = payload.get("target")

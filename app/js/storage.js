@@ -812,8 +812,50 @@ window.Storage = (function () {
     const d = new Date(Number(p[0] || 1970), (Number(p[1]) || 1) - 1, (Number(p[2]) || 1) + n);
     return U.todayStr(d);
   }
+  /* ===== 时间段待办跨天拆段（v1.2.6 拍板 9）=====
+     绝对时间轴统一口径：起=(实例日, start)、止=(dueDate||实例日, due)——
+     显示（planSpansOf）与物化（applyTodoStatus）共用本函数，两边不再各算各的（曾 due==time 口径分裂）；
+     dueDate 缺省沿旧过夜约定（due<start ⇒ 次日尾段）；止<=起保底 1 分钟。
+     返回 [{date, start, end, isTail}]，end='24:00' 是当日尽头合法值（勿取模绕回 00:00）。 */
+  function todoSpanParts(def, dateStr) {
+    const sAbs = dayMin(dateStr, def.start || '00:00');
+    let eDate, eHm;
+    if (def.dueDate) {
+      eDate = def.dueDate < dateStr ? dateStr : def.dueDate; // 防御：到达日早于实例日
+      eHm = def.due || def.start || '00:00';
+    } else {
+      eHm = def.due || def.start || '00:00';
+      eDate = (def.start && def.due && hmMin(def.due) < hmMin(def.start)) ? addDaysStr(dateStr, 1) : dateStr;
+    }
+    let eAbs = dayMin(eDate, eHm);
+    if (eAbs <= sAbs) eAbs = sAbs + 1;
+    const out = [];
+    let cur = sAbs, part = 0;
+    while (cur < eAbs) {
+      const dayIdx = Math.floor(cur / 1440);
+      const segEnd = Math.min(eAbs, (dayIdx + 1) * 1440);
+      out.push({
+        date: minToDay(dayIdx),
+        start: String(Math.floor((cur % 1440) / 60)).padStart(2, '0') + ':' + String(cur % 60).padStart(2, '0'),
+        end: (segEnd % 1440 === 0) ? '24:00' : (String(Math.floor((segEnd % 1440) / 60)).padStart(2, '0') + ':' + String(segEnd % 60).padStart(2, '0')),
+        isTail: part > 0
+      });
+      cur = segEnd;
+      part++;
+    }
+    return out;
+  }
+  /* 'YYYY-MM-DD' + 'HH:MM' → 自 1970-01-01 起绝对分钟（仅同口径比较/拆段用） */
+  function dayMin(dateStr, hm) {
+    const p = String(dateStr || '').split('-').map(Number);
+    const days = Math.round((new Date(p[0] || 1970, (p[1] || 1) - 1, p[2] || 1) - new Date(1970, 0, 1)) / 86400000);
+    return days * 1440 + hmMin(hm);
+  }
+  function minToDay(idx) {
+    return U.todayStr(new Date(1970, 0, 1 + idx));
+  }
   /* 物化块实例锚（v1.2.5）：同一次实例的块共用确定性 gid 'todo:<defId>:<实例日>'——
-     过夜拆分段同组；循环逐日实例互不误判（昨天的夜尾段不会挡住今天实例的物化）；
+     跨天拆分段同组；循环逐日实例互不误判（昨天的夜尾段不会挡住今天实例的物化）；
      兼容旧数据：无该前缀的块按「当天 + todoId」兜底识别 */
   function todoBlockGid(defId, dateStr) { return 'todo:' + defId + ':' + dateStr; }
   function todoBlocksOf(defId, dateStr) {
@@ -867,27 +909,21 @@ window.Storage = (function () {
       if (status === 'done') {
         if (!todoBlocksOf(defId, dateStr).length) {
           const gid = todoBlockGid(defId, dateStr);
+          // 类型映射（v1.2.6 拍板 2）：票行程块落 commute/fun，不再一律 other
+          const tkRec = def.ticketId ? ((db.tickets || {}).items || []).filter(function (x) { return x.id === def.ticketId; })[0] : null;
           const base = {
-            gid: gid, typeId: 'other', note: def.name, location: def.location || '',
+            gid: gid, typeId: tkRec ? ticketBlockTypeId(tkRec.type) : 'other', note: def.name, location: def.location || '',
             todoId: defId, linkHabitId: '', habitSynced: true, source: 'manual'
           };
-          // 过夜（start>due）按天拆两段（与手工跨天录入同构、同 gid 同组）；
-          // 无 due 的旧数据兜底 end=start（不拆）
-          if (!def.due || hmMin(def.due) > hmMin(def.start)) {
+          // 跨天逐日拆段（v1.2.6 拍板 9）：绝对起止统一口径，超 24h 多日行程拆 N 段同 gid
+          todoSpanParts(def, dateStr).forEach(function (seg) {
             jobs.push(saveTimelineBlock(Object.assign({}, base, {
-              date: dateStr, start: def.start, end: def.due || def.start
+              date: seg.date, start: seg.start, end: seg.end
             })));
-          } else {
-            jobs.push(saveTimelineBlock(Object.assign({}, base, {
-              date: dateStr, start: def.start, end: '24:00'
-            })));
-            jobs.push(saveTimelineBlock(Object.assign({}, base, {
-              date: addDaysStr(dateStr, 1), start: '00:00', end: def.due
-            })));
-          }
+          });
         }
       } else if (prev === 'done') {
-        // 撤销/改跳过：删该实例物化块（含过夜拆分段，按实例 gid 整组）
+        // 撤销/改跳过：删该实例物化块（含跨天拆分段，按实例 gid 整组）
         todoBlocksOf(defId, dateStr).slice().forEach(function (b) {
           jobs.push(removeTimelineGroup(b.id));
         });
@@ -899,11 +935,6 @@ window.Storage = (function () {
         if (todoHabitDelta(def.linkHabitId, dateStr, status === 'done')) jobs.push(persist('habits'));
       }
     }
-    // 票据反向同步（v1.2.5）：票衍生待办勾完成/撤销 → 票标 已用/未用（幂等）
-    try {
-      const tkJob = typeof syncTicketFromTodo === 'function' ? syncTicketFromTodo(defId, dateStr, status === 'done') : null;
-      if (tkJob) jobs.push(tkJob);
-    } catch (e) { /* 联动失败不阻塞待办 */ }
     return Promise.all(jobs);
   }
   /* 习惯打卡 → 待办反向同步（双向联动，勾选「同步到习惯打卡」的待办）
@@ -1190,18 +1221,29 @@ window.Storage = (function () {
     { id: 'concert', name: '演唱会', icon: 'mic', cat: 'w_fun' },
     { id: 'movie', name: '电影', icon: 'film', cat: 'w_fun' },
     { id: 'exhibition', name: '展览', icon: 'palette', cat: 'w_fun' },
+    { id: 'attraction', name: '景点门票', icon: 'landmark', cat: 'w_fun' },
     { id: 'other', name: '其他', icon: 'ticket', cat: 'w_other_exp' }
   ];
+  /* 费用性质（v1.2.6）：none=自费（自动建账单）；pending/settled=报销（不记账不进任何金额统计） */
+  const REIMB_OPTS = { none: '自费', pending: '待报销', settled: '已报销' };
+  /* 票类型 → 时间日历类型（v1.2.6 拍板）：行程块默认通勤/交通，演出类落娱乐 */
+  function ticketBlockTypeId(typeId) {
+    if (typeId === 'train' || typeId === 'flight' || typeId === 'bus') return 'commute';
+    if (typeId === 'concert' || typeId === 'movie' || typeId === 'exhibition' || typeId === 'attraction') return 'fun';
+    return 'other';
+  }
   function normTickets(raw) {
     const r = raw && typeof raw === 'object' ? raw : {};
     return {
       items: Array.isArray(r.items) ? r.items.filter(function (x) { return x && typeof x === 'object'; }).map(function (x) {
         return {
           id: String(x.id || U.uid()), type: String(x.type || 'other'), name: String(x.name || '未命名'),
-          date: String(x.date || ''), time: String(x.time || ''), endTime: String(x.endTime || ''),
+          date: String(x.date || ''), arriveDate: String(x.arriveDate || x.date || ''),
+          time: String(x.time || ''), endTime: String(x.endTime || ''),
           location: String(x.location || ''), seat: String(x.seat || ''),
           price: Number(x.price) || 0, ticketNo: String(x.ticketNo || ''), note: String(x.note || ''),
-          status: x.status === 'used' ? 'used' : 'unused', // 作废态已移除（拍板）：旧 void 归未用
+          // v1.2.6：已用/未用状态移除（拍板）；费用性质 none=自费/pending=待报销/settled=已报销
+          reimb: x.reimb === 'pending' || x.reimb === 'settled' ? x.reimb : 'none',
           images: Array.isArray(x.images) ? x.images.slice() : [],
           buyDate: String(x.buyDate || ''), billId: String(x.billId || ''), todoId: String(x.todoId || ''),
           ext: (x.ext && typeof x.ext === 'object') ? Object.assign({}, x.ext) : {},
@@ -1214,30 +1256,48 @@ window.Storage = (function () {
     };
   }
   function tickets() { db.tickets = db.tickets || normTickets(null); return db.tickets; }
+  /* 票面 OCR（v1.2.6 拍板 Q3）：Windows 本地识别（WinRT，离线不出机）。
+     入参 PNG dataURL（前端 canvas 重编码）；返回 {ok, text|error} */
+  async function ocrImage(dataURL) {
+    const r = await api('/api/ocr', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ b64: dataURL })
+    });
+    return r.json();
+  }
   function ticketBillCat(typeId) {
     const t = (tickets().types || []).filter(function (x) { return x.id === typeId; })[0];
     return (t && t.cat) || 'w_other_exp';
   }
-  /* 票 ↔ 时间段待办（Q1:A）：行程进时间日历/主页；双向状态同步 */
+  /* 票 ↔ 时间段待办（Q1:A）：行程进时间日历/主页（勾完成只影响待办本身，不再反标票据）。
+     v1.2.6 跨天（拍板 9）：dueDate=到达日期——起止是完整绝对时刻，超 24h 也能表达；
+     无到达时间默认 +2h（溢出零点自然到次日，不再取模绕回当过夜猜测）。 */
   function ticketSyncTodo(tk) {
-    const due = tk.endTime || (function () {
-      const m = /^(\d{1,2}):(\d{2})$/.exec(tk.time || '');
-      if (!m) return '23:59';
-      const mm = (Number(m[1]) * 60 + Number(m[2]) + 120) % (24 * 60);
-      return String(Math.floor(mm / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0');
-    })();
+    const startHm = /^\d{1,2}:\d{2}$/.test(tk.time || '') ? tk.time : '09:00';
+    let due, dueDate;
+    if (tk.endTime) {
+      due = tk.endTime;
+      dueDate = tk.arriveDate || tk.date || U.todayStr();
+    } else {
+      const m = /^(\d{1,2}):(\d{2})$/.exec(startHm);
+      const mm = (Number(m[1]) * 60 + Number(m[2]) + 120);
+      due = String(Math.floor((mm % 1440) / 60)).padStart(2, '0') + ':' + String(mm % 60).padStart(2, '0');
+      // +2h 溢出零点 → 到达日+1（与绝对时刻口径一致）
+      dueDate = mm >= 1440 ? addDaysStr(tk.date || U.todayStr(), 1) : (tk.arriveDate || tk.date || U.todayStr());
+    }
     const def = {
       id: tk.todoId || U.uid(), name: tk.name || '行程', date: tk.date || U.todayStr(),
-      start: tk.time || '09:00', due: due,
+      start: startHm, due: due, dueDate: dueDate,
       repeat: 'none', repeatOn: [], interval: 1, remindBefore: 30,
       linkHabitId: '', location: tk.location || '', priority: 'mid',
       repeatUntil: '', createdAt: Date.now(), archived: false, ticketId: tk.id
     };
     return saveTodoDef(def).then(function () {
       tk.todoId = def.id;
-      const cur = todoStatus(def.id, def.date);
-      if (tk.status === 'used' && cur !== 'done') return setTodoDone(def.id, def.date, 'done');
-      if (tk.status !== 'used' && cur === 'done') return setTodoDone(def.id, def.date, '');
+      // 票行程=既成事实（v1.2.6 拍板：已用/未用移除后不再有待办语义）——生成即完成，
+      // 时间日历直接显示为事实段（实色块），不再出现"待完成"计划段 UI；撤销完成可回计划态
+      return setTodoDone(def.id, def.date, 'done');
     });
   }
   function saveTicket(tk) {
@@ -1245,10 +1305,11 @@ window.Storage = (function () {
     tk = tk || {};
     const rec = {
       id: tk.id || U.uid(), type: String(tk.type || 'other'), name: String(tk.name || '未命名'),
-      date: String(tk.date || ''), time: String(tk.time || ''), endTime: String(tk.endTime || ''),
+      date: String(tk.date || ''), arriveDate: String(tk.arriveDate || tk.date || ''),
+      time: String(tk.time || ''), endTime: String(tk.endTime || ''),
       location: String(tk.location || ''), seat: String(tk.seat || ''),
       price: Number(tk.price) || 0, ticketNo: String(tk.ticketNo || ''), note: String(tk.note || ''),
-      status: tk.status === 'used' ? 'used' : 'unused',
+      reimb: tk.reimb === 'pending' || tk.reimb === 'settled' ? tk.reimb : 'none',
       images: Array.isArray(tk.images) ? tk.images.slice() : [],
       buyDate: String(tk.buyDate || '') || U.todayStr(),
       billId: String(tk.billId || ''), todoId: String(tk.todoId || ''),
@@ -1262,7 +1323,7 @@ window.Storage = (function () {
     if (rec.date && rec.time) {
       // 改期：先清旧实例（完成态+物化块）再在新日期同步（顺序执行防两份落盘竞态），
       // 否则旧日期残留 done/物化块、新日期又物化一份
-      if (prev && prev.todoId && prev.date && rec.date !== prev.date) {
+      if (prev && prev.todoId && prev.date && (rec.date !== prev.date || rec.arriveDate !== prev.arriveDate)) {
         jobs.push(applyTodoStatus(prev.todoId, prev.date, '', true).then(function () {
           return ticketSyncTodo(rec);
         }));
@@ -1287,10 +1348,24 @@ window.Storage = (function () {
     });
   }
   /* 票→账单：无 billId 且 price>0 自动建；已绑则金额跟随（拍板 10/11）。
-     跟随含 0 元：票价改 0 账单金额同步归 0（曾直接跳过，钱包留旧价）；0 元票仍不新建账单。 */
+     跟随含 0 元：票价改 0 账单金额同步归 0（曾直接跳过，钱包留旧价）；0 元票仍不新建账单。
+     v1.2.6 报销（拍板 3/Q2）：reimb≠none 不记账——票价仅展示、不进任何金额统计；
+     自费票改报销时回收自动建的账单（票的账单都是自动建的，ticketId 归属清晰）。 */
   function ticketSyncBill(rec) {
     const bills = db.wallet.bills;
     const amt = Math.abs(Number(rec.price) || 0);
+    // 报销票：回收/不建账单，billId 清空
+    if (rec.reimb && rec.reimb !== 'none') {
+      let changed = false;
+      if (rec.billId) {
+        const bi = bills.findIndex(function (b) { return b.id === rec.billId; });
+        if (bi >= 0) { bills.splice(bi, 1); changed = true; }
+        rec.billId = '';
+      }
+      const ex = bills.filter(function (b) { return b.ticketId === rec.id; })[0];
+      if (ex) { bills.splice(bills.indexOf(ex), 1); changed = true; }
+      return changed ? persist('wallet') : Promise.resolve();
+    }
     if (rec.billId) {
       const bill = bills.filter(function (b) { return b.id === rec.billId; })[0];
       if (!bill) { rec.billId = ''; }
@@ -1337,17 +1412,7 @@ window.Storage = (function () {
       throw e;
     });
   }
-  /* 待办勾完成 → 票反向标已用（ticketId 关联，幂等） */
-  function syncTicketFromTodo(defId, dateStr, done) {
-    const t = db.tickets || { items: [] };
-    const rec = (t.items || []).filter(function (x) { return x.todoId === defId && x.date === dateStr; })[0];
-    if (!rec) return null;
-    // 作废是终态（拍板「作废后不可恢复为未用」）：待办勾/撤不复活作废票
-    const want = done ? 'used' : 'unused';
-    if (rec.status === want) return null;
-    rec.status = want;
-    return persist('tickets');
-  }
+  /* 待办勾完成 → 票反向标已用（ticketId 关联，幂等）——v1.2.6 已用/未用移除（拍板 5），此联动废弃 */
 
   function setTimelineTimer(t) {
     timeline().timer = t || null;
@@ -2365,6 +2430,7 @@ window.Storage = (function () {
     habits: habits, saveHabitDef: saveHabitDef, removeHabitDef: removeHabitDef,
     /* 待办事项（todos 域，v1.2.0） */
     todoDef: todoDef, todoDueOn: todoDueOn, todoStatus: todoStatus, todoNowStr: todoNowStr,
+    todoSpanParts: todoSpanParts,
     setTodoDone: setTodoDone, syncTodoFromHabit: syncTodoFromHabit,
     saveTodoDef: saveTodoDef, removeTodoDef: removeTodoDef, todoOpenInstances: todoOpenInstances,
     saveTodos: function () { return persist('todos'); },
@@ -2376,8 +2442,9 @@ window.Storage = (function () {
     setTimelineTimer: setTimelineTimer,
     saveTimelineType: saveTimelineType, removeTimelineType: removeTimelineType,
     /* 我的票据（tickets 域，v1.2.5） */
-    tickets: tickets, TICKET_TYPES: TICKET_TYPES, normTickets: normTickets,
-    saveTicket: saveTicket, removeTicket: removeTicket, syncTicketFromTodo: syncTicketFromTodo,
+    tickets: tickets, TICKET_TYPES: TICKET_TYPES, REIMB_OPTS: REIMB_OPTS, normTickets: normTickets,
+    ticketBlockTypeId: ticketBlockTypeId, ocrImage: ocrImage,
+    saveTicket: saveTicket, removeTicket: removeTicket,
     saveTickets: function () { return persist('tickets'); },
     saveTimeline: function () { return persist('timeline'); },
     toggleHabit: toggleHabit, setHabitCount: setHabitCount, habitCountOf: habitCountOf,

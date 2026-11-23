@@ -447,7 +447,7 @@ async function main() {
     const plans = col.querySelectorAll('.tl-plan');
     assert(plans.length === 2, '今天列应有 2 段计划（今日头段 + 昨日尾段），实为 ' + plans.length);
     const texts = Array.prototype.map.call(plans, function (p) { return p.textContent; });
-    assert(texts.some(function (t) { return t.indexOf('23:00 - 01:00') >= 0; }), '头段应显示完整起止（23:00 - 01:00）: ' + texts.join('|'));
+    assert(texts.some(function (t) { return t.indexOf('23:00 - 24:00') >= 0; }), '头段应显示拆段起止（23:00 - 24:00，v1.2.6 拍板 9 统一口径）: ' + texts.join('|'));
     assert(texts.some(function (t) { return t.indexOf('00:00 - 01:00') >= 0; }), '昨日尾段应显示 00:00 - 01:00: ' + texts.join('|'));
     // 物化：过夜实例拆两段同 gid（此前压成 23:00-01:00 一段，end<start 布局成 1 分钟）
     await S.setTodoDone('tn', today, 'done');

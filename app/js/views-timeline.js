@@ -127,33 +127,48 @@ window.TimelineView = (function () {
       return { def: d, dateStr: dateStr, done: !!S.todoStatus(d.id, dateStr) };
     });
   }
-  /* 过夜时间段待办（start > due）：显示/物化都按天拆两段（与手工跨天录入同构） */
+  /* 过夜时间段待办（start > due）：显示/物化都按天拆两段（与手工跨天录入同构）——
+     v1.2.6 跨天拆段统一走 S.todoSpanParts（dueDate 绝对口径），本判断仅剩兼容用途 */
   function isOvernight(d) {
     return !!(d && d.start && d.due && parseHM(d.due) < parseHM(d.start));
   }
   /* 计划段（v1.2.4 状态机）：时间段待办（def.start）未完成=计划态派生显示；
      done 已物化为事实段（不再派生）；skipped 仍显示计划段（待手工删除，拍板 3）。
-     v1.2.5：过夜实例按天拆两段显示——本日列只出**属于本日**的段：
-     当天实例的头段（start→24:00）+ 前一天过夜实例的尾段（00:00→due）；
-     返回 {def, instDate, start, end, endLabel, isTail}——完成按钮带实例日，
-     在尾段（次日列）勾完成仍落回当天实例 */
+     v1.2.6（拍板 9）：跨天实例逐日拆段（与物化同口径 S.todoSpanParts）——
+     本日列出**所有覆盖本日**的段：当天实例的头/中段 + 往前实例的中/尾段（多日行程不再截断）；
+     返回 {def, instDate, start, end, endLabel, isTail, typeId}——完成按钮带实例日，
+     在中/尾段（次日列）勾完成仍落回实例锚日 */
   function planSpansOf(dateStr) {
     const defs = ((S.getDB().todos || {}).defs) || [];
     const out = [];
+    function ticketTypeOf(tid) {
+      const it = (((S.getDB().tickets || {}).items) || []).filter(function (x) { return x.id === tid; })[0];
+      return it ? it.type : '';
+    }
+    // 往回看天数=跨天实例最大跨度（票行程可达多日；旧过夜约定 due<start 跨 1 天）
+    let lookback = 1;
     defs.forEach(function (d) {
-      if (!d || d.archived || !d.start || !S.todoDueOn(d, dateStr)) return;
-      if (S.todoStatus(d.id, dateStr) === 'done') return;
-      const end = d.due || d.start;
-      out.push({
-        def: d, instDate: dateStr, start: d.start,
-        end: isOvernight(d) ? '24:00' : end, endLabel: end, isTail: false
-      });
+      if (!d || !d.dueDate || !d.date) return;
+      const span = Math.round((new Date(d.dueDate + 'T00:00:00') - new Date(d.date + 'T00:00:00')) / 86400000);
+      if (span > lookback) lookback = Math.min(60, span);
     });
-    const prev = addDays(dateStr, -1);
     defs.forEach(function (d) {
-      if (!d || d.archived || !d.start || !isOvernight(d)) return;
-      if (!S.todoDueOn(d, prev) || S.todoStatus(d.id, prev) === 'done') return;
-      out.push({ def: d, instDate: prev, start: '00:00', end: d.due || d.start, endLabel: d.due || d.start, isTail: true });
+      if (!d || d.archived || !d.start) return;
+      // 类型映射（v1.2.6 拍板 2）：票行程段落 commute/fun，计划段按类型配色
+      const typeId = d.ticketId ? S.ticketBlockTypeId(ticketTypeOf(d.ticketId)) : 'other';
+      for (let i = lookback; i >= 0; i--) {
+        const instDate = addDays(dateStr, -i);
+        if (!S.todoDueOn(d, instDate)) continue;
+        if (S.todoStatus(d.id, instDate) === 'done') continue;
+        S.todoSpanParts(d, instDate).forEach(function (seg) {
+          if (seg.date !== dateStr) return;
+          out.push({
+            def: d, instDate: instDate, start: seg.start,
+            end: seg.end, endLabel: seg.end, isTail: seg.isTail || instDate !== dateStr,
+            typeId: typeId
+          });
+        });
+      }
     });
     return out;
   }
@@ -183,14 +198,16 @@ window.TimelineView = (function () {
       '<button type="button" class="btn btn-ghost btn-sm" id="tl-add-point">' + UI.icon('plus', 13) + ' 时间点</button>' +
       '<span class="op-host tl-add-block-host">' +
       '<button type="button" class="btn btn-primary btn-sm" id="tl-add-block">' + UI.icon('plus', 13) + ' 时间段</button>' +
-      '<span class="op-float tl-timer-slot">' +
+      // 计时运行态不渲染 hover 槽（空槽占位会把与计时按钮的间距拉大）
       (t ? '' :
-        '<button type="button" class="btn btn-ghost btn-sm" id="tl-timer" title="开始计时（自动生成时间段）">' + UI.icon('timer', 13) + '</button>') +
-      '</span></span>' +
+        '<span class="op-float tl-timer-slot">' +
+        '<button type="button" class="btn btn-ghost btn-sm" id="tl-timer" title="开始计时（自动生成时间段）">' + UI.icon('timer', 13) + '</button>' +
+        '</span>') +
+      '</span>' +
       // 计时运行态：读数常驻显眼（拍板 3）——红条读数 + 停止钮，不再藏 hover 槽
       (t
         ? '<button type="button" class="tl-timer-live" id="tl-timer-stop" title="结束计时并生成记录">' +
-          UI.icon('timer', 13) + ' 计时中 <b id="tl-timer-elapsed">' + fmtElapsed(t) + '</b> ' + UI.icon('square', 11) + '</button>'
+          UI.icon('timer', 13) + '<span>计时中</span><b id="tl-timer-elapsed">' + fmtElapsed(t) + '</b>' + UI.icon('square', 11) + '</button>'
         : '') +
       '<button type="button" class="btn btn-ghost btn-sm" id="tl-types" title="记录类型管理">' + UI.icon('settings', 13) + '</button>' +
       '</div></div>' +
@@ -228,9 +245,9 @@ window.TimelineView = (function () {
       planSpansOf(ds).forEach(function (p) {
         items.push({
           isPlan: true, def: p.def,
-          id: 'plan:' + p.def.id + (p.isTail ? ':t' : ''),
+          id: 'plan:' + p.def.id + ':' + p.instDate,
           date: ds, start: p.start, end: p.end, endLabel: p.endLabel,
-          typeId: 'other', note: p.def.name, location: p.def.location || '', todoId: p.def.id,
+          typeId: p.typeId || 'other', note: p.def.name, location: p.def.location || '', todoId: p.def.id,
           instDate: p.instDate
         });
       });
@@ -241,10 +258,12 @@ window.TimelineView = (function () {
         const w = 100 / it.cols;
         const short = h < 38;
         if (it.rec.isPlan) {
-          // 计划段：浅色虚线 + ◻（与事实段实色对照）
+          // 计划段：浅色虚线 + ◻（与事实段实色对照）；类型色浅底+左条（v1.2.6 拍板 2）
+          const pty = typeOf(it.rec.typeId);
           inner += '<div class="tl-block tl-plan' + (short ? ' tl-short' : '') + '"' +
             ' data-tl-plan="' + U.escapeHtml(it.rec.def.id) + '" data-tl-kind="plan"' +
-            ' style="top:' + top + 'px;height:' + h + 'px;left:' + (it.col * w) + '%;width:calc(' + w + '% - 2px);">' +
+            ' style="top:' + top + 'px;height:' + h + 'px;left:' + (it.col * w) + '%;width:calc(' + w + '% - 2px);' +
+            'background:' + U.escapeHtml(pty.color) + '14;border-left-color:' + U.escapeHtml(pty.color) + '">' +
             '<div class="tl-b-t">◻ ' + U.escapeHtml(it.rec.def.name) +
             (short ? '' : '（' + durText(it.endMin - it.startMin) + '）') + '</div>' +
             (short ? '' : '<div class="tl-b-s">' + U.escapeHtml(it.rec.start) + ' - ' + U.escapeHtml(it.rec.endLabel != null ? it.rec.endLabel : it.rec.end) +

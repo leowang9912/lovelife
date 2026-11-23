@@ -132,6 +132,7 @@ UI.icon('trash-2');             // 默认 16px
 | 宠物 | `paw-print` | | 其他收支 | `more-horizontal` |
 | 工资 | `briefcase` | | 兼职外快 | `zap` |
 | 报销 | `receipt` | | 理财收益 | `trending-up` |
+| 景点门票（票据类型） | `landmark` | | 识别填充（票面 OCR） | `scan-text` |
 | 二手闲置 | `refresh-cw` | | 现金 | `banknote` |
 | 微信 | `message-circle` | | 支付宝 | `smartphone` |
 | 银行卡 | `credit-card` | | 账单行图标 | 分类图标（同上） |
@@ -162,3 +163,4 @@ lucide 目前没有"裤子"类图标；`pants` 为自绘补充，**lucide 同风
 | 2026-11-04 | 修订：下装改自绘 `pants`（§7）；「我的生活」sparkles→heart |
 | 2026-11-04 | 修订：登记展示档尺寸（28/32/48）与 sparkles/circle-check/grip-vertical/disc-3 |
 | 2026-11-04 | v1.1.0 钱袋：登记 §4.8 记账/分类/账户全套图标（28 语义） |
+| 2026-11-23 | v1.2.6 票据/报销/OCR：登记 `receipt` `landmark` `scan-text` |

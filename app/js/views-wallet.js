@@ -202,9 +202,50 @@ window.WalletView = (function () {
     { id: 'accounts', label: '账户', icon: 'wallet' }
   ];
 
+  /* 报销浮层（v1.2.6 拍板 3/Q2）：从票据派生（不另存数据），合计/清单可见、不进任何统计 */
+  function openReimbDialog(items) {
+    function group(title, list, cls) {
+      if (!list.length) return '';
+      const sum = list.reduce(function (a, x) { return a + Math.abs(Number(x.price) || 0); }, 0);
+      return '<div class="muted small" style="margin:10px 0 4px">' + title + ' · ' + list.length + ' 张 · ' + U.formatMoney(sum) + '</div>' +
+        list.map(function (x) {
+          return '<div class="kv-row ' + cls + '"><span>' + esc(x.name || '票据') + '　' + esc(x.date || '') + '</span>' +
+            '<strong>' + U.formatMoney(Math.abs(Number(x.price) || 0)) + '</strong></div>';
+        }).join('');
+    }
+    function esc(s) { return window.Utils.escapeHtml(s == null ? '' : s); }
+    const pending = items.filter(function (x) { return x.reimb === 'pending'; });
+    const settled = items.filter(function (x) { return x.reimb === 'settled'; });
+    UI.modal({
+      title: '报销', width: 420,
+      bodyHTML: '<div class="detail-kv">' +
+        group('待报销', pending, 'reimb-pending') + group('已报销', settled, 'reimb-settled') +
+        '</div><p class="muted small">报销票只做记录：票价可见，但不生成账单、不计入任何收支统计。</p>',
+      footerHTML: '<div class="flex1"></div>' +
+        '<button type="button" class="btn btn-ghost" data-x="c">关闭</button>' +
+        '<button type="button" class="btn btn-primary" data-x="go">去票据</button>',
+      onMount: function (w, close) {
+        w.querySelector('[data-x=c]').addEventListener('click', close);
+        w.querySelector('[data-x=go]').addEventListener('click', function () {
+          close();
+          window.App.go('tickets');
+        });
+      }
+    });
+  }
+
   function render(main) {
+    // 报销按钮（v1.2.6 拍板 3/Q2）：有报销票才出现——点开轻量浮层看合计/清单，不设独立台账区
+    const tkItems = (((S.getDB() || {}).tickets || {}).items) || [];
+    const reimbItems = tkItems.filter(function (x) { return x.reimb && x.reimb !== 'none'; });
+    const reimbPending = reimbItems.filter(function (x) { return x.reimb === 'pending'; });
+    const reimbPendingSum = reimbPending.reduce(function (a, x) { return a + Math.abs(Number(x.price) || 0); }, 0);
     main.innerHTML =
       '<div class="page-head"><h2>我的钱袋</h2><div class="page-actions">' +
+      (reimbItems.length
+        ? '<button class="btn btn-ghost" id="btn-reimb" title="报销票不计入收支统计">' + UI.icon('receipt', 14) + ' 报销' +
+          (reimbPending.length ? ' <b class="reimb-badge">待 ' + U.formatMoney(reimbPendingSum) + '</b>' : '') + '</button>'
+        : '') +
       '<button class="btn btn-ghost" id="btn-goto-io">' + UI.icon('file-up', 14) + ' 导入 / 导出</button>' +
       '<button class="btn btn-ghost" id="btn-goto-stats">' + UI.icon('chart-column', 14) + ' 查看统计</button>' +
       '<button class="btn btn-primary" id="btn-add-bill">' + UI.icon('plus', 14) + ' 记一笔</button>' +
@@ -215,6 +256,8 @@ window.WalletView = (function () {
       }).join('') + '</div>' +
       '<div id="wallet-body"></div>';
 
+    const rb = main.querySelector('#btn-reimb');
+    if (rb) rb.addEventListener('click', function () { openReimbDialog(reimbItems); });
     main.querySelector('#btn-add-bill').addEventListener('click', function () { openBillForm(null); });
     // 甲22 导入/导出入口：钱袋页直达设置 → 记账设置分组（账单导入导出挂在那）
     main.querySelector('#btn-goto-io').addEventListener('click', function () {

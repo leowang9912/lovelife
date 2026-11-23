@@ -257,7 +257,7 @@ window.UI = (function () {
     if (!dpPop) return;
     const t = e.target;
     if (dpPop.contains(t)) return;                       // 弹层内交互交给弹层自身
-    if (dpInput && t === dpInput) return;                // 再点同一输入=切换开关，交给输入 handler
+    if (dpInput && (t === dpInput || (dpInput._dpSeg && dpInput._dpSeg.contains(t)))) return; // 点三段/日历钮=编辑或开关，交给自身 handler
     dpClose();
     if (t && t.classList && t.classList.contains('modal-mask')) {
       e.preventDefault();
@@ -277,13 +277,14 @@ window.UI = (function () {
       if (!dpPop) return;
       const ae = document.activeElement;
       if (ae === dpInput) return;
+      if (dpInput && dpInput._dpSeg && ae && dpInput._dpSeg.contains(ae)) return; // 焦点在三段上
       if (ae && dpPop.contains(ae)) return;
       dpClose();
     }, 0);
   }
   function dpPlace() {
     if (!dpPop || !dpInput) return;
-    const r = dpInput.getBoundingClientRect();
+    const r = (dpInput._dpSeg || dpInput).getBoundingClientRect(); // 三段容器锚定
     const pw = dpPop.offsetWidth || 272, ph = dpPop.offsetHeight || 330;
     const vh = window.innerHeight || 800, vw = window.innerWidth || 1280;
     let top = r.bottom + 6, left = r.left;
@@ -418,57 +419,161 @@ window.UI = (function () {
     window.addEventListener('scroll', dpOnAnchorMove, true);
   }
 
-  /* root 内所有 input[type=date] → 自定义日期选择控件（幂等，data-dp-bound 标记）。
-     v1.2.1：可直接键入（不再 readonly）——失焦/回车容错解析规范化；点击弹月历，
-     纯键盘 Tab 聚焦不弹层（打字不被日历挡住） */
+  /* root 内所有 input[type=date] → 日期三段式控件（幂等，data-dp-bound 标记）。
+     v1.2.6 拍板 10：年｜月｜日分段数字输入（自动跳段/方向键/↑↓微调，隔断互不影响），
+     尾部日历钮保留月历选取（点段=编辑，点日历=翻月历）。
+     原 input 转 hidden 作值载体（value 恒 YYYY-MM-DD，setter 拦截回填三段）——
+     各表单读写 el.value / id / disabled 零改动，全域 17 处调用点自动生效 */
   function bindDatePickers(root) {
     if (dpPop && dpInput && !dpInput.isConnected) dpClose(); // 锚定输入随弹窗卸载→收起
     (root || document).querySelectorAll('input[type="date"]').forEach(function (el) {
       if (el.getAttribute('data-dp-bound')) return;
       const val = el.value || '';
       el.setAttribute('data-dp-bound', '1');
-      el.setAttribute('type', 'text');
-      el.setAttribute('placeholder', '年 / 月 / 日');
+      el.setAttribute('type', 'hidden');
       el.classList.add('dp-input');
-      el.value = val;
-      el._dpOrig = val;
-      // 弹月历：pointerdown 弹（真实指针点击）；click 兜底 label 转发点击（无 pointerdown）。
-      // 纯键盘聚焦（Tab）不弹，聚焦后可直接打字；同一手势只处理一次（时间戳去重）
-      el.addEventListener('pointerdown', function () {
+      // 三段容器（可见交互层，二次定稿）：一个框内 年-月-日 分段；点击框=弹月历（旧习惯）
+      const segWrap = document.createElement('span');
+      segWrap.className = 'dp-seg';
+      segWrap.innerHTML =
+        '<input class="dp-seg-p" data-seg="y" inputmode="numeric" maxlength="4" aria-label="年">' +
+        '<span class="dp-sep">-</span>' +
+        '<input class="dp-seg-p" data-seg="m" inputmode="numeric" maxlength="2" aria-label="月">' +
+        '<span class="dp-sep">-</span>' +
+        '<input class="dp-seg-p" data-seg="d" inputmode="numeric" maxlength="2" aria-label="日">';
+      el.parentNode.insertBefore(segWrap, el.nextSibling);
+      el._dpSeg = segWrap;
+      const segs = [segWrap.querySelector('[data-seg=y]'), segWrap.querySelector('[data-seg=m]'), segWrap.querySelector('[data-seg=d]')];
+      if (el.disabled) {
+        segs.forEach(function (s) { s.disabled = true; });
+      }
+      // 点击框任意处=弹月历（旧文本框习惯一致）；同时点击聚焦段可打字（Tab 亦可）
+      segWrap.addEventListener('pointerdown', function () {
         if (el.disabled) return;
-        el._dpPdAt = Date.now();
+        segWrap._dpPdAt = Date.now();
         dpOpen(el);
       });
-      el.addEventListener('click', function () {
+      segWrap.addEventListener('click', function () {
         if (el.disabled) return;
-        if (el._dpPdAt && Date.now() - el._dpPdAt < 800) return; // pointerdown 已处理
+        if (segWrap._dpPdAt && Date.now() - segWrap._dpPdAt < 800) return;
         dpOpen(el);
       });
-      el.addEventListener('focus', function () {
-        el._dpOrig = el.value; // 记录编辑前原值（非法输入回退用）
-      });
-      el.addEventListener('keydown', function (e) {
-        if (e.isComposing || e.keyCode === 229) return;
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          e.stopPropagation(); // 只提交日期，不串到表单的 Enter=保存/确认
-          dpCommit(el); // 回车提交：容错解析 → 规范化 / 非法回退
-          if (dpPop && dpInput === el) dpClose();
+      // 值载体 setter：外部 xxx.value = 写入（联动场景如「到达日期跟随使用日期」）自动回填三段。
+      // 原生槽同步（v1.2.6 修正）：FormData/表单收集读的是原生 value 槽而非实例 getter——
+      // 只盖 getter 会让保存落库拿回旧槽值（v119 测试逮住）；保留原生 setter 双写
+      const valueDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+      let curVal = val;
+      function segFill(v) {
+        const p = dpParse(dpParseLoose(v));
+        segs[0].value = p ? String(p.y) : '';
+        segs[1].value = p ? ('0' + (p.m + 1)).slice(-2) : '';
+        segs[2].value = p ? ('0' + p.d).slice(-2) : '';
+      }
+      Object.defineProperty(el, 'value', {
+        configurable: true,
+        get: function () { return curVal; },
+        set: function (nv) {
+          curVal = String(nv == null ? '' : nv);
+          if (valueDesc && valueDesc.set) valueDesc.set.call(el, curVal); // 同步原生槽
+          segFill(curVal);
         }
       });
-      el.addEventListener('input', function () {
-        // 打字过程中弹层视图跟随已键入的年月（只跟视图，不写值）
-        if (!dpPop || dpInput !== el) return;
-        const p = dpParse(dpParseLoose(el.value));
-        if (p && (p.y !== dpViewY || p.m !== dpViewM)) {
-          dpViewY = p.y; dpViewM = p.m;
-          dpRender();
+      if (valueDesc && valueDesc.set) valueDesc.set.call(el, curVal);
+      segFill(val);
+      // disabled 代理：运行时改 hidden input.disabled 自动联动三段（模板初始态已同步）
+      const disabledDesc = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'disabled');
+      Object.defineProperty(el, 'disabled', {
+        configurable: true,
+        get: function () { return disabledDesc.get.call(el); },
+        set: function (v) {
+          disabledDesc.set.call(el, v);
+          segs.forEach(function (s) { s.disabled = !!v; });
         }
       });
-      el.addEventListener('blur', function () {
-        dpCommit(el); // 失焦提交：容错解析 → 规范化 / 非法回退
-        dpScheduleCloseCheck();
+      /* 三段聚合：全空=''（合法清空）；不完整/非法=null；合法=YYYY-MM-DD */
+      function segCollect() {
+        const y = segs[0].value.trim(), m = segs[1].value.trim(), d = segs[2].value.trim();
+        if (!y && !m && !d) return '';
+        if (!y || !m || !d) return null;
+        return dpParseLoose(y + '-' + ('0' + m).slice(-2) + '-' + ('0' + d).slice(-2));
+      }
+      function segCommit() {
+        const v = segCollect();
+        if (v === null) {
+          if (segs[0].value || segs[1].value || segs[2].value) toast('日期不完整或不合法，已还原', 'info');
+          segFill(curVal); // 丢弃本次段编辑，回填上次合法值
+          return;
+        }
+        if (v !== curVal) {
+          el.value = v; // 走 setter：同步原生槽（FormData 口径）+ 回填三段
+          el.dispatchEvent(new Event('input', { bubbles: true }));
+          el.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      }
+      function segStep(idx, delta) {
+        const s = segs[idx];
+        let n = Number(s.value) || (idx === 0 ? dpToday().y : 1);
+        n += delta;
+        if (idx === 0) {
+          s.value = String(Math.min(2100, Math.max(1900, n)));
+        } else if (idx === 1) {
+          s.value = ('0' + (((n - 1 + 12) % 12) + 1)).slice(-2);
+        } else {
+          const y = Number(segs[0].value) || dpToday().y, mo = Number(segs[1].value) || 1;
+          const dim = new Date(y, mo, 0).getDate();
+          s.value = ('0' + (((n - 1 + dim) % dim) + 1)).slice(-2);
+        }
+      }
+      segs.forEach(function (s, idx) {
+        s.addEventListener('focus', function () {
+          s.select();
+        });
+        s.addEventListener('input', function () {
+          s.value = s.value.replace(/\D/g, '');
+          const len = s.value.length;
+          if ((idx === 0 && len >= 4) || (idx > 0 && len >= 2)) {
+            if (idx < 2) segs[idx + 1].focus();
+          }
+        });
+        s.addEventListener('keydown', function (e) {
+          if (e.isComposing || e.keyCode === 229) return;
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            e.stopPropagation(); // 只提交日期，不串到表单的 Enter=保存/确认
+            segCommit();
+            return;
+          }
+          if (e.key === 'ArrowLeft' && s.selectionStart === 0 && idx > 0) {
+            e.preventDefault(); segs[idx - 1].focus();
+          } else if (e.key === 'ArrowRight' && s.selectionStart === s.value.length && idx < 2) {
+            e.preventDefault(); segs[idx + 1].focus();
+          } else if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault();
+            segStep(idx, e.key === 'ArrowUp' ? 1 : -1);
+          } else if (e.key === 'Backspace' && !s.value && idx > 0) {
+            segs[idx - 1].focus();
+          }
+        });
+        s.addEventListener('blur', function () {
+          // 焦点离开三段（也不在月历内）才聚合提交；段间跳转不打断编辑
+          setTimeout(function () {
+            const ae = document.activeElement;
+            if (segWrap.contains(ae)) return;
+            if (dpPop && dpPop.contains(ae)) return;
+            segCommit();
+            dpScheduleCloseCheck();
+          }, 0);
+        });
       });
+      // 点字段名（label）=弹月历+聚焦年段（旧习惯：点字段区域弹日历）
+      const lab = el.closest ? el.closest('label') : null;
+      if (lab) {
+        lab.addEventListener('click', function (e) {
+          if (segWrap.contains(e.target)) return; // 点段归自身
+          if (!el.disabled) dpOpen(el);
+          segs[0].focus();
+        });
+      }
     });
   }
 
@@ -499,9 +604,12 @@ window.UI = (function () {
   function cropImage(file, opts) {
     opts = opts || {};
     // 比例档（v1.1.5）：'3:4' 竖图（穿搭照片/推荐封面），默认 1:1。框与输出同比例
+    // v1.2.6 票据模式（ratios，拍板 Q1）：裁切框可切 1:1 / 横票根 8:5 / 竖票根 5:8，
+    // 「使用原图」不裁切——票根长条照片不再被 1:1 强裁
     const portrait = opts.ratio === '3:4' || opts.ratio === '9:16';
-    const frameW = portrait ? 270 : 320;
-    const frameH = portrait ? 360 : 320;
+    const RATIOS = { '1:1': [320, 320], wide: [320, 200], tall: [200, 320] };
+    let frameW = portrait ? 270 : 320;
+    let frameH = portrait ? 360 : 320;
     return new Promise(function (resolve, reject) {
       let settled = false;
       // 任何关闭方式（取消/×/遮罩/确认）都会结算，杜绝上传循环挂死丢图（v1.0.9）
@@ -510,11 +618,15 @@ window.UI = (function () {
       const img = new Image();
       img.onload = function () {
         let scale = 1, offsetX = 0, offsetY = 0;
-        const frame = frameW; // 输出换算基准（框与输出等比）
         modal({
           title: '裁切图片（' + (portrait ? '3:4 竖图' : '1:1') + '）',
           width: 420,
           bodyHTML:
+            (opts.ratios ? '<div class="crop-ratios">' +
+              '<button type="button" class="btn btn-ghost btn-sm" data-ratio="1:1">1:1</button>' +
+              '<button type="button" class="btn btn-ghost btn-sm" data-ratio="wide">横票根 8:5</button>' +
+              '<button type="button" class="btn btn-ghost btn-sm" data-ratio="tall">竖票根 5:8</button>' +
+              '<span class="muted small">或点下方「使用原图」不裁切</span></div>' : '') +
             '<div class="crop-frame" id="crop-frame">' +
             '<canvas id="crop-canvas" width="' + frameW + '" height="' + frameH + '"></canvas>' +
             '<div class="crop-grid"></div></div>' +
@@ -560,6 +672,20 @@ window.UI = (function () {
               }
             }
             fit(); draw();
+            // 票据模式：比例档即时切换（重置缩放，框与输出同变）
+            if (opts.ratios) {
+              wrap.querySelectorAll('[data-ratio]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                  const r = RATIOS[btn.getAttribute('data-ratio')];
+                  if (!r) return;
+                  frameW = r[0]; frameH = r[1];
+                  canvas.width = frameW; canvas.height = frameH;
+                  offsetX = 0; offsetY = 0;
+                  wrap.querySelector('#crop-zoom').value = 100;
+                  fit(); draw();
+                });
+              });
+            }
 
             wrap.querySelector('#crop-zoom').addEventListener('input', function () {
               fit(); draw();
@@ -622,14 +748,16 @@ window.UI = (function () {
             wrap.querySelector('[data-act=ok]').addEventListener('click', async function () {
               // 输出 ≥1024px（甲2-②）：按预览同款构图（等比缩放 + 白底补边）放大输出。
               // 3:4 竖图输出 768×1024，1:1 输出 1024×1024（v1.1.5 比例档）
-              const OUT_W = portrait ? 768 : 1024;
-              const OUT_H = 1024;
+              // 票据模式按当前框比例输出（横 1024×640 / 竖 640×1024 / 1:1 1024×1024）
+              const ratioHW = frameH / frameW;
+              const OUT_W = opts.ratios ? (ratioHW > 1 ? 640 : 1024) : (portrait ? 768 : 1024);
+              const OUT_H = opts.ratios ? Math.round(OUT_W * ratioHW) : 1024;
               const outCanvas = document.createElement('canvas');
               outCanvas.width = OUT_W; outCanvas.height = OUT_H;
               const octx = outCanvas.getContext('2d');
               octx.fillStyle = '#ffffff';
               octx.fillRect(0, 0, OUT_W, OUT_H);
-              const k = OUT_W / frame;
+              const k = OUT_W / frameW;
               const w = img.width * scale, h = img.height * scale;
               octx.drawImage(cutoutCanvas || img, ((frameW - w) / 2 + offsetX) * k, ((frameH - h) / 2 + offsetY) * k, w * k, h * k);
               const blob = await new Promise(function (res) {
@@ -702,7 +830,7 @@ window.UI = (function () {
               pendingBlobs.push({ blob: r0.blob, ext: r0.ext });
               continue;
             }
-            const result = await cropImage(f, { ratio: options.ratio, batch: batch });
+            const result = await cropImage(f, { ratio: options.ratio, ratios: options.ticketMode, batch: batch });
             if (!result) { skipped++; continue; } // 用户取消：跳过该图，不拖累整批
             pendingBlobs.push({ blob: result.blob, ext: result.ext || (result.isCutout ? '.png' : '.webp') });
           } catch (err) {
@@ -746,6 +874,20 @@ window.UI = (function () {
         return saved;
       },
       getPaths: function () { return paths.slice(); },
+      // 取第一张图（票据 OCR 用）：优先未上传的新图，其次已存图
+      getFirstBlob: async function () {
+        if (pendingBlobs.length) {
+          const p = pendingBlobs[0];
+          return p.blob || p;
+        }
+        if (paths.length) {
+          const url = await Storage.getImageURL(paths[0]);
+          if (!url) return null;
+          const r = await fetch(url);
+          return await r.blob();
+        }
+        return null;
+      },
       // 有没有图（已保存 + 待上传）：纯拍照打卡校验用（甲23-②）
       hasImages: function () { return paths.length > 0 || pendingBlobs.length > 0; }
     };
@@ -1498,6 +1640,7 @@ window.UI = (function () {
     const db = window.Storage.getDB();
     let badges = '';
     // 全状态外显（v1.2.5 拍板 4）：闲置曾独享徽章，其余状态同款显示
+    // v1.2.6 拍板 11：**在用不标注**（默认态安静），其余状态分色外显 st-*
     const ST_LABEL = {
       in_use: '在用', idle: '闲置', borrowed: '借出', to_sell: '待出闲置',
       broken: '损坏报废', sold: '已售出', gifted: '已转赠'
@@ -1505,9 +1648,9 @@ window.UI = (function () {
     if (item.status === 'empty' || item.remainLevel === '空') {
       badges += '<span class="badge badge-empty">空瓶</span>';
     }
-    // 状态徽章与空瓶并显（全状态外显）：曾 else-if 互斥，空瓶把在用/借出等状态盖掉
-    if (ST_LABEL[item.status]) {
-      badges += '<span class="badge badge-status">' + ST_LABEL[item.status] + '</span>';
+    // 状态徽章与空瓶并显：曾 else-if 互斥，空瓶把借出等状态盖掉
+    if (ST_LABEL[item.status] && item.status !== 'in_use') {
+      badges += '<span class="badge badge-status st-' + item.status + '">' + ST_LABEL[item.status] + '</span>';
     }
     if (item.kind === 'game' && item.gameStatus) {
       badges += '<span class="badge badge-game">' + { unopened: '未开坑', playing: '在玩', finished: '通关', dropped: '弃坑' }[item.gameStatus] + '</span>';

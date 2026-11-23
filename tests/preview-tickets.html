@@ -1,4 +1,4 @@
-<!DOCTYPE html><html><head><meta charset=utf-8><style>/* styles.css — 人生管家 · macOS 经典浅色 */
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>preview tickets</title><style>/* styles.css — 人生管家 · macOS 经典浅色 */
 :root {
   --bg: #f5f5f7;
   --panel: #ffffff;
@@ -192,6 +192,16 @@ body {
 .badge-idle { background: rgba(255, 149, 0, .92); color: #fff; }
 .badge-game { background: rgba(0, 113, 227, .9); color: #fff; }
 .badge-wear { background: rgba(52, 199, 89, .92); color: #fff; }
+/* 物品状态徽章（v1.2.6 拍板 11）：在用不标注；其余状态分色外显 */
+.badge-status { background: rgba(0, 0, 0, .06); color: var(--text-2); }
+.badge-status.st-idle { background: rgba(142, 142, 147, .22); color: #6b6b70; }
+.badge-status.st-borrowed { background: rgba(0, 113, 227, .16); color: #0058b0; }
+.badge-status.st-to_sell { background: rgba(255, 149, 0, .18); color: #b26a00; }
+.badge-status.st-broken { background: rgba(255, 59, 48, .16); color: #c42c1e; }
+.badge-status.st-sold { background: rgba(52, 199, 89, .18); color: #1d7a3c; }
+.badge-status.st-gifted { background: rgba(175, 82, 222, .16); color: #8944ab; }
+/* 钱袋报销角标（v1.2.6）：待报销金额 */
+.reimb-badge { color: #b26a00; font-size: 12px; font-weight: 700; }
 .item-info { padding: 12px 14px 14px; }
 .item-name {
   font-weight: 600; font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -283,7 +293,7 @@ body {
   width: 86px; height: 86px; border-radius: 11px; overflow: hidden; position: relative;
   background: #f2f2f4; box-shadow: inset 0 0 0 0.5px var(--line-soft);
 }
-.img-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.img-thumb img { width: 100%; height: 100%; object-fit: contain; background: #fff; }
 .img-del {
   position: absolute; top: 4px; right: 4px; width: 20px; height: 20px; border-radius: 50%;
   border: none; background: rgba(29, 29, 31, .62); color: #fff; cursor: pointer;
@@ -316,7 +326,8 @@ body {
 
 /* ---------- 详情（三类条目共用，左右列统一） ---------- */
 .detail-imgs { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 12px; }
-.detail-imgs img { height: 160px; border-radius: 11px; object-fit: cover; flex-shrink: 0; }
+/* 票根等长条照片按原比例完整显示（v1.2.6 拍板 Q1，不再 cover 裁切） */
+.detail-imgs img { height: 160px; max-width: 340px; border-radius: 11px; object-fit: contain; background: #f5f5f7; flex-shrink: 0; }
 .detail-cols { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; align-items: start; }
 /* 字阶最终态在 extra.css（--f-headline）；此处仅保留未被覆盖项 */
 .detail-sub {
@@ -1846,6 +1857,24 @@ input[type="number"], input[inputmode="numeric"], input[inputmode="decimal"] {
    替代原生 date（中英混杂占位 / 原生弹层风格不符）；value 恒为 YYYY-MM-DD */
 input.dp-input { cursor: text; }
 input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2f2f4; }
+/* —— 日期三段式（v1.2.6 拍板 10，二次定稿）：一个输入框内 年-月-日 独立分段 ——
+   点击框任意处弹月历（与旧文本框习惯一致）；Tab 进入后分段打字 */
+.dp-seg {
+  display: flex; align-items: center; gap: 0; width: 100%;
+  border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: #fff; cursor: text;
+}
+.dp-seg:focus-within { border-color: var(--accent); }
+.dp-seg-p {
+  flex: 1; min-width: 0; text-align: center;
+  border: none; background: none; border-radius: 0;
+  font-variant-numeric: tabular-nums;
+}
+.dp-seg-p[data-seg='y'] { flex: 1.5; }
+.dp-sep { color: var(--text-3); flex: 0 0 auto; user-select: none; }
+.dp-seg-p:focus { outline: none; }
+.dp-seg-p:disabled { color: var(--text-3); }
+.dp-seg:has(.dp-seg-p:disabled) { background: #f2f2f4; cursor: default; }
 .dp-pop {
   position: fixed; z-index: 1300;
   width: 272px;
@@ -3024,92 +3053,189 @@ input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2
 }
 .tl-plan .tl-b-t { color: var(--text-2); }
 
-/* ===== v1.2.5 我的票据：仿真票券卡（存根+撕孔+票身+条码+打孔章） ===== */
+/* ===== v1.2.6 我的票据：各票种独立仿真票面（卡片尺寸统一，形态/配色各异，规则单源） ===== */
 .tk-wall {
-  display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
   gap: 16px;
 }
+/* 统一卡片尺寸（拍板 Q4）：差异靠内部布局与配色，不靠卡片大小 */
 .tk-card {
-  position: relative; display: flex; min-height: 132px;
-  background: #fff; border: 1px solid var(--line-soft); border-radius: 14px;
-  overflow: hidden; cursor: pointer;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, .05);
-  transition: box-shadow .15s ease, transform .15s ease;
+  position: relative; height: 186px; border-radius: 14px; overflow: hidden;
+  background: #fff; border: 1px solid rgba(0, 0, 0, .08);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, .05); cursor: pointer;
+  display: flex; flex-direction: column;
 }
 .tk-card:hover { box-shadow: 0 6px 18px rgba(0, 0, 0, .1); transform: translateY(-1px); }
-.tk-card.tk-used { background: #f7f7f9; opacity: .78; }
-.tk-card.tk-void { opacity: .5; }
-.tk-stub {
-  flex: none; width: 84px; padding: 12px 8px;
-  display: flex; flex-direction: column; align-items: center; gap: 8px;
-  background: linear-gradient(180deg, #f0f4ff, #e8eefc);
+
+/* —— 通用字件（单源）—— */
+.tk-station {
+  font-size: 17px; font-weight: 800; letter-spacing: -0.01em; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tk-tear {
-  flex: none; width: 12px; position: relative;
-  background:
-    radial-gradient(circle at 0 6px, transparent 5px, #fff 5px) 0 0 / 12px 18px repeat-y,
-    radial-gradient(circle at 12px 6px, transparent 5px, #fff 5px) 0 0 / 12px 18px repeat-y;
+.tk-big .tk-station { font-size: 21px; }
+.tk-arrowwrap { display: flex; flex-direction: column; align-items: center; flex: 0 0 auto; padding: 0 10px; }
+.tk-trainno { font-size: 12px; font-weight: 700; letter-spacing: .5px; color: var(--text-2); }
+.tk-arrowline {
+  display: block; width: 64px; height: 2px; background: currentColor; opacity: .35;
+  position: relative; margin-top: 3px;
 }
-.tk-tear::before {
-  content: ''; position: absolute; left: 50%; top: 4px; bottom: 4px;
-  border-left: 1.5px dashed var(--line);
+.tk-arrowline::after {
+  content: ''; position: absolute; right: -1px; top: -3px;
+  border: 4px solid transparent; border-left-color: currentColor; opacity: .55;
 }
-.tk-body {
-  flex: 1; min-width: 0; padding: 12px 14px 10px;
-  display: flex; flex-direction: column; gap: 3px;
+.tk-airline { background: none; height: auto; font-size: 13px; margin-top: 0; }
+.tk-airline::after { display: none; }
+.tk-rail-route { display: flex; align-items: center; }
+.tk-rail-route .tk-station:last-child { text-align: right; }
+.tk-rail-row {
+  display: flex; align-items: center; gap: 8px; font-size: 11.5px;
+  color: var(--text-2); font-variant-numeric: tabular-nums;
 }
-.tk-stub-type { display: flex; }
-.tk-stub-no {
-  font-size: 9.5px; color: var(--text-3); word-break: break-all; text-align: center;
-  writing-mode: horizontal-tb;
+.tk-rail-row > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-rail-row > :last-child { margin-left: auto; }
+.tk-rail-row > span:only-child { margin-left: 0 !important; }
+.tk-muted { color: var(--text-3); }
+.tk-price { font-size: 14px; font-weight: 800; color: #b23b2e; font-variant-numeric: tabular-nums; }
+.tk-plusday {
+  display: inline-block; margin-left: 4px; padding: 0 5px; border-radius: 6px;
+  background: rgba(178, 59, 46, .1); color: #b23b2e; font-size: 10px; font-weight: 700;
 }
 .tk-name {
-  font-size: 15px; font-weight: 600; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-size: 16px; font-weight: 800; letter-spacing: -0.01em;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.tk-when { font-size: 11.5px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.tk-big .tk-name { font-size: 19px; }
+.tk-k { color: var(--text-3); }
 .tk-where {
-  font-size: 11px; color: var(--text-3);
+  font-size: 12px; color: var(--text-2); line-height: 1.65;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tk-sub-h { font-size: 10.5px; font-weight: 700; letter-spacing: 2px; }
+.tk-sub-d { font-size: 11px; font-variant-numeric: tabular-nums; }
+.tk-sub-no {
+  margin-top: auto; font-size: 9.5px; letter-spacing: .5px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.tk-foot { display: flex; align-items: center; gap: 8px; margin-top: auto; }
-.tk-foot b { font-size: 15px; font-variant-numeric: tabular-nums; }
-.tk-status {
-  margin-left: auto; font-size: 10.5px; color: var(--text-2);
-  background: #f2f2f6; border-radius: 999px; padding: 1px 8px;
+
+/* —— 铁路式（火车=蓝头 / 汽车=绿头）：色条头 + 起终点同排（车次叠箭头）—— */
+.tk-face-train .tk-rail-head, .tk-face-bus .tk-rail-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 12px; color: #fff; font-size: 11px; font-weight: 700; letter-spacing: 1px;
 }
-.tk-used .tk-status { background: #e8f6ec; color: #1d7a3c; }
-.tk-barcode {
-  height: 16px; margin-top: 6px; border-radius: 2px;
-  background: repeating-linear-gradient(90deg,
-    #1d1d1f 0 2px, transparent 2px 5px, #1d1d1f 5px 6px, transparent 6px 10px,
-    #1d1d1f 10px 13px, transparent 13px 15px, #1d1d1f 15px 16px, transparent 16px 20px);
-  opacity: .82;
+.tk-face-train .tk-rail-head { background: linear-gradient(90deg, #1a4f9c, #2f6bc4); }
+.tk-face-bus .tk-rail-head { background: linear-gradient(90deg, #1d7a3c, #34a05a); }
+.tk-rail-no { font-size: 10px; opacity: .9; letter-spacing: .5px; }
+.tk-rail-body {
+  flex: 1; display: flex; flex-direction: column; justify-content: center;
+  gap: 9px; padding: 10px 14px;
 }
-.tk-stamp {
-  position: absolute; right: 12px; top: 38px;
-  transform: rotate(-14deg);
-  border: 2.5px solid #34a853; color: #34a853;
-  font-size: 15px; font-weight: 700; letter-spacing: 2px;
-  padding: 2px 10px; border-radius: 6px; opacity: .8;
+.tk-face-train .tk-rail-route { color: #17325c; }
+.tk-face-bus .tk-rail-route { color: #1c4a2c; }
+.tk-face-train .tk-trainno, .tk-face-bus .tk-trainno { color: inherit; opacity: .75; }
+
+/* —— 登机牌（飞机）：左红竖条 + FROM ✈ TO + 右存根（座位大字）—— */
+.tk-face-flight { position: relative; }
+.tk-face-flight::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 10px;
+  background: linear-gradient(180deg, #c8432f, #9c2b1e); z-index: 1;
 }
-.tk-stamp.void { border-color: #c7c7cc; color: #8e8e93; }
-.tk-big { min-height: 180px; pointer-events: none; }
-.tk-big .tk-name { font-size: 18px; }
+.tk-board { flex: 1; display: flex; min-width: 0; }
+.tk-board-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: center;
+  gap: 9px; padding: 12px 12px 12px 22px;
+}
+.tk-board-h {
+  display: flex; justify-content: space-between;
+  font-size: 11px; font-weight: 700; letter-spacing: 2px; color: #9c2b1e;
+}
+.tk-board-stub {
+  flex: 0 0 84px; border-left: 2px dashed rgba(0, 0, 0, .18); background: #faf7f5;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+}
+.tk-stub-k { font-size: 9px; color: var(--text-3); letter-spacing: 2px; }
+.tk-stub-seat { font-size: 19px; font-weight: 800; color: #9c2b1e; }
+.tk-face-flight .tk-rail-route { color: #4a2418; }
+.tk-face-flight .tk-trainno { color: inherit; opacity: .75; }
+
+/* —— 票根式（演唱会/电影/展览/其他）：主券 + 打孔线 + 右副券 —— */
+.tk-face-concert, .tk-face-movie, .tk-face-exhibition, .tk-face-other { flex-direction: row; }
+.tk-ev-main {
+  flex: 1; min-width: 0; padding: 12px 12px 10px;
+  display: flex; flex-direction: column; gap: 3px;
+}
+.tk-ev-tag { font-size: 10px; font-weight: 700; letter-spacing: 3px; opacity: .75; }
+.tk-ev-rows { min-width: 0; }
+.tk-ev-main .tk-price { margin-top: auto; }
+.tk-ev-sub {
+  flex: 0 0 88px; border-left: 2px dashed rgba(255, 255, 255, .35);
+  display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 12px 6px;
+}
+/* 演唱会：深紫金字 */
+.tk-face-concert { background: linear-gradient(135deg, #2a1b3d, #45275e); color: #f5e6c8; }
+.tk-face-concert .tk-ev-tag { color: #d8b96a; }
+.tk-face-concert .tk-price { color: #f0d488; }
+.tk-face-concert .tk-k, .tk-face-concert .tk-muted { color: inherit; opacity: .7; }
+.tk-face-concert .tk-where, .tk-face-concert .tk-sub-d, .tk-face-concert .tk-rail-row { color: inherit; opacity: .85; }
+.tk-face-concert .tk-ev-sub { background: rgba(0, 0, 0, .22); border-left-color: rgba(216, 185, 106, .5); }
+.tk-face-concert .tk-sub-h { color: #d8b96a; }
+.tk-face-concert .tk-sub-no { color: #e8c987; }
+/* 电影：橙红 */
+.tk-face-movie { background: linear-gradient(135deg, #b23b2e, #d9633f); color: #fff; }
+.tk-face-movie .tk-ev-tag { color: #ffe2c9; }
+.tk-face-movie .tk-price { color: #fff; }
+.tk-face-movie .tk-k, .tk-face-movie .tk-muted { color: inherit; opacity: .7; }
+.tk-face-movie .tk-where, .tk-face-movie .tk-sub-d, .tk-face-movie .tk-rail-row { color: inherit; opacity: .85; }
+.tk-face-movie .tk-ev-sub { background: rgba(0, 0, 0, .18); border-left-color: rgba(255, 255, 255, .45); }
+.tk-face-movie .tk-sub-h { color: #ffe2c9; }
+.tk-face-movie .tk-sub-no { color: #fff; }
+/* 展览：米白文艺 */
+.tk-face-exhibition { background: linear-gradient(135deg, #f7f3ea, #efe7d6); color: #4a3b22; }
+.tk-face-exhibition .tk-ev-tag { color: #8a6f3a; }
+.tk-face-exhibition .tk-price { color: #8a5a1e; }
+.tk-face-exhibition .tk-k, .tk-face-exhibition .tk-muted { color: inherit; opacity: .65; }
+.tk-face-exhibition .tk-where, .tk-face-exhibition .tk-sub-d { color: inherit; opacity: .85; }
+.tk-face-exhibition .tk-ev-sub { background: rgba(138, 111, 58, .1); border-left-color: rgba(138, 111, 58, .45); }
+.tk-face-exhibition .tk-sub-h { color: #8a6f3a; }
+.tk-face-exhibition .tk-sub-no { color: #8a5a1e; }
+/* 其他/自定义：简洁卡（无副券） */
+.tk-face-other { background: linear-gradient(180deg, #fdfdfb, #f6f5f2); color: var(--text); }
+.tk-face-other .tk-ev-tag { color: var(--text-3); }
+.tk-face-other .tk-ev-sub { display: none; }
+
+/* —— 景点门票：绿条头 + 大标题 + 齿孔副券 —— */
+.tk-face-attraction { position: relative; }
+.tk-att-head {
+  display: flex; justify-content: space-between; padding: 7px 12px; color: #fff;
+  background: linear-gradient(90deg, #1d7a3c, #3fae62);
+  font-size: 11px; font-weight: 700; letter-spacing: 2px;
+}
+.tk-att-main {
+  flex: 1; display: flex; flex-direction: column; justify-content: center;
+  gap: 5px; padding: 8px 14px; min-width: 0;
+}
+.tk-att-main .tk-name { color: #1c4a2c; }
+.tk-face-attraction .tk-price { color: #1d7a3c; }
+.tk-att-sub {
+  flex: 0 0 82px; display: flex; flex-direction: column; align-items: center; gap: 5px;
+  padding: 12px 6px; background: #eef7ee; border-left: 2px dashed rgba(29, 122, 60, .5); color: #1c4a2c;
+}
+
+/* —— 报销徽章（右上角，拍板 3）—— */
+.tk-reimb-flag {
+  position: absolute; top: 8px; right: 8px; z-index: 2;
+  padding: 2px 8px; border-radius: 999px; font-size: 10px; font-weight: 700;
+  background: rgba(255, 149, 0, .92); color: #fff;
+}
+.tk-reimb-flag.is-settled { background: rgba(52, 199, 89, .92); }
+
+/* —— 详情大票面 —— */
+.tk-big { height: 230px; pointer-events: none; cursor: default; }
+.tk-big .tk-rail-head, .tk-big .tk-att-head, .tk-big .tk-board-h { font-size: 12.5px; }
+.tk-big .tk-rail-row, .tk-big .tk-where, .tk-big .tk-sub-d { font-size: 12.5px; }
+.tk-big .tk-ev-sub, .tk-big .tk-att-sub, .tk-big .tk-board-stub { flex-basis: 108px; }
+.tk-big .tk-price { font-size: 17px; }
+.tk-big .tk-stub-seat { font-size: 23px; }
 .tk-detail .detail-kv { margin-top: 12px; }
-
-/* 站程类票面（火车/飞机/汽车）：出发站→到达站 大字布局（仿真车票） */
-.tk-arrow {
-  font-size: 10.5px; color: var(--text-3); padding-left: 2px;
-  font-variant-numeric: tabular-nums;
-}
-.tk-big .tk-station { font-size: 20px; }
-.tk-fine { font-size: 9px; color: var(--text-3); margin-top: 3px; letter-spacing: .5px; }
-
-/* 物品状态全外显徽章（v1.2.5） */
-.badge-status {
-  background: rgba(0, 0, 0, .06); color: var(--text-2);
-}
 
 /* 计时运行态常驻读数（拍板 3）：红条显眼 */
 .tl-timer-live {
@@ -3118,17 +3244,22 @@ input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2
   background: #fff2f0; color: var(--red, #ff3b30); cursor: pointer;
   font: var(--f-cap-m); font-variant-numeric: tabular-nums;
 }
+
 .tl-timer-live b { font-size: 13px; font-variant-numeric: tabular-nums; }
+
 .tl-timer-live:hover { background: #ffe8e4; }
 
 /* 美食四合一分餐打卡（v1.2.5）：早/中/晚/加格，绿=已打 */
 #hc-food { display: flex; align-items: center; gap: 10px; }
+
 .home-check-main {
   display: inline-flex; align-items: center; gap: 8px;
   border: none; background: none; cursor: pointer; padding: 0;
   font: var(--f-body-2-m); color: inherit;
 }
+
 .home-check-meals { display: inline-flex; gap: 5px; margin-left: 2px; }
+
 .meal-slot {
   position: relative; min-width: 30px; height: 26px; padding: 0 8px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -3136,12 +3267,16 @@ input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2
   font-size: 11.5px; font-weight: 600; cursor: pointer;
   transition: background .15s;
 }
+
 .meal-slot:hover { background: #e6e6ec; }
+
 .meal-slot.on { background: #34c759; color: #fff; }
+
 .meal-slot i {
   font-style: normal; font-size: 9px; margin-left: 2px;
   background: rgba(255, 255, 255, .28); border-radius: 999px; padding: 0 4px;
 }
+
 /* hover 格出 −1（撤销该餐最近一条，v1.2.5） */
 .meal-slot .meal-del {
   display: none;
@@ -3152,148 +3287,28 @@ input.dp-input:disabled { cursor: default; color: var(--text-3); background: #f2
   background: #ff3b30; color: #fff;
   font-size: 11px; line-height: 1; cursor: pointer;
 }
+
 .meal-slot:hover .meal-del { display: inline-flex; }
 
-/* 状态徽章分色（拍板 13）：损坏红/闲置待售橙/出走灰字 */
-.badge-st-broken { background: #ffe8e6; color: #c62828; }
-.badge-st-warn { background: #fff3e0; color: #b25e00; }
-.badge-st-mute { background: rgba(0, 0, 0, .05); color: var(--text-3); }
+/* 裁切比例档（票据照片，拍板 Q1） */
+.crop-ratios { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
 
-/* ===== 票券卡三形态（拍板 2026-11-23） ===== */
-.tk-toprow {
-  display: flex; align-items: baseline; gap: 8px;
-  font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums;
-}
-.tk-ticketno { letter-spacing: .5px; }
-.tk-gate { margin-left: auto; font-weight: 600; }
-.tk-where { line-height: 1.6; }
-
-/* 登机牌 */
-.tk-boarding { position: relative; padding-left: 18px; }
-.tk-boarding::before {
-  content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 8px;
-  background: #b23b2e; border-radius: 2px;
-}
-.tk-bp-title {
-  font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
-  color: #b23b2e; margin-bottom: 4px;
-}
-
-/* 演唱会式：主区 + 右副券（撕线装饰） */
-.tk-event { display: flex; gap: 0; padding: 0 !important; }
-.tk-ev-main { flex: 1; min-width: 0; padding: 12px 12px 10px; display: flex; flex-direction: column; gap: 2px; }
-.tk-sub {
-  flex: none; width: 92px; padding: 12px 8px;
-  background: #f6f0f7; border-left: 1px dashed var(--line);
-  display: flex; flex-direction: column; gap: 4px; text-align: center;
-}
-.tk-sub-h { font-size: 11px; font-weight: 700; color: var(--text-2); letter-spacing: 2px; }
-.tk-sub-d { font-size: 11px; color: var(--text-2); font-variant-numeric: tabular-nums; }
-.tk-sub-no { margin-top: auto; font-size: 10px; color: #b23b2e; letter-spacing: .5px; word-break: break-all; }
-.tk-big .tk-ev-main { padding: 16px 16px 12px; }
-.tk-big .tk-sub { width: 110px; }
-
-/* ===== 票面质感强化（对照真票样图） ===== */
-/* 火车票：票号红色、站名大字加重、浅蓝票面感 */
-.tk-ticketno { color: #b23b2e; font-weight: 700; font-size: 12px; letter-spacing: 1px; }
-.tk-station { font-size: 18px; font-weight: 800; letter-spacing: -0.01em; }
-.tk-big .tk-station { font-size: 22px; }
-.tk-arrow { font-size: 12px; color: var(--text-2); font-weight: 600; }
-.tk-station b { font-size: 13.5px; font-weight: 700; color: var(--text); }
-.tk-gate { color: #b23b2e; font-weight: 700; }
-.tk-foot b { font-size: 17px; }
-
-/* 登机牌：白票红饰 */
-.tk-boarding::before { width: 10px; background: linear-gradient(180deg, #c8432f, #9c2b1e); }
-.tk-bp-title { font-size: 12.5px; letter-spacing: 2px; color: #9c2b1e; }
-.tk-boarding .tk-station { font-size: 15px; font-weight: 700; }
-
-/* 演唱会式：标题加重、副券淡紫加深、撕线更明显 */
-.tk-event .tk-name { font-size: 15.5px; font-weight: 700; letter-spacing: -0.01em; }
-.tk-event .tk-where { font-size: 12px; color: var(--text-2); }
-.tk-sub { background: #f3e9f4; border-left: 2px dashed #c9a8cc; }
-.tk-sub-h { color: #7a4a80; letter-spacing: 3px; }
-.tk-sub-no { color: #9c2b1e; font-weight: 600; }
-
-/* 票面纸质感：微底纹 */
-.tk-card { background: linear-gradient(180deg, #fdfdfb, #fafaf7); }
-.tk-used { background: linear-gradient(180deg, #f6f6f8, #f2f2f4); }
-
-/* 票号不截断（stub/副券） */
-.tk-stub-no { font-size: 9px; letter-spacing: 0; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tk-sub-no { font-size: 9.5px; word-break: normal; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-
-/* 票面布局定稿：起点—车次→终点 同排；行内左右分布（照真票） */
-.tk-route {
-  display: flex; align-items: baseline; gap: 8px;
-  white-space: nowrap; overflow: hidden;
-}
-.tk-route .tk-station {
-  flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;
-}
-.tk-route .tk-station:last-child { text-align: right; }
-.tk-route .tk-arrow {
-  flex: none; padding: 0 2px; font-size: 11px; color: var(--text-2);
-}
-.tk-route .tk-arrow b { font-size: 13px; color: var(--text); }
-.tk-rowline {
-  display: flex; align-items: baseline; gap: 8px;
-  font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums;
-}
-.tk-rowline > span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tk-rowline > :last-child { margin-left: auto; }
-.tk-k { color: var(--text-3); }
-.tk-big .tk-station { font-size: 19px; }
-
-/* 站名行定稿：纯文本块（旧 flex 规则把名字挤塌=站名消失） */
-.tk-station {
-  display: block; font-size: 17px; font-weight: 800; color: var(--text);
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  letter-spacing: -0.01em;
-}
-.tk-station b { display: none; }
-.tk-big .tk-station { font-size: 20px; }
-
-/* 站名行【定稿单源】：起终点同排大字（曾多条 flex 规则打架致站名被挤没） */
-.tk-station {
-  display: block; font-size: 17px; font-weight: 800; color: #1d1d1f;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  letter-spacing: -0.01em; line-height: 1.25;
-}
-.tk-big .tk-station { font-size: 20px; }
-
-/* 演唱会式：主区+副券横排（曾继承 tk-body 列向致副券被裁） */
-.tk-event { flex-direction: row; }
-
-/* 车次叠箭头上方（真票样式）：平线+右箭头，无段差 */
-.tk-arrowwrap {
-  flex: none; position: relative;
-  min-width: 88px; padding: 0 6px;
-  display: flex; flex-direction: column; align-items: center; justify-content: center;
-}
-.tk-trainno {
-  font-size: 13px; font-weight: 800; color: var(--text);
-  line-height: 1.1; letter-spacing: .5px;
-}
-.tk-arrowline {
-  display: block; width: 100%; height: 2px; margin-top: 1px;
-  background: var(--text); position: relative; border-radius: 1px;
-}
-.tk-arrowline::after {
-  content: ''; position: absolute; right: -1px; top: 50%;
-  width: 0; height: 0; transform: translateY(-50%);
-  border-left: 7px solid var(--text);
-  border-top: 4px solid transparent; border-bottom: 4px solid transparent;
-}
-.tk-airline { background: none; height: auto; font-size: 13px; margin-top: 0; }
-.tk-airline::after { display: none; }
-
-/* 票面定稿：左栏窄、状态在左栏、无条码、✈ 居中 */
-.tk-stub { width: 64px; padding: 10px 6px; }
-.tk-status.tk-stub-status {
-  margin-left: 0; margin-top: auto; background: rgba(0, 0, 0, .06);
-}
-.tk-used .tk-stub-status { background: #e8f6ec; color: #1d7a3c; }
-.tk-airline { justify-content: center; text-align: center; }
-.tk-arrowwrap.tk-center, .tk-arrowwrap { align-items: center; }
-</style></head><body class=app><div id=app><div class="page-head"><h2>我的票据</h2><div class="page-actions"><button type="button" class="btn btn-primary btn-sm" id="tk-add"><svg class="ic" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg> 添加</button><button type="button" class="btn btn-ghost btn-sm" id="tk-types" title="类型管理"><svg class="ic" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></button></div></div><div class="tk-wall"><div class="tk-card tk-unused" data-tk="k2" title="点击看详情"><div class="tk-stub"><div class="tk-stub-type"><svg class="ic" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"></path></svg></div><div class="tk-stub-no">No.CA1</div><div class="tk-status tk-stub-status">未用</div></div><div class="tk-tear"></div><div class="tk-body tk-boarding"><div class="tk-route"><div class="tk-station">北京</div><div class="tk-arrowwrap"><span class="tk-trainno">CA1</span><span class="tk-arrowline tk-airline">✈</span></div><div class="tk-station">上海</div></div><div class="tk-rowline"><span>经济舱 · 18F</span></div><div class="tk-rowline"><span>2026/11/23 · 登机 09:00 · 登机口 A12</span></div><div class="tk-rowline"><span><b>¥700.0</b></span></div></div></div></div></div></body></html>
+/* 票面照片区标题行（label 与识别按钮分置两端，v1.2.6 减负） */
+.tk-img-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+</style></head><body><div id="app"></div><script>window.__PREVIEW_DATA__ = {"tickets":{"items":[{"id":"k1","type":"train","name":"上海虹桥→北京南","date":"2026-11-23","arriveDate":"2026-11-24","time":"23:00","endTime":"07:30","location":"","seat":"01车12A","price":553,"ticketNo":"E123456789","note":"","reimb":"none","images":[],"buyDate":"2026-11-23","billId":"","todoId":"","ext":{"no":"G12","from":"上海虹桥","to":"北京南","gate":"5B","sub":"二等座"},"createdAt":1795437292679},{"id":"k2","type":"flight","name":"CA123 北京→成都","date":"2026-11-23","arriveDate":"2026-11-23","time":"08:00","endTime":"11:20","location":"","seat":"32A","price":1280,"ticketNo":"99922233344","note":"","reimb":"pending","images":[],"buyDate":"2026-11-18","billId":"","todoId":"","ext":{"no":"CA123","from":"首都T3","to":"天府T2","gate":"A12","sub":"经济舱"},"createdAt":1795437292679},{"id":"k3","type":"bus","name":"杭州→乌镇","date":"2026-11-22","arriveDate":"2026-11-22","time":"09:30","endTime":"10:50","location":"","seat":"12号","price":35,"ticketNo":"","note":"","reimb":"none","images":[],"buyDate":"2026-11-22","billId":"","todoId":"","ext":{"no":"K588","from":"杭州客运中心","to":"乌镇"},"createdAt":1795437292679},{"id":"k4","type":"concert","name":"周杰伦·嘉年华","date":"2026-11-30","arriveDate":"2026-11-30","time":"19:30","endTime":"22:00","location":"国家体育场","seat":"12排34号","price":980,"ticketNo":"TK886612","note":"","reimb":"none","images":[],"buyDate":"2026-10-24","billId":"","todoId":"","ext":{"sub":"看台 C 区"},"createdAt":1795437292679},{"id":"k5","type":"movie","name":"沙丘3","date":"2026-11-21","arriveDate":"2026-11-21","time":"14:00","endTime":"","location":"万达影城","seat":"5排8座","price":45,"ticketNo":"MV2026","note":"","reimb":"none","images":[],"buyDate":"2026-11-21","billId":"","todoId":"","ext":{"cinema":"3号厅 IMAX"},"createdAt":1795437292679},{"id":"k6","type":"exhibition","name":"莫奈光影展","date":"2026-11-20","arriveDate":"2026-11-20","time":"10:00","endTime":"","location":"上海博物馆","seat":"","price":88,"ticketNo":"EX5566","note":"","reimb":"settled","images":[],"buyDate":"2026-11-13","billId":"","todoId":"","ext":{},"createdAt":1795437292679},{"id":"k7","type":"attraction","name":"拙政园","date":"2026-11-24","arriveDate":"2026-11-24","time":"09:00","endTime":"","location":"苏州市姑苏区","seat":"","price":70,"ticketNo":"AT7788","note":"","reimb":"none","images":[],"buyDate":"2026-11-23","billId":"","todoId":"","ext":{},"createdAt":1795437292679},{"id":"k8","type":"other","name":"密室逃脱·星辰","date":"2026-11-18","arriveDate":"2026-11-18","time":"18:30","endTime":"20:00","location":"星辰密室","seat":"4人场","price":128,"ticketNo":"","note":"","reimb":"none","images":[],"buyDate":"2026-11-18","billId":"","todoId":"","ext":{},"createdAt":1795437292679}],"types":[]}};</script><script>window.fetch = function (u) {u = String(u); var D = window.__PREVIEW_DATA__;function ok(data) { return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(data); } }); }if (u.indexOf("/api/session") >= 0) return ok({ ok: true, accounts: [{ id: "me", name: "Me", icon: "x" }], lastAccountId: "me", dataRoot: "m", schemaVersion: 3 });if (u.indexOf("/api/db") >= 0) return ok({ ok: true, schemaVersion: 3, account: { id: "me", name: "Me", icon: "x" }, accounts: [{ id: "me", name: "Me", icon: "x" }, ], items: [], outfits: [], events: [], food: [], settings: {}, categories: { expense: [], income: [] }, wallet: { bills: [], accounts: [], cats: { expense: [], income: [] }, tags: [], imports: [], templates: [], balances: [] }, habits: { defs: [], log: {} }, todos: { defs: [], done: {} }, timeline: { blocks: [], points: [], types: [], timer: null }, tickets: D.tickets, dataRoot: "m" });return ok({ ok: true }); };window.Weather = window.Weather || { targetDate: function () { return { date: "", doneToday: false }; }, dayRange: function () { return Promise.resolve(null); }, recommend: function () { return { outfits: [], combos: [] }; } };</script><script src="../app/vendor/lucide.min.js"></script>
+<script src="../app/js/utils.js"></script>
+<script src="../app/js/models.js"></script>
+<script src="../app/js/storage.js"></script>
+<script src="../app/js/charts.js"></script>
+<script src="../app/js/cutout.js"></script>
+<script src="../app/js/ui.js"></script>
+<script src="../app/js/weather.js"></script>
+<script src="../app/js/views-plan.js"></script>
+<script src="../app/js/views-main.js"></script>
+<script src="../app/js/views-life.js"></script>
+<script src="../app/js/views-food.js"></script>
+<script src="../app/js/views-wallet.js"></script>
+<script src="../app/js/views-home.js"></script>
+<script src="../app/js/views-timeline.js"></script>
+<script src="../app/js/views-tickets.js"></script>
+<script src="../app/js/app.js"></script><script>window.addEventListener("load", function () { setTimeout(function () { if (window.App && window.App.go) window.App.go("tickets");}, 1200); });</script></body></html>

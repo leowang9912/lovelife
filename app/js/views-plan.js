@@ -33,7 +33,9 @@ window.PlanView = (function () {
     streakRank: { name: '习惯连续排行', block: 'habit', size: 'm' },
     habitRate: { name: '习惯完成率', block: 'habit', size: 'm' },
     timeDist: { name: '时间分配排行', block: 'time', size: 'm' },
-    ticketSpend: { name: '票据花费', block: 'ticket', size: 'm' },
+    ticketSpend: { name: '票据花费（自费）', block: 'ticket', size: 'm' },
+    ticketTrips: { name: '年出行次数与地点', block: 'ticket', size: 'm' },
+    ticketStations: { name: '出发 / 到达车站', block: 'ticket', size: 'm' },
     timeTrend: { name: '每日记录时长', block: 'time', size: 'm' },
     wAssets: { name: '资产走势', block: 'overall', size: 'l' },
     game: { name: '游戏通关状态', block: 'digital', size: 's' },
@@ -1244,7 +1246,7 @@ window.PlanView = (function () {
     'cPrice', 'cWearRank', 'cOutfitRank', 'cNoWear', 'cBuyTrend', 'cStreak', 'cCatPie',
     'lPrice', 'lCpw', 'lUseRank', 'lOutfitRank', 'lFresh', 'lStock', 'lCatPie',
     'wBalance', 'wTrend', 'wCatPie', 'wDaily', 'wHeat', 'wAssets', 'habitHeat',
-    'timeDist', 'timeTrend', 'ticketSpend'];
+    'timeDist', 'timeTrend', 'ticketSpend', 'ticketTrips', 'ticketStations'];
 
   /* 补齐/迁移栏目，保留用户已有顺序（块内相对顺序不变） */
   function normalizeSections(db) {
@@ -2225,10 +2227,12 @@ window.PlanView = (function () {
       return;
     }
     if (id === 'ticketSpend') {
+      // v1.2.6（拍板 3/Q2）：金额只统计**自费**票；报销票不计入任何金额统计（仅注脚可见）
       const items = ((db.tickets || {}).items) || [];
+      const selfItems = items.filter(function (x) { return !x.reimb || x.reimb === 'none'; });
+      const reimbItems = items.filter(function (x) { return x.reimb && x.reimb !== 'none'; });
       const byType = {};
-      items.forEach(function (x) {
-        if (x.status === 'void') return;
+      selfItems.forEach(function (x) {
         byType[x.type] = (byType[x.type] || 0) + (Math.abs(Number(x.price) || 0));
       });
       const tmap = {};
@@ -2237,9 +2241,57 @@ window.PlanView = (function () {
         return { label: tmap[k] || k, value: Math.round(byType[k] * 100) / 100, valueText: U.formatMoney(byType[k]) };
       }).sort(function (a, b) { return b.value - a.value; });
       const total = rows.reduce(function (a, r) { return a + r.value; }, 0);
+      const reimbSum = reimbItems.reduce(function (a, x) { return a + Math.abs(Number(x.price) || 0); }, 0);
       body.innerHTML = rows.length
-        ? C.rankBars(rows) + '<div class="muted small" style="margin-top:6px">票据总花费 ' + U.formatMoney(total) + ' · 共 ' + items.length + ' 张</div>'
-        : emptyHint('去「我的票据」记录车票、演唱会门票后显示', 'tickets');
+        ? C.rankBars(rows) + '<div class="muted small" style="margin-top:6px">自费票据总花费 ' + U.formatMoney(total) + ' · 共 ' + selfItems.length + ' 张' +
+          (reimbItems.length ? '｜另有报销 ' + reimbItems.length + ' 张 ' + U.formatMoney(reimbSum) + ' 不计入统计' : '') + '</div>'
+        : (items.length
+          ? '<div class="muted small">全部 ' + items.length + ' 张为报销票（' + U.formatMoney(reimbSum) + '），不计入统计</div>'
+          : emptyHint('去「我的票据」记录车票、演唱会门票后显示', 'tickets'));
+      return;
+    }
+    if (id === 'ticketTrips') {
+      // v1.2.6（拍板 8）：年出行次数 + 常去地点——行为统计含报销票（次数与钱无关）
+      const items = ((db.tickets || {}).items) || [];
+      if (!items.length) { body.innerHTML = emptyHint('去「我的票据」记录车票、演唱会门票后显示', 'tickets'); return; }
+      const byYear = {}, byPlace = {};
+      items.forEach(function (x) {
+        const y = (x.date || '').slice(0, 4) || '未知';
+        byYear[y] = (byYear[y] || 0) + 1;
+        const loc = (x.location || '').trim();
+        if (loc) byPlace[loc] = (byPlace[loc] || 0) + 1;
+      });
+      const yearRows = Object.keys(byYear).sort().map(function (k) {
+        return { label: k + ' 年', value: byYear[k], valueText: byYear[k] + ' 次' };
+      });
+      const placeRows = Object.keys(byPlace).map(function (k) {
+        return { label: k, value: byPlace[k], valueText: byPlace[k] + ' 次' };
+      }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+      body.innerHTML =
+        '<div class="muted small" style="margin-bottom:4px">年出行次数</div>' + C.rankBars(yearRows) +
+        (placeRows.length ? '<div class="muted small" style="margin:8px 0 4px">常去地点</div>' + C.rankBars(placeRows) : '') +
+        '<div class="muted small" style="margin-top:6px">共 ' + items.length + ' 张票（含报销）</div>';
+      return;
+    }
+    if (id === 'ticketStations') {
+      // v1.2.6（拍板 8）：出发/到达车站排行（火车/汽车/飞机 ext.from/to）
+      const items = ((db.tickets || {}).items) || [];
+      const byFrom = {}, byTo = {};
+      items.forEach(function (x) {
+        const f = (x.ext && x.ext.from || '').trim(), t2 = (x.ext && x.ext.to || '').trim();
+        if (f) byFrom[f] = (byFrom[f] || 0) + 1;
+        if (t2) byTo[t2] = (byTo[t2] || 0) + 1;
+      });
+      const fromRows = Object.keys(byFrom).map(function (k) {
+        return { label: k, value: byFrom[k], valueText: byFrom[k] + ' 次' };
+      }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+      const toRows = Object.keys(byTo).map(function (k) {
+        return { label: k, value: byTo[k], valueText: byTo[k] + ' 次' };
+      }).sort(function (a, b) { return b.value - a.value; }).slice(0, 8);
+      body.innerHTML = (fromRows.length || toRows.length)
+        ? (fromRows.length ? '<div class="muted small" style="margin-bottom:4px">出发站</div>' + C.rankBars(fromRows) : '') +
+          (toRows.length ? '<div class="muted small" style="margin:8px 0 4px">到达站</div>' + C.rankBars(toRows) : '')
+        : emptyHint('记录带出发/到达站的车票、机票后显示', 'tickets');
       return;
     }
     /* ===== v1.1.8 P2-12：美食类加栏 ===== */

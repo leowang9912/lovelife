@@ -401,6 +401,8 @@ window.HomeView = (function () {
             location: (w.querySelector('#td-loc') ? w.querySelector('#td-loc').value.trim() : ''),
             date: w.querySelector('#td-date').value || U.todayStr(),
             due: w.querySelector('#td-due').value || '21:00',
+            // 到达日期跟随改期（仅原本=起始日时跟随；独立跨天行程保持原到达日，拍板 9）
+            dueDate: def.dueDate ? (def.dueDate === (def.date || '') ? (w.querySelector('#td-date').value || U.todayStr()) : def.dueDate) : '',
             start: w.querySelector('#td-start') ? w.querySelector('#td-start').value : '',
             repeat: v,
             repeatOn: v === 'weekly'
